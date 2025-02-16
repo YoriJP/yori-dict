@@ -94,7 +94,7 @@ Usage:
   bun run add --lang <lang> --word <word> --reading <reading> [options]
 
 Required:
-  --lang      Language code (en, de, zh-TW, etc.)
+  --lang      Language code (en, de, ko, zh-cn, zh-tw)
   --word      Japanese word (kanji or kana)
   --reading   Hiragana reading
 
