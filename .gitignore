@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Database
+dict.sqlite
+
+# Raw data files (large)
+data/raw/
+
+# Build output
+dist/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log

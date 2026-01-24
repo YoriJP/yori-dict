@@ -1,0 +1,23 @@
+{
+  "name": "japanese-dict",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Multilingual Japanese dictionary API",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "seed": "bun run scripts/seed.ts",
+    "seed:xml": "bun run scripts/seed-xml.ts",
+    "seed:sample": "bun run scripts/seed-sample.ts",
+    "enrich": "bun run scripts/enrich.ts",
+    "export": "bun run scripts/export.ts"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "wanakana": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "license": "CC-BY-SA-4.0"
+}
