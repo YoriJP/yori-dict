@@ -4,7 +4,7 @@ import { conjugate } from './conjugator'
 import type { Language, LookupResponse, WordRow, TranslationRow, ExampleRow } from './types'
 
 // Database path
-const DB_PATH = './dict.sqlite'
+const DB_PATH = process.env.DATABASE_PATH || './dict.sqlite'
 
 // Lazy-loaded database instance
 let db: Database | null = null
