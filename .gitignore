@@ -3,6 +3,8 @@ node_modules/
 
 # Database
 dict.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 # Raw data files (large)
 data/raw/
