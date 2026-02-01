@@ -5,6 +5,7 @@
   "description": "Multilingual Japanese dictionary API",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
+    "db:seed": "bun run seed",
     "start": "bun run src/index.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",

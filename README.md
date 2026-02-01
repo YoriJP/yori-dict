@@ -92,6 +92,7 @@ Health check endpoint.
 | `bun run start` | Start production server |
 | `bun run test` | Run tests |
 | `bun run test:watch` | Run tests in watch mode |
+| `bun run db:seed` | Alias for `bun run seed` (build the SQLite database) |
 | `bun run seed` | Download and import JMDict data |
 | `bun run seed:sample` | Create small test dataset (10 words) |
 | `bun run enrich` | Generate AI translations for missing languages |
