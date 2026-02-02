@@ -1,0 +1,4 @@
+data/cache/jmdict-eng.json filter=lfs diff=lfs merge=lfs -text
+data/cache/jmdict-ger.json filter=lfs diff=lfs merge=lfs -text
+data/en.json filter=lfs diff=lfs merge=lfs -text
+data/de.json filter=lfs diff=lfs merge=lfs -text
