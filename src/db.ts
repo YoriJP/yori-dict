@@ -35,7 +35,7 @@ export function initSchema(): void {
       reading TEXT NOT NULL,
       part_of_speech TEXT NOT NULL,
       common INTEGER DEFAULT 0,
-      jlpt INTEGER
+      jlpt TEXT
     );
 
     -- Translations per language
@@ -43,7 +43,7 @@ export function initSchema(): void {
       word_id TEXT NOT NULL,
       lang TEXT NOT NULL,
       definitions TEXT NOT NULL,
-      source TEXT NOT NULL,
+      sources TEXT NOT NULL,
       PRIMARY KEY (word_id, lang),
       FOREIGN KEY (word_id) REFERENCES words(id)
     );
