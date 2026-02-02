@@ -76,10 +76,19 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
   const db = getDb()
 
   // Query word by exact match on word or reading
+  // Order by: common words first, then by lowest JLPT level (most beginner-friendly)
+  // jlpt is JSON array like '[5]' or '[5,4]' - extract first element for sorting
+  // JLPT levels: N5=5 (easiest) to N1=1 (hardest), so lower number = harder
+  // We want easiest first, so sort DESC on the extracted level
   const wordQuery = db.query<WordRow, [string]>(`
-    SELECT * FROM words 
+    SELECT * FROM words
     WHERE word = ?1 OR reading = ?1
-    ORDER BY common DESC, jlpt ASC
+    ORDER BY
+      common DESC,
+      CASE
+        WHEN jlpt IS NULL THEN 0
+        ELSE CAST(json_extract(jlpt, '$[0]') AS INTEGER)
+      END DESC
     LIMIT 1
   `)
 
