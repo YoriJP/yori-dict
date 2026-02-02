@@ -179,8 +179,8 @@ export function mergeDictEntries(
       // Replace mode - overwrite everything
       target[key] = sourceEntry
       updated++
-    } else if (mode === 'merge') {
-      // Merge mode - combine data
+    } else if (mode === 'merge' || mode === 'diff') {
+      // Merge/diff mode - combine data and check for changes
       const merged = mergeEntries(targetEntry, sourceEntry)
 
       // Check if anything changed
@@ -192,14 +192,14 @@ export function mergeDictEntries(
         JSON.stringify(merged.examples) !== JSON.stringify(targetEntry.examples)
 
       if (changed) {
-        target[key] = merged
+        // Only mutate target in merge mode, not diff mode
+        if (mode === 'merge') {
+          target[key] = merged
+        }
         updated++
       } else {
         unchanged++
       }
-    } else {
-      // diff mode - just count
-      unchanged++
     }
   }
 
