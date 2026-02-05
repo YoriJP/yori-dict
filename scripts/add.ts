@@ -22,8 +22,8 @@ interface AddOptions {
   lang: string
   word: string
   reading: string
-  def?: string
-  pos?: string
+  def?: string[]
+  pos?: string[]
   jlpt?: number
   common?: boolean
   example?: string // Format: "japanese|translation"
@@ -51,11 +51,11 @@ function parseArgs(): AddOptions | null {
         i++
         break
       case '--def':
-        opts.def = next
+        opts.def = [...(opts.def ?? []), next]
         i++
         break
       case '--pos':
-        opts.pos = next
+        opts.pos = [...(opts.pos ?? []), next]
         i++
         break
       case '--jlpt':
@@ -136,10 +136,12 @@ async function main(): Promise<void> {
   const newEntry: DictEntry = {
     word: opts.word,
     reading: opts.reading,
-    partOfSpeech: opts.pos ? [opts.pos] : [],
+    partOfSpeech: opts.pos ?? [],
     common: opts.common || false,
     jlpt: opts.jlpt ? [opts.jlpt] : [],
-    definitions: opts.def ? [{ text: opts.def, sources: ['manual'] }] : [],
+    definitions: opts.def
+      ? opts.def.map((text) => ({ text, sources: ['manual'] }))
+      : [],
     examples: [],
   }
 
