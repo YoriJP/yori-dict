@@ -198,6 +198,7 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
   const word = entry.kanji?.[0]?.text || entry.kana[0].text
   const reading = entry.kana[0].text
   const isCommon = entry.kanji?.[0]?.common || entry.kana[0]?.common || false
+  const targetGlossLang = REVERSE_LANG_MAP[lang]
 
   // Collect POS tags
   const posSet = new Set<string>()
@@ -211,6 +212,8 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
   const definitions: { text: string; sources: string[] }[] = []
   for (const sense of entry.sense) {
     for (const gloss of sense.gloss) {
+      // Keep glosses for the target language; allow untagged glosses as fallback.
+      if (gloss.lang && gloss.lang !== targetGlossLang) continue
       definitions.push({
         text: gloss.text,
         sources: ['jmdict'],
