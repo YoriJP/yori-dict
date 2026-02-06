@@ -173,7 +173,9 @@ export function mergeDictEntries(
 
     if (!targetEntry) {
       // New entry
-      target[key] = sourceEntry
+      if (mode !== 'diff') {
+        target[key] = sourceEntry
+      }
       added++
     } else if (mode === 'replace') {
       // Replace mode - overwrite everything
