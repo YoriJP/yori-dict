@@ -168,6 +168,29 @@ export function mergeDictEntries(
   let updated = 0
   let unchanged = 0
 
+  if (mode === 'replace') {
+    const sourceKeys = new Set(Object.keys(source))
+
+    // Prune stale entries not present in the source snapshot.
+    for (const key of Object.keys(target)) {
+      if (!sourceKeys.has(key)) {
+        delete target[key]
+      }
+    }
+
+    // Overwrite or add all source entries.
+    for (const [key, sourceEntry] of Object.entries(source)) {
+      if (target[key]) {
+        updated++
+      } else {
+        added++
+      }
+      target[key] = sourceEntry
+    }
+
+    return { added, updated, unchanged }
+  }
+
   for (const [key, sourceEntry] of Object.entries(source)) {
     const targetEntry = target[key]
 
@@ -177,10 +200,6 @@ export function mergeDictEntries(
         target[key] = sourceEntry
       }
       added++
-    } else if (mode === 'replace') {
-      // Replace mode - overwrite everything
-      target[key] = sourceEntry
-      updated++
     } else if (mode === 'merge' || mode === 'diff') {
       // Merge/diff mode - combine data and check for changes
       const merged = mergeEntries(targetEntry, sourceEntry)
