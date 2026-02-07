@@ -257,6 +257,8 @@ function convertJMdictToDict(jmdict: JMdictFile, lang: string): Record<string, D
           existing.partOfSpeech.push(pos)
         }
       }
+      // Preserve common if any duplicate marks it common
+      existing.common = existing.common || entry.common
     } else {
       entries[key] = entry
     }
