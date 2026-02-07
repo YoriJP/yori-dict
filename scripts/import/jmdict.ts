@@ -210,9 +210,11 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
 
   // Collect definitions for this language
   const definitions: { text: string; sources: string[] }[] = []
+  const includeUntaggedGloss = lang === 'en'
   for (const sense of entry.sense) {
     for (const gloss of sense.gloss) {
-      // Keep glosses for the target language; allow untagged glosses as fallback.
+      // Untagged glosses in JMdict are effectively English defaults.
+      if (!gloss.lang && !includeUntaggedGloss) continue
       if (gloss.lang && gloss.lang !== targetGlossLang) continue
       definitions.push({
         text: gloss.text,
