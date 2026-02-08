@@ -171,7 +171,7 @@ bun install
 bun test
 
 # Run specific test file
-bun test src/conjugator.test.ts
+bun test tests/conjugator.test.ts
 
 # Watch mode
 bun test --watch
@@ -230,6 +230,12 @@ Create a new importer in `scripts/import/`. The importer should:
 2. Convert to `DictEntry` format
 3. Use `mergeDictEntries()` to combine with existing data
 
+`mergeDictEntries()` modes:
+
+- `merge`: add missing keys and merge fields for existing keys
+- `diff`: preview `added/updated/unchanged` without mutating entries or writing files
+- `replace`: full snapshot sync (remove stale keys not present in source, then overwrite/add source keys)
+
 **Example structure:**
 
 ```typescript
@@ -251,7 +257,9 @@ async function importWadoku(lang: string): Promise<void> {
       common: false,
       jlpt: [],
       definitions: [{ text: item.meaning, sources: ['wadoku'] }],
-      examples: [],
+      examples: item.example
+        ? [{ ja: item.example.ja, text: item.example.text, sources: ['wadoku'] }]
+        : [],
     }
   }
 
@@ -315,13 +323,25 @@ function conjugateIchidan(reading: string): Conjugations {
       "definitions": [
         { "text": "to eat", "sources": ["jmdict"] }
       ],
-      "examples": []
+      "examples": [
+        {
+          "ja": "毎朝食べます",
+          "text": "I eat every morning",
+          "sources": ["manual", "tatoeba"]
+        }
+      ]
     }
   }
 }
 ```
 
 **Key format:** `{word}:{reading}` ensures uniqueness for homonyms.
+
+**Example merge semantics:**
+
+- Examples are deduped by `ja + text`
+- If the same `ja + text` appears from multiple importers, `sources` arrays are merged
+- Legacy example shape with a single `source` field is normalized on load
 
 ### Database Schema
 
@@ -352,7 +372,7 @@ CREATE TABLE examples (
   lang TEXT NOT NULL,
   japanese TEXT NOT NULL,
   translation TEXT NOT NULL,
-  source TEXT NOT NULL
+  source TEXT NOT NULL          -- one row per source attribution
 );
 
 -- Indexes
@@ -385,6 +405,23 @@ The Dockerfile uses multi-stage builds:
 ---
 
 ## Troubleshooting
+
+### Import mode behavior
+
+`import:jmdict` supports three modes:
+
+- `--mode merge` (default): merge new data into existing `data/{lang}.json`
+- `--mode diff`: preview changes only (no file writes)
+- `--mode replace`: full replace for that language (prunes stale keys, then writes source snapshot)
+
+### Language filtering behavior (JMdict)
+
+JMdict glosses are filtered by requested language during import:
+
+- `en`: accepts `eng` glosses and untagged glosses (JMdict default English)
+- non-`en` (for example `de`): accepts only matching tagged glosses (for example `ger`)
+
+This avoids mixed-language definitions in non-English files.
 
 ### "No language files found"
 
@@ -421,6 +458,15 @@ bun run import:jmdict --lang en
 ### Database locked errors
 
 Ensure only one process accesses the database. In production, use `DATABASE_PATH` to point to a persistent volume.
+
+### `SQLiteError: no such table: main.words` during `build:db`
+
+If SQLite sidecar files are left over from an interrupted run, clean and rebuild:
+
+```bash
+rm -f dict.sqlite dict.sqlite-shm dict.sqlite-wal
+bun run build:db
+```
 
 ---
 
