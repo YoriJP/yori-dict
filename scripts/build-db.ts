@@ -16,6 +16,7 @@ import { loadDict, type DictFile } from './import/base'
 
 const DATA_DIR = './data'
 const DB_PATH = process.env.DATABASE_PATH || './dict.sqlite'
+const LFS_POINTER_HEADER = 'version https://git-lfs.github.com/spec/v1'
 
 // ============================================================================
 // Database Schema
@@ -283,6 +284,15 @@ function insertExamples(db: Database, examples: ExampleData[]): number {
 // Main
 // ============================================================================
 
+async function assertMaterializedJson(filePath: string): Promise<void> {
+  const header = await Bun.file(filePath).slice(0, LFS_POINTER_HEADER.length + 8).text()
+  if (header.startsWith(LFS_POINTER_HEADER)) {
+    throw new Error(
+      `File "${filePath}" is a Git LFS pointer, not JSON. Run: bun run data:pull`
+    )
+  }
+}
+
 async function main(): Promise<void> {
   console.log('=== Build SQLite from JSON ===\n')
 
@@ -313,6 +323,7 @@ async function main(): Promise<void> {
   for (const lang of languages) {
     const filePath = `${DATA_DIR}/${lang}.json`
     console.log(`Loading ${filePath}...`)
+    await assertMaterializedJson(filePath)
 
     const dict: DictFile = await loadDict(filePath, lang)
     console.log(`  Version: ${dict.version}, Updated: ${dict.updatedAt}`)
