@@ -132,6 +132,7 @@ yori-dict/
 │   │   ├── base.ts       # Shared types, merge logic, file I/O
 │   │   └── jmdict.ts     # JMdict importer
 │   ├── build-db.ts       # Compiles JSON → SQLite
+│   ├── pull-data.ts      # Materializes Git LFS JSON data files
 │   └── add.ts            # CLI for manual entries
 ├── data/
 │   ├── en.json           # English dictionary (~215k entries)
@@ -166,6 +167,7 @@ bun install
 | `bun run start` | Start production server |
 | `bun run test` | Run test suite |
 | `bun run import:jmdict` | Import JMdict data to JSON |
+| `bun run data:pull` | Materialize `data/*.json` from Git LFS |
 | `bun run build:db` | Build SQLite from JSON files |
 | `bun run add` | Add manual dictionary entries |
 
@@ -393,10 +395,21 @@ CREATE INDEX idx_words_reading ON words(reading);
 
 ### Docker
 
+Before building the image, materialize Git LFS dictionary files on the host:
+
+```bash
+bun run data:pull
+```
+
 ```bash
 bun run docker:build   # Build image
 bun run docker:run     # Run container
 ```
+
+Docker build does not fetch Git LFS blobs by itself; it only copies local files into the image context.
+If Docker build reports Git LFS pointer files, run `bun run data:pull` first on host.
+
+For CI/CD, ensure your checkout step pulls LFS objects before running `docker build`.
 
 The Dockerfile uses multi-stage builds:
 1. **Builder**: Install deps → build SQLite from JSON
@@ -460,6 +473,18 @@ JMdict files are cached in `data/cache/`. Delete cache to re-download:
 ```bash
 rm -rf data/cache
 bun run import:jmdict --lang en
+```
+
+### `Build failed: SyntaxError: Failed to parse JSON`
+
+This usually means `data/{lang}.json` is still a Git LFS pointer file, not the real JSON blob.
+
+```bash
+# materialize LFS-tracked language files
+bun run data:pull
+
+# rebuild database
+bun run build:db
 ```
 
 ### Database locked errors
