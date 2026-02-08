@@ -83,6 +83,11 @@ curl "http://localhost:3000/v1/lookup?word=食べる&lang=en"
 | 400 | `{"error": "Invalid language. Supported: en, de, ..."}` |
 | 404 | `{"error": "Word not found"}` |
 
+**Examples behavior:**
+
+- API responses de-duplicate examples by `(japanese, translation)`
+- If the same example exists with multiple DB sources, only one example item is returned
+
 ### `GET /health`
 
 Health check endpoint. Returns `{"status": "ok"}`.
@@ -342,6 +347,8 @@ function conjugateIchidan(reading: string): Conjugations {
 - Examples are deduped by `ja + text`
 - If the same `ja + text` appears from multiple importers, `sources` arrays are merged
 - Legacy example shape with a single `source` field is normalized on load
+- During DB build, one row is inserted per source attribution
+- During API lookup, rows are de-duplicated by `(japanese, translation)` before response mapping
 
 ### Database Schema
 
@@ -372,7 +379,7 @@ CREATE TABLE examples (
   lang TEXT NOT NULL,
   japanese TEXT NOT NULL,
   translation TEXT NOT NULL,
-  source TEXT NOT NULL          -- one row per source attribution
+  source TEXT NOT NULL          -- one row per source attribution (lookup de-duplicates by pair)
 );
 
 -- Indexes

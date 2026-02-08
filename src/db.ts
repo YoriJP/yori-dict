@@ -1,7 +1,12 @@
 import { Database } from 'bun:sqlite'
 import { toRomaji } from 'wanakana'
 import { conjugate } from './conjugator'
-import type { Language, LookupResponse, WordRow, TranslationRow, ExampleRow } from './types'
+import type { Language, LookupResponse, WordRow, TranslationRow } from './types'
+
+interface ExampleLookupRow {
+  japanese: string
+  translation: string
+}
 
 // Database path
 const DB_PATH = process.env.DATABASE_PATH || './dict.sqlite'
@@ -112,9 +117,11 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
   }
 
   // Get examples for this word and language
-  const examplesQuery = db.query<ExampleRow, [string, string]>(`
-    SELECT * FROM examples
+  const examplesQuery = db.query<ExampleLookupRow, [string, string]>(`
+    SELECT DISTINCT japanese, translation
+    FROM examples
     WHERE word_id = ? AND lang = ?
+    ORDER BY japanese, translation
   `)
 
   const exampleRows = examplesQuery.all(wordRow.id, lang)
