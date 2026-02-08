@@ -14,6 +14,14 @@ COPY scripts/build-db.ts ./scripts/
 # Copy per-language dictionary files
 COPY data/*.json ./data/
 
+# Fail early if JSON files are still Git LFS pointers.
+RUN for f in data/*.json; do \
+      if [ -f "$f" ] && head -n 1 "$f" | grep -q "version https://git-lfs.github.com/spec/v1"; then \
+        echo "ERROR: $f is a Git LFS pointer. Run 'bun run data:pull' on host before docker build."; \
+        exit 1; \
+      fi; \
+    done
+
 # Build SQLite database from JSON
 RUN bun run build:db
 
