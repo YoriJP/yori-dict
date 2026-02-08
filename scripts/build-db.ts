@@ -12,7 +12,7 @@
 
 import { Database } from 'bun:sqlite'
 import { existsSync, unlinkSync, readdirSync } from 'fs'
-import type { DictFile, DictEntry } from './import/base'
+import { loadDict, type DictFile } from './import/base'
 
 const DATA_DIR = './data'
 const DB_PATH = process.env.DATABASE_PATH || './dict.sqlite'
@@ -160,13 +160,16 @@ function collectData(
 
     // Collect examples
     for (const example of entry.examples) {
-      examples.push({
-        wordId: key,
-        lang,
-        japanese: example.ja,
-        translation: example.text,
-        source: example.source,
-      })
+      const sources = example.sources.length > 0 ? example.sources : ['unknown']
+      for (const source of sources) {
+        examples.push({
+          wordId: key,
+          lang,
+          japanese: example.ja,
+          translation: example.text,
+          source,
+        })
+      }
     }
 
     count++
@@ -311,7 +314,7 @@ async function main(): Promise<void> {
     const filePath = `${DATA_DIR}/${lang}.json`
     console.log(`Loading ${filePath}...`)
 
-    const dict: DictFile = await Bun.file(filePath).json()
+    const dict: DictFile = await loadDict(filePath, lang)
     console.log(`  Version: ${dict.version}, Updated: ${dict.updatedAt}`)
 
     collectData(dict, wordsMap, allTranslations, allExamples)

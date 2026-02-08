@@ -149,7 +149,7 @@ async function main(): Promise<void> {
   if (opts.example) {
     const [ja, text] = opts.example.split('|')
     if (ja && text) {
-      newEntry.examples.push({ ja, text, source: 'manual' })
+      newEntry.examples.push({ ja, text, sources: ['manual'] })
     }
   }
 
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
   if (entry.examples.length > 0) {
     console.log(`  Examples:`)
     for (const ex of entry.examples) {
-      console.log(`    - ${ex.ja} → ${ex.text} [${ex.source}]`)
+      console.log(`    - ${ex.ja} → ${ex.text} [${ex.sources.join(', ')}]`)
     }
   }
 

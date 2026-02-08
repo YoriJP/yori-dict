@@ -14,7 +14,7 @@ export interface Definition {
 export interface Example {
   ja: string
   text: string
-  source: string
+  sources: string[]
 }
 
 export interface DictEntry {
@@ -123,22 +123,62 @@ export function mergeDefinitions(defs1: Definition[], defs2: Definition[]): Defi
 }
 
 /**
- * Merge examples - dedupe by Japanese text
+ * Merge examples - dedupe by Japanese text + translation
  */
 export function mergeExamples(ex1: Example[], ex2: Example[]): Example[] {
   const exMap = new Map<string, Example>()
+  const makeExampleKey = (ex: Example) => `${ex.ja}\u0000${ex.text}`
 
   for (const ex of ex1) {
-    exMap.set(ex.ja, ex)
+    exMap.set(makeExampleKey(ex), {
+      ...ex,
+      sources: [...ex.sources],
+    })
   }
 
   for (const ex of ex2) {
-    if (!exMap.has(ex.ja)) {
-      exMap.set(ex.ja, ex)
+    const key = makeExampleKey(ex)
+    const existing = exMap.get(key)
+    if (!existing) {
+      exMap.set(key, {
+        ...ex,
+        sources: [...ex.sources],
+      })
+      continue
     }
+    existing.sources = mergeArrays(existing.sources, ex.sources)
   }
 
   return Array.from(exMap.values())
+}
+
+type RawExample = {
+  ja?: unknown
+  text?: unknown
+  sources?: unknown
+  source?: unknown
+}
+
+function parseSources(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter(
+      (source): source is string => typeof source === 'string' && source.length > 0
+    )
+  }
+  return []
+}
+
+function normalizeExampleSources(ex: RawExample): Example {
+  const parsedSources = parseSources(ex.sources)
+  const sources = parsedSources.length > 0
+    ? parsedSources
+    : (typeof ex.source === 'string' && ex.source.length > 0 ? [ex.source] : [])
+
+  return {
+    ja: String(ex.ja ?? ''),
+    text: String(ex.text ?? ''),
+    sources: mergeArrays([], sources),
+  }
 }
 
 /**
@@ -255,7 +295,11 @@ export async function loadDict(path: string, lang: string): Promise<DictFile> {
   const file = Bun.file(path)
 
   if (await file.exists()) {
-    return file.json()
+    const dict = await file.json() as DictFile
+    for (const entry of Object.values(dict.entries)) {
+      entry.examples = (entry.examples ?? []).map((ex) => normalizeExampleSources(ex))
+    }
+    return dict
   }
 
   return createEmptyDict(lang)
