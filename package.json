@@ -8,6 +8,7 @@
     "start": "bun run src/index.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
+    "data:pull": "bun run scripts/pull-data.ts",
     "build:db": "bun run scripts/build-db.ts",
     "import:jmdict": "bun run scripts/import/jmdict.ts",
     "add": "bun run scripts/add.ts",
