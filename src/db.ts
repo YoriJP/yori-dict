@@ -1,7 +1,12 @@
 import { Database } from 'bun:sqlite'
 import { toRomaji } from 'wanakana'
 import { conjugate } from './conjugator'
-import type { Language, LookupResponse, WordRow, TranslationRow, ExampleRow } from './types'
+import type { Language, LookupResponse, WordRow, TranslationRow } from './types'
+
+interface ExampleLookupRow {
+  japanese: string
+  translation: string
+}
 
 // Database path
 const DB_PATH = process.env.DATABASE_PATH || './dict.sqlite'
@@ -35,7 +40,7 @@ export function initSchema(): void {
       reading TEXT NOT NULL,
       part_of_speech TEXT NOT NULL,
       common INTEGER DEFAULT 0,
-      jlpt INTEGER
+      jlpt TEXT
     );
 
     -- Translations per language
@@ -43,7 +48,7 @@ export function initSchema(): void {
       word_id TEXT NOT NULL,
       lang TEXT NOT NULL,
       definitions TEXT NOT NULL,
-      source TEXT NOT NULL,
+      sources TEXT NOT NULL,
       PRIMARY KEY (word_id, lang),
       FOREIGN KEY (word_id) REFERENCES words(id)
     );
@@ -76,10 +81,19 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
   const db = getDb()
 
   // Query word by exact match on word or reading
+  // Order by: common words first, then by lowest JLPT level (most beginner-friendly)
+  // jlpt is JSON array like '[5]' or '[5,4]' - extract first element for sorting
+  // JLPT levels: N5=5 (easiest) to N1=1 (hardest), so lower number = harder
+  // We want easiest first, so sort DESC on the extracted level
   const wordQuery = db.query<WordRow, [string]>(`
-    SELECT * FROM words 
+    SELECT * FROM words
     WHERE word = ?1 OR reading = ?1
-    ORDER BY common DESC, jlpt ASC
+    ORDER BY
+      common DESC,
+      CASE
+        WHEN jlpt IS NULL THEN 0
+        ELSE CAST(json_extract(jlpt, '$[0]') AS INTEGER)
+      END DESC
     LIMIT 1
   `)
 
@@ -103,9 +117,11 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
   }
 
   // Get examples for this word and language
-  const examplesQuery = db.query<ExampleRow, [string, string]>(`
-    SELECT * FROM examples
+  const examplesQuery = db.query<ExampleLookupRow, [string, string]>(`
+    SELECT DISTINCT japanese, translation
+    FROM examples
     WHERE word_id = ? AND lang = ?
+    ORDER BY japanese, translation
   `)
 
   const exampleRows = examplesQuery.all(wordRow.id, lang)

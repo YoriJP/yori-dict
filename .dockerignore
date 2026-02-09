@@ -1,0 +1,41 @@
+# Dependencies (will be installed in container)
+node_modules/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+
+# Tests
+tests/
+
+# Examples
+examples/
+
+# Raw JMdict files (large, not needed for build)
+data/raw/
+
+# Local database (will be built from JSON)
+dict.sqlite
+dict.sqlite-shm
+dict.sqlite-wal
+
+# Environment files
+.env
+.env.local
+.env.*
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

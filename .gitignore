@@ -1,7 +1,7 @@
 # Dependencies
 node_modules/
 
-# Database
+# Database (built from JSON during Docker build)
 dict.sqlite
 *.sqlite-wal
 *.sqlite-shm
@@ -15,6 +15,7 @@ dist/
 # Environment
 .env
 .env.local
+.env.*
 
 # OS
 .DS_Store

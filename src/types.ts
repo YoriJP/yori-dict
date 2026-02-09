@@ -38,14 +38,14 @@ export interface WordRow {
   reading: string
   part_of_speech: string // JSON string array
   common: number
-  jlpt: number | null
+  jlpt: string | null // JSON string array of JLPT levels, e.g. "[5, 4]"
 }
 
 export interface TranslationRow {
   word_id: string
   lang: string
   definitions: string // JSON string array
-  source: string
+  sources: string // JSON string array of sources, e.g. '["jmdict", "manual"]'
 }
 
 export interface ExampleRow {

@@ -5,15 +5,15 @@
   "description": "Multilingual Japanese dictionary API",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "build": "bun run seed",
     "start": "bun run src/index.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "seed": "bun run scripts/seed.ts",
-    "seed:xml": "bun run scripts/seed-xml.ts",
-    "seed:sample": "bun run scripts/seed-sample.ts",
-    "enrich": "bun run scripts/enrich.ts",
-    "export": "bun run scripts/export.ts"
+    "data:pull": "bun run scripts/pull-data.ts",
+    "build:db": "bun run scripts/build-db.ts",
+    "import:jmdict": "bun run scripts/import/jmdict.ts",
+    "add": "bun run scripts/add.ts",
+    "docker:build": "docker build -t yori-dict .",
+    "docker:run": "docker run -p 3000:3000 -e PORT=3000 yori-dict"
   },
   "dependencies": {
     "hono": "^4.6.0",
