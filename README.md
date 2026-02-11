@@ -415,7 +415,30 @@ The Dockerfile uses multi-stage builds:
 1. **Builder**: Install deps → build SQLite from JSON
 2. **Production**: Copy runtime deps + database only (~100MB image)
 
-### Railway / Fly.io / Render
+### Railway
+
+Deployments are handled via GitHub Actions using `railway up`, which builds the Docker image locally (where Git LFS files are available) and pushes directly to Railway.
+
+**Setup:**
+
+1. Get Railway API token: Railway Dashboard → Account Settings → Tokens
+2. Get Service ID: Railway Dashboard → Your Service → Settings (copy from URL)
+3. Add GitHub repository secrets:
+   - `RAILWAY_TOKEN` - your Railway API token
+   - `RAILWAY_SERVICE_ID` - your service ID
+4. Disconnect GitHub repo in Railway Dashboard (to prevent duplicate builds)
+5. Create a GitHub release to trigger deployment
+
+**Workflow behavior:**
+
+- Triggers on GitHub release or manual dispatch
+- Checks out code with Git LFS files (real JSON, not pointers)
+- Builds Docker image on GitHub Actions runner
+- Pushes built image directly to Railway via `railway up`
+
+See `.github/workflows/docker.yml` for the workflow configuration.
+
+### Fly.io / Render
 
 1. Connect your repository
 2. Set build command: `bun run build:db`
