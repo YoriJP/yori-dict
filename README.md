@@ -422,12 +422,14 @@ Deployments are handled via GitHub Actions using `railway up`, which builds the 
 **Setup:**
 
 1. Get Railway API token: Railway Dashboard → Account Settings → Tokens
-2. Get Service ID: Railway Dashboard → Your Service → Settings (copy from URL)
-3. Add GitHub repository secrets:
+2. Get Project ID: Railway Dashboard → Your Project → Settings
+3. Get Service ID: Railway Dashboard → Your Service → Settings (copy from URL)
+4. Add GitHub repository secrets:
    - `RAILWAY_TOKEN` - your Railway API token
+   - `RAILWAY_PROJECT_ID` - your project ID
    - `RAILWAY_SERVICE_ID` - your service ID
-4. Disconnect GitHub repo in Railway Dashboard (to prevent duplicate builds)
-5. Create a GitHub release to trigger deployment
+5. Disconnect GitHub repo in Railway Dashboard (to prevent duplicate builds)
+6. Create a GitHub release to trigger deployment
 
 **Workflow behavior:**
 
