@@ -1,4 +1,4 @@
-name: Build and Deploy to Railway
+name: Deploy to Railway
 
 on:
   release:
@@ -9,7 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     container: ghcr.io/railwayapp/cli:latest
-    
+
     steps:
       - name: Checkout with LFS
         uses: actions/checkout@v4
