@@ -11,6 +11,10 @@
     "data:pull": "bun run scripts/pull-data.ts",
     "build:db": "bun run scripts/build-db.ts",
     "import:jmdict": "bun run scripts/import/jmdict.ts",
+    "import:jlpt": "bun run scripts/import/jlpt.ts",
+    "import:tatoeba": "bun run scripts/import/tatoeba.ts",
+    "import:wadoku": "bun run scripts/import/wadoku.ts",
+    "import:wiktionary": "bun run scripts/import/wiktionary.ts",
     "add": "bun run scripts/add.ts",
     "docker:build": "docker build -t yori-dict .",
     "docker:run": "docker run -p 3000:3000 -e PORT=3000 yori-dict"
