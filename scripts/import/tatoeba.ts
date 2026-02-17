@@ -22,6 +22,7 @@ import {
   type Example,
   loadDict,
   saveDict,
+  downloadWithProgress,
 } from './base'
 
 // ============================================================================
@@ -111,19 +112,7 @@ interface ImportStats {
 // ============================================================================
 
 async function ensureDownloaded(url: string, archivePath: string): Promise<void> {
-  if (existsSync(archivePath)) {
-    return
-  }
-
-  console.log(`  Downloading: ${url}`)
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'yori-dict-importer' },
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to download ${url}: ${response.status}`)
-  }
-
-  await Bun.write(archivePath, response)
+  await downloadWithProgress(url, archivePath)
 }
 
 async function unzipIfNeeded(zipPath: string, textPath: string): Promise<void> {

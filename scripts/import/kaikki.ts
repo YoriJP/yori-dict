@@ -28,6 +28,7 @@ import {
   mergeDefinitions,
   mergeDictEntries,
   printStats,
+  downloadWithProgress,
 } from './base'
 
 // ============================================================================
@@ -239,22 +240,7 @@ async function* streamJsonLines(filePath: string): AsyncGenerator<WiktEntry> {
 // ============================================================================
 
 async function downloadIfNeeded(url: string, path: string): Promise<void> {
-  if (existsSync(path)) {
-    console.log(`  Using cached archive: ${path}`)
-    return
-  }
-
-  console.log(`  Downloading: ${url}`)
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'yori-dict-importer' },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed download (${response.status}): ${url}`)
-  }
-
-  await Bun.write(path, response)
-  console.log(`  Cached archive to: ${path}`)
+  await downloadWithProgress(url, path)
 }
 
 async function gunzipIfNeeded(gzipPath: string, jsonlPath: string): Promise<void> {
