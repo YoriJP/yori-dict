@@ -495,6 +495,11 @@ async function main(): Promise<void> {
 
   const fileOverrides = parseFileOverrides(args)
 
+  // Ensure zh-cn is processed before zh-tw (zh-tw bootstraps from zh-cn)
+  if (langs.includes('zh-tw') && langs.includes('zh-cn')) {
+    langs = [...langs.filter((l) => l !== 'zh-tw'), 'zh-tw' as ImportLang]
+  }
+
   console.log('=== Kaikki Importer ===')
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
