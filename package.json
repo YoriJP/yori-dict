@@ -11,6 +11,7 @@
     "data:pull": "bun run scripts/pull-data.ts",
     "build:db": "bun run scripts/build-db.ts",
     "import:jmdict": "bun run scripts/import/jmdict.ts",
+    "import:kaikki": "bun run scripts/import/kaikki.ts",
     "import:jlpt": "bun run scripts/import/jlpt.ts",
     "import:tatoeba": "bun run scripts/import/tatoeba.ts",
     "import:wadoku": "bun run scripts/import/wadoku.ts",
