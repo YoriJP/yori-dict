@@ -90,8 +90,8 @@ async function downloadWadoku(): Promise<string> {
 function extractTranslations(markup: string): string[] {
   const translations: string[] = []
 
-  // Match <TrE: ...> patterns
-  const trePattern = /<TrE:\s*([^>]+)>/g
+  // Match <TrE: ...> patterns, allowing nested angle brackets
+  const trePattern = /<TrE:\s*((?:[^<>]|<[^>]*>)*)>/g
   let match
 
   while ((match = trePattern.exec(markup)) !== null) {
