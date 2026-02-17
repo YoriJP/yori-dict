@@ -3,14 +3,14 @@
 [![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=for-the-badge&logo=bun&logoColor=white)](https://bun.sh)
 [![Hono](https://img.shields.io/badge/Hono-E36002?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev)
 [![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-CC--BY--SA--4.0-green.svg?style=for-the-badge)](LICENSE)
 
 **Fast, multilingual Japanese dictionary API with automatic verb conjugations.**
 
 - ⚡ **~1ms response time** - SQLite with optimized indexes
-- 🌍 **Multilingual** - English, German (extensible to Chinese, Korean)
+- 🌍 **Multilingual** - English, German, Korean, Chinese (Simplified & Traditional)
 - 🔤 **Auto conjugations** - ichidan, godan, suru, kuru verbs + i-adjectives
-- 📝 **Example sentences** - 60k+ curated examples
+- 📝 **Example sentences** - 175k+ curated examples from Tatoeba
 - 🎯 **JLPT levels** - N5-N1 tagged for study progress
 
 ---
@@ -68,6 +68,7 @@ bun run dev          # Start server
 
 # Option B: Build from scratch (fresh data)
 bun run import:jmdict --lang en,de   # Download & process (~5 min)
+bun run import:kaikki --lang ko,zh-cn,zh-tw
 bun run import:jlpt
 bun run import:tatoeba
 bun run import:wiktionary
@@ -88,7 +89,7 @@ Lookup a Japanese word by kanji or reading.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `word` | string | ✅ | Japanese word (kanji, hiragana, or katakana) |
-| `lang` | string | ❌ | Target language: `en`, `de`, `zh-TW`, `zh-CN`, `ko` (default: `en`) |
+| `lang` | string | ❌ | Target language: `en`, `de`, `ko`, `zh-cn`, `zh-tw` (aliases `zh-CN`, `zh-TW` also accepted; default: `en`) |
 
 **Examples:**
 
@@ -142,19 +143,20 @@ Health check. Returns `{"status": "ok"}`.
 
 | Language | Entries | Examples | JLPT | Sources |
 |----------|---------|----------|------|---------|
-| **English** | ~215k | ~64k | 7.4k | JMdict, Wiktionary (+60k), Tatoeba |
-| **German** | ~128k | - | 7.4k | JMdict, Wadoku (+13k) |
-| Chinese (TW) | Planned | - | - | - |
-| Chinese (CN) | Planned | - | - | - |
-| Korean | Planned | - | - | - |
+| **English** | ~214k | ~28k | 7.4k | JMdict, Wiktionary (+60k), Tatoeba |
+| **German** | ~128k | ~21k | 7.4k | JMdict, Wadoku (+13k), Tatoeba |
+| **Chinese (CN)** | ~26k | - | - | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Chinese (TW)** | ~26k | - | - | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Korean** | ~5k | - | - | Kaikki, Tatoeba (`jpn-kor`) |
 
 **Source Details:**
 
 | Source | Data | License | Imported Via |
 |--------|------|---------|--------------|
 | [JMdict-simplified](https://github.com/scriptin/jmdict-simplified) | Base dictionary | CC-BY-SA-4.0 | `import:jmdict` |
-| [Tatoeba](https://tatoeba.org) via [ManyThings](https://manythings.org/anki/) | Example sentences | CC-BY-2.0 | `import:tatoeba` |
+| [Tatoeba](https://tatoeba.org) via [ManyThings](https://manythings.org/anki/) and [raw exports](https://downloads.tatoeba.org/exports/per_language/) | Example sentences | CC-BY-2.0 | `import:tatoeba` |
 | [Wiktionary](https://kaikki.org) | Additional definitions | CC-BY-SA-3.0 | `import:wiktionary` |
+| [Kaikki](https://kaikki.org) (kowiktionary/zhwiktionary) | Korean/Chinese definitions | CC-BY-SA-3.0 | `import:kaikki` |
 | [Wadoku](https://github.com/WaDoku/WaDokuJT-Data) | German definitions | CC-BY-SA-3.0 | `import:wadoku` |
 | [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) | JLPT N5-N1 levels | Public Domain | `import:jlpt` |
 
@@ -249,17 +251,21 @@ yori-dict/
 │   ├── import/
 │   │   ├── base.ts       # Shared types & merge logic
 │   │   ├── jmdict.ts     # JMdict importer
+│   │   ├── kaikki.ts     # Korean/Chinese definitions
 │   │   ├── jlpt.ts       # JLPT level importer
 │   │   ├── tatoeba.ts    # Example sentences
 │   │   ├── wadoku.ts     # German definitions
-│   │   └── wiktionary.ts # Wiktionary definitions
+│   │   └── wiktionary.ts # English definitions enrichment
 │   ├── build-db.ts       # JSON → SQLite compiler
 │   ├── pull-data.ts      # Git LFS materializer
 │   └── add.ts            # Manual entry CLI
 ├── data/
 │   ├── en.json           # English dictionary (Git LFS)
 │   ├── de.json           # German dictionary (Git LFS)
-│   └── cache/            # Downloaded raw data
+│   ├── ko.json           # Korean dictionary (Git LFS)
+│   ├── zh-cn.json        # Chinese Simplified dictionary (Git LFS)
+│   ├── zh-tw.json        # Chinese Traditional dictionary (Git LFS)
+│   └── cache/            # Downloaded raw data (gitignored)
 └── dict.sqlite           # Built database (gitignored)
 ```
 
@@ -271,8 +277,9 @@ yori-dict/
 | `bun run start` | Start production server |
 | `bun run test` | Run test suite |
 | `bun run import:jmdict --lang en,de` | Import JMdict base dictionary |
+| `bun run import:kaikki --lang ko,zh-cn,zh-tw` | Import Korean/Chinese definitions from Kaikki |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
-| `bun run import:tatoeba` | Import example sentences |
+| `bun run import:tatoeba` | Import example sentences (`en`, `de`, `ko`, `zh-cn`, `zh-tw`) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
 | `bun run import:wiktionary` | Import Wiktionary definitions |
 | `bun run build:db` | Build SQLite from JSON files |
@@ -319,18 +326,15 @@ bun test tests/conjugator.test.ts
 
 ### Adding a New Language
 
-1. Check JMdict support at [scriptin/jmdict-simplified](https://github.com/scriptin/jmdict-simplified/releases)
-2. Add language mapping in `scripts/import/jmdict.ts`:
-   ```typescript
-   const LANG_MAP = { eng: 'en', ger: 'de', fra: 'fr' }
-   ```
-3. Update `src/types.ts`:
-   ```typescript
-   export type Language = 'en' | 'de' | 'fr' | 'zh-TW' | 'zh-CN' | 'ko'
-   ```
+1. Check source support first:
+   `en/de`: [scriptin/jmdict-simplified releases](https://github.com/scriptin/jmdict-simplified/releases)
+   `ko/zh`: [Kaikki index](https://kaikki.org)
+2. Update language definitions and aliases in `src/types.ts`.
+3. Add importer mapping in the relevant import script (`scripts/import/jmdict.ts` or `scripts/import/kaikki.ts`).
 4. Import and build:
    ```bash
-   bun run import:jmdict --lang fr
+   bun run import:jmdict --lang en,de
+   bun run import:kaikki --lang ko,zh-cn,zh-tw
    bun run build:db
    ```
 
@@ -412,10 +416,12 @@ bun run build:db
 <details>
 <summary><b>Import modes explained</b></summary>
 
-All import scripts support three modes:
+Most import scripts support three modes:
 - `--mode merge` (default): Add new entries, merge with existing
 - `--mode diff`: Preview changes without writing files
 - `--mode replace`: Full replace (removes stale keys, then writes source snapshot)
+
+Note: `import:tatoeba` only supports `merge` and `diff`.
 
 Example:
 ```bash
@@ -430,15 +436,14 @@ For more issues, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ## License
 
-- **Code**: MIT
-- **Data**: Mixed open licenses (see Data Sources table)
+- **Code & Data**: CC-BY-SA-4.0 (see Data Sources table for individual source licenses)
 
 ## Acknowledgments
 
 - [JMdict/EDICT](https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project) - Original dictionary project
 - [jmdict-simplified](https://github.com/scriptin/jmdict-simplified) - Pre-processed JMdict JSON
 - [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) - JLPT vocabulary lists
-- [Tatoeba](https://tatoeba.org) / [ManyThings.org](https://manythings.org/anki/) - Example sentences
+- [Tatoeba](https://tatoeba.org) / [ManyThings.org](https://manythings.org/anki/) / [Tatoeba raw exports](https://downloads.tatoeba.org/exports/per_language/) - Example sentences
 - [Wadoku](https://www.wadoku.de) - Japanese-German dictionary
 - [Wiktionary](https://kaikki.org) - Wiktionary extracts
 - [wanakana](https://github.com/WaniKani/WanaKana) - Japanese text utilities
