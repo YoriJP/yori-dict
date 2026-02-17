@@ -67,11 +67,12 @@ bun run build:db     # Build SQLite (~10s)
 bun run dev          # Start server
 
 # Option B: Build from scratch (fresh data)
-bun run import:jmdict --lang en,de   # Download & process (~5 min)
-bun run import:kaikki --lang ko,zh-cn,zh-tw
-bun run import:jlpt
-bun run import:tatoeba
-bun run import:wiktionary
+bun run import:jmdict --lang en,de   # Base dictionaries
+bun run import:kaikki --lang ko,zh-cn,zh-tw  # Korean/Chinese definitions
+bun run import:jlpt                  # JLPT levels
+bun run import:wadoku                # German definitions
+bun run import:wiktionary            # English definitions
+bun run import:tatoeba               # Example sentences (all languages)
 bun run build:db
 bun run dev
 ```
@@ -145,9 +146,9 @@ Health check. Returns `{"status": "ok"}`.
 |----------|---------|----------|------|---------|
 | **English** | ~214k | ~28k | 7.4k | JMdict, Wiktionary (+60k), Tatoeba |
 | **German** | ~128k | ~21k | 7.4k | JMdict, Wadoku (+13k), Tatoeba |
-| **Chinese (CN)** | ~26k | - | - | Kaikki, Tatoeba (`jpn-cmn`) |
-| **Chinese (TW)** | ~26k | - | - | Kaikki, Tatoeba (`jpn-cmn`) |
-| **Korean** | ~5k | - | - | Kaikki, Tatoeba (`jpn-kor`) |
+| **Chinese (CN)** | ~26k | ~6k | - | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Chinese (TW)** | ~26k | ~6k | - | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Korean** | ~5k | ~800 | - | Kaikki, Tatoeba (`jpn-kor`) |
 
 **Source Details:**
 
@@ -173,10 +174,10 @@ Health check. Returns `{"status": "ok"}`.
 │   │   IMPORT     │    │   BUILD      │    │   SERVE      │     │
 │   │              │    │              │    │              │     │
 │   │ JMdict JSON  │───▶│ data/*.json  │───▶│ dict.sqlite  │     │
-│   │ JLPT CSV     │    │              │    │              │     │
-│   │ Tatoeba TXT  │    │ ~200MB JSON  │    │ ~80MB SQLite │     │
+│   │ Kaikki JSONL │    │              │    │              │     │
+│   │ Tatoeba TSV  │    │ ~130MB JSON  │    │ ~80MB SQLite │     │
 │   │ Wiktionary   │    │              │    │              │     │
-│   │ JSONL        │    │              │    │ ~1ms lookup  │     │
+│   │ Wadoku/JLPT  │    │              │    │ ~1ms lookup  │     │
 │   └──────────────┘    └──────────────┘    └──────────────┘     │
 │         ▲                    ▲                   ▲              │
 │         │                    │                   │              │
@@ -331,10 +332,12 @@ bun test tests/conjugator.test.ts
    `ko/zh`: [Kaikki index](https://kaikki.org)
 2. Update language definitions and aliases in `src/types.ts`.
 3. Add importer mapping in the relevant import script (`scripts/import/jmdict.ts` or `scripts/import/kaikki.ts`).
-4. Import and build:
+4. Add example sentence support in `scripts/import/tatoeba.ts` if Tatoeba has a corpus for the language.
+5. Import and build:
    ```bash
    bun run import:jmdict --lang en,de
    bun run import:kaikki --lang ko,zh-cn,zh-tw
+   bun run import:tatoeba
    bun run build:db
    ```
 
