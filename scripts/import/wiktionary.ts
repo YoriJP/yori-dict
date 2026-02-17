@@ -21,6 +21,7 @@ import {
   loadDict,
   saveDict,
   mergeDefinitions,
+  downloadWithProgress,
 } from './base'
 
 // ============================================================================
@@ -86,29 +87,8 @@ interface ParsedWiktEntry {
 async function downloadWiktionary(): Promise<string> {
   const cachePath = `${CACHE_DIR}/wiktionary-japanese.jsonl`
 
-  // Check cache
-  if (existsSync(cachePath)) {
-    console.log(`  Using cached: ${cachePath}`)
-    return cachePath
-  }
-
-  // Download
-  console.log(`  Downloading: ${WIKTIONARY_URL}`)
-  console.log(`  (This is a ~340MB file, may take a while...)`)
-
-  const response = await fetch(WIKTIONARY_URL, {
-    headers: { 'User-Agent': 'yori-dict-importer' },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to download Wiktionary: ${response.status}`)
-  }
-
-  // Stream to file
   await mkdir(CACHE_DIR, { recursive: true })
-  const buffer = await response.arrayBuffer()
-  await Bun.write(cachePath, buffer)
-  console.log(`  Cached to: ${cachePath}`)
+  await downloadWithProgress(WIKTIONARY_URL, cachePath)
 
   return cachePath
 }
