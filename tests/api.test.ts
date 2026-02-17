@@ -153,8 +153,18 @@ describe('GET /v1/lookup - Error Cases', () => {
   })
 
   test('word exists but no translation for language returns 404', async () => {
-    // zh-TW has no translations yet
+    // zh aliases are accepted, even if translation is missing
     const res = await request('/v1/lookup?word=食べる&lang=zh-TW')
+    expect(res.status).toBe(404)
+  })
+
+  test('canonical lowercase zh code is accepted', async () => {
+    const res = await request('/v1/lookup?word=食べる&lang=zh-tw')
+    expect(res.status).toBe(404)
+  })
+
+  test('zh-CN alias is accepted', async () => {
+    const res = await request('/v1/lookup?word=食べる&lang=zh-CN')
     expect(res.status).toBe(404)
   })
 })
