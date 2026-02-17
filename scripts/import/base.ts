@@ -2,6 +2,8 @@
  * Base types and merge logic for dictionary imports
  */
 
+import { existsSync } from 'fs'
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -265,6 +267,60 @@ export function mergeDictEntries(
   }
 
   return { added, updated, unchanged }
+}
+
+// ============================================================================
+// Download Helpers
+// ============================================================================
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * Download a file with progress reporting. Skips if the file already exists.
+ */
+export async function downloadWithProgress(url: string, destPath: string): Promise<void> {
+  if (existsSync(destPath)) {
+    console.log(`  Cached: ${destPath}`)
+    return
+  }
+
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'yori-dict-importer' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed download (${response.status}): ${url}`)
+  }
+
+  const totalBytes = Number(response.headers.get('content-length') || 0)
+  const totalStr = totalBytes ? formatBytes(totalBytes) : '?'
+
+  if (!response.body) {
+    throw new Error(`Empty response body: ${url}`)
+  }
+
+  const file = Bun.file(destPath)
+  const writer = file.writer()
+  let received = 0
+  let lastLog = 0
+
+  for await (const chunk of response.body) {
+    writer.write(chunk)
+    received += chunk.byteLength
+
+    if (totalBytes && received - lastLog > totalBytes * 0.05) {
+      const pct = Math.round((received / totalBytes) * 100)
+      process.stdout.write(`\r  Downloading: ${formatBytes(received)} / ${totalStr} (${pct}%)`)
+      lastLog = received
+    }
+  }
+
+  await writer.end()
+  process.stdout.write(`\r  Downloaded: ${formatBytes(received)} / ${totalStr} (100%)\n`)
 }
 
 // ============================================================================
