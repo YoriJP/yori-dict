@@ -151,7 +151,7 @@ function extractReading(entry: WiktEntry): string | null {
  * Convert katakana to hiragana
  */
 function katakanaToHiragana(text: string): string {
-  return text.replace(/[\u30A0-\u30FF]/g, (char) => {
+  return text.replace(/[\u30A1-\u30F6]/g, (char) => {
     return String.fromCharCode(char.charCodeAt(0) - 0x60)
   })
 }
