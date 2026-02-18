@@ -266,7 +266,7 @@ function importWadoku(
     // If no exact match, try to find by word only
     if (!entry) {
       const candidates = wordMap.get(wadoku.japanese) || wordMap.get(wadoku.reading)
-      if (candidates && candidates.length > 0) {
+      if (candidates && candidates.length === 1) {
         entry = dict.entries[candidates[0]]
       }
     }

@@ -348,7 +348,7 @@ async function importWiktionary(
     // If no exact match, try by word only
     if (!entry) {
       const candidates = wordMap.get(parsed.word)
-      if (candidates && candidates.length > 0) {
+      if (candidates && candidates.length === 1) {
         entry = dict.entries[candidates[0]]
       }
     }
