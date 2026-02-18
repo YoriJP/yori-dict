@@ -4,8 +4,32 @@ import {
   extractReading,
   extractDefinitions,
   parseEntry,
+  katakanaToHiragana,
   type WiktEntry,
 } from '../scripts/import/kaikki'
+
+// ============================================================================
+// POS mapping
+// ============================================================================
+
+// ============================================================================
+// katakanaToHiragana
+// ============================================================================
+
+describe('katakanaToHiragana', () => {
+  test('converts katakana letters to hiragana', () => {
+    expect(katakanaToHiragana('ネコ')).toBe('ねこ')
+  })
+
+  test('preserves long vowel mark ー', () => {
+    expect(katakanaToHiragana('コーヒー')).toBe('こーひー')
+    expect(katakanaToHiragana('ラーメン')).toBe('らーめん')
+  })
+
+  test('preserves non-katakana characters', () => {
+    expect(katakanaToHiragana('ABCネコ123')).toBe('ABCねこ123')
+  })
+})
 
 // ============================================================================
 // POS mapping
