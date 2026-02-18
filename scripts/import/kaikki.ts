@@ -108,7 +108,7 @@ interface ImportStats {
 // ============================================================================
 
 export function katakanaToHiragana(text: string): string {
-  return text.replace(/[\u30A0-\u30FF]/g, (char) => {
+  return text.replace(/[\u30A1-\u30F6]/g, (char) => {
     return String.fromCharCode(char.charCodeAt(0) - 0x60)
   })
 }
@@ -519,7 +519,9 @@ async function main(): Promise<void> {
   console.log('\n=== Import Complete ===')
 }
 
-main().catch((error) => {
-  console.error('Import failed:', error)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error('Import failed:', error)
+    process.exit(1)
+  })
+}
