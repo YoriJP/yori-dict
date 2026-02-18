@@ -208,14 +208,18 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
     }
   }
 
-  // Collect definitions for this language
+  // Collect definitions for this language, deduplicating by normalized text
   const definitions: { text: string; sources: string[] }[] = []
+  const seenDefs = new Set<string>()
   const includeUntaggedGloss = lang === 'en'
   for (const sense of entry.sense) {
     for (const gloss of sense.gloss) {
       // Untagged glosses in JMdict are effectively English defaults.
       if (!gloss.lang && !includeUntaggedGloss) continue
       if (gloss.lang && gloss.lang !== targetGlossLang) continue
+      const normalized = gloss.text.toLowerCase().trim()
+      if (seenDefs.has(normalized)) continue
+      seenDefs.add(normalized)
       definitions.push({
         text: gloss.text,
         sources: ['jmdict'],
