@@ -260,6 +260,12 @@ yori-dict/
 │   ├── build-db.ts       # JSON → SQLite compiler
 │   ├── pull-data.ts      # Git LFS materializer
 │   └── add.ts            # Manual entry CLI
+├── tests/
+│   ├── api.test.ts            # API endpoint tests
+│   ├── conjugator.test.ts     # Conjugation engine tests
+│   ├── import-base.test.ts    # Import merge logic tests
+│   ├── import-kaikki.test.ts  # Kaikki parser tests
+│   └── build-db.test.ts       # DB build pipeline tests
 ├── data/
 │   ├── en.json           # English dictionary (Git LFS)
 │   ├── de.json           # German dictionary (Git LFS)
@@ -313,9 +319,13 @@ bun run dev
 ### Running Tests
 
 ```bash
-bun test              # Run all tests
-bun test --watch      # Watch mode
-bun test tests/conjugator.test.ts
+bun test                        # Run all tests
+bun test --watch                # Watch mode
+bun test tests/conjugator.test  # Conjugation engine
+bun test tests/api.test         # API endpoints
+bun test tests/import-base      # Import merge logic
+bun test tests/import-kaikki    # Kaikki parser
+bun test tests/build-db         # DB build pipeline
 ```
 
 ### Code Style
