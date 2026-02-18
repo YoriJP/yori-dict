@@ -14,7 +14,7 @@
  */
 
 import { mkdir } from 'fs/promises'
-import { existsSync, readdirSync, createReadStream } from 'fs'
+import { existsSync, readdirSync, createReadStream, renameSync, unlinkSync } from 'fs'
 import { createInterface } from 'readline'
 import {
   type DictEntry,
@@ -136,15 +136,22 @@ async function bunzip2IfNeeded(bz2Path: string, textPath: string): Promise<void>
     return
   }
 
+  const tmpPath = textPath + '.tmp'
   console.log(`  Decompressing: ${bz2Path}`)
-  const proc = Bun.spawn(['sh', '-c', `bzip2 -dc "${bz2Path}" > "${textPath}"`], {
-    stdout: 'inherit',
-    stderr: 'pipe',
-  })
-  const stderrText = await new Response(proc.stderr).text()
-  const exitCode = await proc.exited
-  if (exitCode !== 0) {
-    throw new Error(`Failed to decompress ${bz2Path}: ${stderrText}`)
+  try {
+    const proc = Bun.spawn(['sh', '-c', `bzip2 -dc "${bz2Path}" > "${tmpPath}"`], {
+      stdout: 'inherit',
+      stderr: 'pipe',
+    })
+    const stderrText = await new Response(proc.stderr).text()
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      throw new Error(`Failed to decompress ${bz2Path}: ${stderrText}`)
+    }
+    renameSync(tmpPath, textPath)
+  } catch (err) {
+    try { unlinkSync(tmpPath) } catch {}
+    throw err
   }
 }
 

@@ -14,7 +14,7 @@
  */
 
 import { mkdir } from 'fs/promises'
-import { createReadStream, createWriteStream, existsSync } from 'fs'
+import { createReadStream, createWriteStream, existsSync, renameSync, unlinkSync } from 'fs'
 import { createInterface } from 'readline'
 import { createGunzip } from 'zlib'
 import { pipeline } from 'stream/promises'
@@ -249,12 +249,19 @@ async function gunzipIfNeeded(gzipPath: string, jsonlPath: string): Promise<void
     return
   }
 
+  const tmpPath = jsonlPath + '.tmp'
   console.log('  Decompressing archive...')
-  await pipeline(
-    createReadStream(gzipPath),
-    createGunzip(),
-    createWriteStream(jsonlPath)
-  )
+  try {
+    await pipeline(
+      createReadStream(gzipPath),
+      createGunzip(),
+      createWriteStream(tmpPath)
+    )
+    renameSync(tmpPath, jsonlPath)
+  } catch (err) {
+    try { unlinkSync(tmpPath) } catch {}
+    throw err
+  }
   console.log(`  Wrote JSONL: ${jsonlPath}`)
 }
 
