@@ -120,14 +120,21 @@ async function unzipIfNeeded(zipPath: string, textPath: string): Promise<void> {
     return
   }
 
-  const proc = Bun.spawn(['sh', '-c', `unzip -p "${zipPath}" > "${textPath}"`], {
-    stdout: 'inherit',
-    stderr: 'pipe',
-  })
-  const stderrText = await new Response(proc.stderr).text()
-  const exitCode = await proc.exited
-  if (exitCode !== 0) {
-    throw new Error(`Failed to unzip ${zipPath}: ${stderrText}`)
+  const tmpPath = textPath + '.tmp'
+  try {
+    const proc = Bun.spawn(['sh', '-c', `unzip -p "${zipPath}" > "${tmpPath}"`], {
+      stdout: 'inherit',
+      stderr: 'pipe',
+    })
+    const stderrText = await new Response(proc.stderr).text()
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      throw new Error(`Failed to unzip ${zipPath}: ${stderrText}`)
+    }
+    renameSync(tmpPath, textPath)
+  } catch (err) {
+    try { unlinkSync(tmpPath) } catch {}
+    throw err
   }
 }
 
