@@ -1,93 +1,14 @@
-/**
- * Smoke tests for kaikki.ts parsing helpers.
- *
- * The helpers (mapPos, extractReading, extractDefinitions, parseEntry) are not
- * exported from kaikki.ts, so we inline minimal copies of the logic here and
- * test against the same contracts. If the module is later refactored to export
- * them, these tests can import directly.
- */
-
 import { describe, test, expect } from 'bun:test'
+import {
+  mapPos,
+  extractReading,
+  extractDefinitions,
+  parseEntry,
+  type WiktEntry,
+} from '../scripts/import/kaikki'
 
 // ============================================================================
-// Inline copies of pure helpers (mirrors kaikki.ts logic)
-// ============================================================================
-
-function katakanaToHiragana(text: string): string {
-  return text.replace(/[\u30A0-\u30FF]/g, (char) =>
-    String.fromCharCode(char.charCodeAt(0) - 0x60)
-  )
-}
-
-const INCLUDED_POS = new Set([
-  'noun', 'verb', 'adj', 'adv', 'intj', 'pron', 'conj',
-  'particle', 'counter', 'prefix', 'suffix', 'affix', 'phrase', 'proverb', 'num',
-])
-
-const SKIP_SENSE_TAGS = new Set(['alt-of', 'form-of', 'romanization', 'Rōmaji'])
-
-function mapPos(pos: string): string {
-  const mapping: Record<string, string> = {
-    noun: 'noun', verb: 'verb', adj: 'adjective', adv: 'adverb',
-    intj: 'interjection', pron: 'pronoun', conj: 'conjunction',
-    particle: 'particle', counter: 'counter', prefix: 'prefix',
-    suffix: 'suffix', affix: 'affix', phrase: 'expression',
-    proverb: 'expression', num: 'numeral',
-  }
-  return mapping[pos] || pos
-}
-
-interface WiktEntry {
-  word: string
-  pos: string
-  lang_code: string
-  forms?: { form: string; tags?: string[]; ruby?: [string, string][] }[]
-  senses?: { glosses?: string[]; raw_glosses?: string[]; tags?: string[] }[]
-  sounds?: { other?: string }[]
-}
-
-function extractReading(entry: WiktEntry): string | null {
-  if (entry.forms) {
-    for (const form of entry.forms) {
-      if (form.ruby && form.ruby.length > 0) {
-        const reading = form.ruby.map(([_, kana]) => kana).join('')
-        if (reading && /[\u3040-\u309F]/.test(reading)) return reading
-      }
-      if (form.tags?.includes('romanization')) continue
-      if (form.form && /^[\u3040-\u309F]+$/.test(form.form)) return form.form
-      if (form.form && /^[\u30A0-\u30FF]+$/.test(form.form)) return katakanaToHiragana(form.form)
-    }
-  }
-  if (entry.sounds) {
-    for (const sound of entry.sounds) {
-      if (sound.other && /^[\u30A0-\u30FF]+$/.test(sound.other)) return katakanaToHiragana(sound.other)
-    }
-  }
-  if (/^[\u3040-\u309F]+$/.test(entry.word)) return entry.word
-  if (/^[\u30A0-\u30FF]+$/.test(entry.word)) return katakanaToHiragana(entry.word)
-  return null
-}
-
-function extractDefinitions(entry: WiktEntry): string[] {
-  const defs: string[] = []
-  const seen = new Set<string>()
-  if (!entry.senses) return defs
-  for (const sense of entry.senses) {
-    if (sense.tags?.some((t) => SKIP_SENSE_TAGS.has(t))) continue
-    for (const gloss of (sense.glosses ?? sense.raw_glosses ?? [])) {
-      const cleaned = gloss.replace(/\s+/g, ' ').trim()
-      if (!cleaned) continue
-      const norm = cleaned.toLowerCase()
-      if (seen.has(norm)) continue
-      seen.add(norm)
-      defs.push(cleaned)
-    }
-  }
-  return defs
-}
-
-// ============================================================================
-// Tests
+// POS mapping
 // ============================================================================
 
 describe('POS mapping', () => {
@@ -103,6 +24,10 @@ describe('POS mapping', () => {
     expect(mapPos('determiner')).toBe('determiner')
   })
 })
+
+// ============================================================================
+// extractReading
+// ============================================================================
 
 describe('extractReading', () => {
   test('extracts reading from ruby annotation', () => {
@@ -140,6 +65,10 @@ describe('extractReading', () => {
   })
 })
 
+// ============================================================================
+// extractDefinitions
+// ============================================================================
+
 describe('extractDefinitions', () => {
   test('parses glosses', () => {
     const entry: WiktEntry = {
@@ -174,15 +103,71 @@ describe('extractDefinitions', () => {
   })
 })
 
-describe('INCLUDED_POS filtering', () => {
-  test('includes standard POS tags', () => {
-    for (const pos of ['noun', 'verb', 'adj', 'particle', 'counter']) {
-      expect(INCLUDED_POS.has(pos)).toBe(true)
+// ============================================================================
+// parseEntry — end-to-end
+// ============================================================================
+
+describe('parseEntry', () => {
+  test('converts a raw kaikki JSON entry into a ParsedWiktEntry', () => {
+    const raw: WiktEntry = {
+      word: '食べる',
+      pos: 'verb',
+      lang_code: 'ja',
+      forms: [{ form: 'たべる' }],
+      senses: [
+        { glosses: ['먹다'] },
+        { glosses: ['섭취하다'] },
+      ],
     }
+
+    const result = parseEntry(raw)
+    expect(result).not.toBeNull()
+    expect(result!.word).toBe('食べる')
+    expect(result!.reading).toBe('たべる')
+    expect(result!.pos).toBe('verb')
+    expect(result!.definitions).toEqual(['먹다', '섭취하다'])
   })
 
-  test('excludes non-standard POS', () => {
-    expect(INCLUDED_POS.has('determiner')).toBe(false)
-    expect(INCLUDED_POS.has('character')).toBe(false)
+  test('returns null for non-Japanese entries', () => {
+    const raw: WiktEntry = {
+      word: 'hello', pos: 'noun', lang_code: 'en',
+      senses: [{ glosses: ['greeting'] }],
+    }
+    expect(parseEntry(raw)).toBeNull()
+  })
+
+  test('returns null for excluded POS', () => {
+    const raw: WiktEntry = {
+      word: '食べる', pos: 'determiner', lang_code: 'ja',
+      forms: [{ form: 'たべる' }],
+      senses: [{ glosses: ['test'] }],
+    }
+    expect(parseEntry(raw)).toBeNull()
+  })
+
+  test('returns null when no reading can be extracted', () => {
+    const raw: WiktEntry = {
+      word: 'ABC', pos: 'noun', lang_code: 'ja',
+      senses: [{ glosses: ['test'] }],
+    }
+    expect(parseEntry(raw)).toBeNull()
+  })
+
+  test('returns null when no definitions found', () => {
+    const raw: WiktEntry = {
+      word: '食べる', pos: 'verb', lang_code: 'ja',
+      forms: [{ form: 'たべる' }],
+      senses: [],
+    }
+    expect(parseEntry(raw)).toBeNull()
+  })
+
+  test('maps POS in the result', () => {
+    const raw: WiktEntry = {
+      word: '猫', pos: 'adj', lang_code: 'ja',
+      forms: [{ form: 'ねこ' }],
+      senses: [{ glosses: ['cute'] }],
+    }
+    expect(parseEntry(raw)!.pos).toBe('adjective')
   })
 })

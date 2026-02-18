@@ -77,7 +77,7 @@ const DEFAULT_MAX_DEFINITIONS = 8
 // Types
 // ============================================================================
 
-interface WiktEntry {
+export interface WiktEntry {
   word: string
   pos: string
   lang_code: string
@@ -90,7 +90,7 @@ interface WiktEntry {
   sounds?: { other?: string }[]
 }
 
-interface ParsedWiktEntry {
+export interface ParsedWiktEntry {
   word: string
   reading: string
   pos: string
@@ -107,13 +107,13 @@ interface ImportStats {
 // Parsing helpers
 // ============================================================================
 
-function katakanaToHiragana(text: string): string {
+export function katakanaToHiragana(text: string): string {
   return text.replace(/[\u30A0-\u30FF]/g, (char) => {
     return String.fromCharCode(char.charCodeAt(0) - 0x60)
   })
 }
 
-function extractReading(entry: WiktEntry): string | null {
+export function extractReading(entry: WiktEntry): string | null {
   if (entry.forms) {
     for (const form of entry.forms) {
       if (form.ruby && form.ruby.length > 0) {
@@ -154,7 +154,7 @@ function extractReading(entry: WiktEntry): string | null {
   return null
 }
 
-function extractDefinitions(entry: WiktEntry): string[] {
+export function extractDefinitions(entry: WiktEntry): string[] {
   const definitions: string[] = []
   const seen = new Set<string>()
 
@@ -179,7 +179,7 @@ function extractDefinitions(entry: WiktEntry): string[] {
   return definitions
 }
 
-function mapPos(pos: string): string {
+export function mapPos(pos: string): string {
   const mapping: Record<string, string> = {
     noun: 'noun',
     verb: 'verb',
@@ -200,7 +200,7 @@ function mapPos(pos: string): string {
   return mapping[pos] || pos
 }
 
-function parseEntry(entry: WiktEntry): ParsedWiktEntry | null {
+export function parseEntry(entry: WiktEntry): ParsedWiktEntry | null {
   if (entry.lang_code !== 'ja') return null
   if (!INCLUDED_POS.has(entry.pos)) return null
 
