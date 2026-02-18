@@ -578,6 +578,18 @@ Examples:
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
 
+  // Handle --help before any filesystem access
+  if (args.includes('--help') || args.includes('-h')) {
+    printHelp()
+    return
+  }
+
+  if (!existsSync(DATA_DIR)) {
+    console.error(`Data directory not found: ${DATA_DIR}`)
+    console.error('Run "bun run import:jmdict --lang en" first to create language files.')
+    process.exit(1)
+  }
+
   const availableLangs = readdirSync(DATA_DIR)
     .filter((f) => f.endsWith('.json') && !f.includes('/'))
     .map((f) => f.replace('.json', ''))
@@ -610,9 +622,6 @@ async function main(): Promise<void> {
         process.exit(1)
       }
       i++
-    } else if (arg === '--help' || arg === '-h') {
-      printHelp()
-      return
     }
   }
 
