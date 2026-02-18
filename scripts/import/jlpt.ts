@@ -121,7 +121,13 @@ function parseCsvLine(line: string): string[] {
     const char = line[i]
 
     if (char === '"') {
-      inQuotes = !inQuotes
+      // RFC 4180: "" inside a quoted field is a literal "
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i++ // skip the second quote
+      } else {
+        inQuotes = !inQuotes
+      }
     } else if (char === ',' && !inQuotes) {
       fields.push(current)
       current = ''
