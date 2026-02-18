@@ -2,7 +2,7 @@
  * Base types and merge logic for dictionary imports
  */
 
-import { existsSync } from 'fs'
+import { existsSync, renameSync, unlinkSync } from 'fs'
 
 // ============================================================================
 // Types
@@ -303,23 +303,31 @@ export async function downloadWithProgress(url: string, destPath: string): Promi
     throw new Error(`Empty response body: ${url}`)
   }
 
-  const file = Bun.file(destPath)
+  const tmpPath = destPath + '.tmp'
+  const file = Bun.file(tmpPath)
   const writer = file.writer()
   let received = 0
   let lastLog = 0
 
-  for await (const chunk of response.body) {
-    writer.write(chunk)
-    received += chunk.byteLength
+  try {
+    for await (const chunk of response.body) {
+      writer.write(chunk)
+      received += chunk.byteLength
 
-    if (totalBytes && received - lastLog > totalBytes * 0.05) {
-      const pct = Math.round((received / totalBytes) * 100)
-      process.stdout.write(`\r  Downloading: ${formatBytes(received)} / ${totalStr} (${pct}%)`)
-      lastLog = received
+      if (totalBytes && received - lastLog > totalBytes * 0.05) {
+        const pct = Math.round((received / totalBytes) * 100)
+        process.stdout.write(`\r  Downloading: ${formatBytes(received)} / ${totalStr} (${pct}%)`)
+        lastLog = received
+      }
     }
+
+    await writer.end()
+    renameSync(tmpPath, destPath)
+  } catch (err) {
+    try { unlinkSync(tmpPath) } catch {}
+    throw err
   }
 
-  await writer.end()
   process.stdout.write(`\r  Downloaded: ${formatBytes(received)} / ${totalStr} (100%)\n`)
 }
 
