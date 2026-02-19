@@ -89,36 +89,77 @@ export function normalizeText(text: string): string {
   return text.toLowerCase().trim()
 }
 
+const INLINE_TAG_PATTERN = /<[^>]*:\s*([^<>]*)>/g
+const MARKER_TAG_PATTERN = /<[^>]+>/g
+const BARE_HW_FRAGMENT_PATTERN = /(^|[\s(])\{?\s*HW\s+[a-z]{1,4}\s*:\s*/gi
+const RESIDUAL_HW_PATTERN = /(^|[\s(])\{?\s*HW\s+[a-z]{1,4}\s*:/i
+
+/**
+ * Best-effort cleanup for malformed upstream markup fragments in definition text.
+ */
+export function sanitizeDefinitionText(text: string): string {
+  let cleaned = String(text ?? '').replace(/\u00A0/g, ' ').trim()
+  let prev = ''
+
+  // Repeatedly unwrap nested angle-bracket tags (Wadoku-style markup)
+  // until no more changes occur.
+  while (prev !== cleaned) {
+    prev = cleaned
+    cleaned = cleaned.replace(INLINE_TAG_PATTERN, '$1')
+    cleaned = cleaned.replace(MARKER_TAG_PATTERN, ' ')
+  }
+
+  cleaned = cleaned
+    // Handle malformed bare HW fragments like "HW n: Verlassen" or "{HW n:".
+    .replace(BARE_HW_FRAGMENT_PATTERN, '$1')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return cleaned
+}
+
+/**
+ * Detects residual import artifacts that should not be shipped to clients.
+ */
+export function isDefinitionArtifact(text: string): boolean {
+  const cleaned = text.trim()
+  if (cleaned.length === 0) return true
+  if (cleaned.includes('<') || cleaned.includes('>')) return true
+  if (RESIDUAL_HW_PATTERN.test(cleaned)) return true
+  return false
+}
+
 /**
  * Merge definitions - same text gets sources merged
  */
 export function mergeDefinitions(defs1: Definition[], defs2: Definition[]): Definition[] {
   const defMap = new Map<string, Definition>()
+  const upsert = (def: Definition): void => {
+    const text = sanitizeDefinitionText(def.text)
+    if (isDefinitionArtifact(text)) return
+
+    const normalized = normalizeText(text)
+    const existing = defMap.get(normalized)
+
+    if (existing) {
+      existing.sources = mergeArrays(existing.sources, def.sources)
+    } else {
+      defMap.set(normalized, {
+        text,
+        sources: mergeArrays([], def.sources),
+      })
+    }
+  }
 
   // Add all from defs1
   for (const def of defs1) {
-    const normalized = normalizeText(def.text)
-    defMap.set(normalized, {
-      text: def.text,
-      sources: [...def.sources],
-    })
+    upsert(def)
   }
 
   // Merge from defs2
   for (const def of defs2) {
-    const normalized = normalizeText(def.text)
-    const existing = defMap.get(normalized)
-
-    if (existing) {
-      // Same text - merge sources
-      existing.sources = mergeArrays(existing.sources, def.sources)
-    } else {
-      // New definition
-      defMap.set(normalized, {
-        text: def.text,
-        sources: [...def.sources],
-      })
-    }
+    upsert(def)
   }
 
   return Array.from(defMap.values())
@@ -373,6 +414,11 @@ export async function loadDict(path: string, lang: string): Promise<DictFile> {
  * Save dictionary file with updated stats
  */
 export async function saveDict(path: string, dict: DictFile): Promise<void> {
+  for (const entry of Object.values(dict.entries)) {
+    // Final guard to prevent malformed definition artifacts from being persisted.
+    entry.definitions = mergeDefinitions([], entry.definitions)
+  }
+
   // Update stats
   const entries = Object.values(dict.entries)
   dict.stats.entries = entries.length
