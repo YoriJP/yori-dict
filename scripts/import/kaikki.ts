@@ -406,8 +406,10 @@ async function bootstrapTraditionalChinese(mode: ImportMode): Promise<void> {
     clonedEntries[key] = structuredClone(entry)
   }
 
-  const stats = mergeDictEntries(zhTwDict.entries, clonedEntries, mode)
-  printStats(stats, mode)
+  // refresh means re-copy everything from zh-cn, equivalent to replace here
+  const effectiveMode = mode === 'refresh' ? 'replace' : mode
+  const stats = mergeDictEntries(zhTwDict.entries, clonedEntries, effectiveMode)
+  printStats(stats, effectiveMode)
 
   if (mode !== 'diff') {
     await saveDict(zhTwPath, zhTwDict)
