@@ -447,6 +447,27 @@ For more issues, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ---
 
+## Import Architecture
+
+Imports are split into two tiers:
+
+**Base importers** — create dictionary entries from scratch (must run first):
+- `bun run import:jmdict --lang en,de`  → data/en.json, data/de.json
+- `bun run import:kaikki`               → data/ko.json, data/zh-cn.json, data/zh-tw.json
+
+**Enrichment importers** — add data to existing entries (require base imports):
+- `bun run import:jlpt`       → adds JLPT levels to all languages
+- `bun run import:tatoeba`    → adds example sentences to all languages
+- `bun run import:wadoku`     → adds German definitions to de.json
+- `bun run import:wiktionary` → adds English definitions to en.json
+
+**Full rebuild:**
+```bash
+bun run rebuild:all
+```
+
+---
+
 ## License
 
 - **Code & Data**: CC-BY-SA-4.0 (see Data Sources table for individual source licenses)
