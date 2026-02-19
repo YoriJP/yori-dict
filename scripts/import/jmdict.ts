@@ -19,8 +19,10 @@ import {
   loadDict,
   saveDict,
   mergeDictEntries,
+  refreshDictSource,
   printStats,
   createEmptyDict,
+  mergeArrays,
 } from './base'
 
 // ============================================================================
@@ -179,11 +181,16 @@ async function downloadAndExtract(url: string, cachePath: string): Promise<JMdic
   // Extract using unzip
   const proc = Bun.spawn(['unzip', '-p', zipPath], { stdout: 'pipe' })
   const text = await new Response(proc.stdout).text()
-  await proc.exited
+  const exitCode = await proc.exited
 
-  // Clean up ZIP and cache JSON
+  // Clean up ZIP regardless of outcome
   const { unlinkSync } = await import('fs')
   unlinkSync(zipPath)
+
+  if (exitCode !== 0) {
+    throw new Error(`unzip failed with exit code ${exitCode}`)
+  }
+
   await Bun.write(cachePath, text)
   console.log(`  Cached to: ${cachePath}`)
 
@@ -208,14 +215,18 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
     }
   }
 
-  // Collect definitions for this language
+  // Collect definitions for this language, deduplicating by normalized text
   const definitions: { text: string; sources: string[] }[] = []
+  const seenDefs = new Set<string>()
   const includeUntaggedGloss = lang === 'en'
   for (const sense of entry.sense) {
     for (const gloss of sense.gloss) {
       // Untagged glosses in JMdict are effectively English defaults.
       if (!gloss.lang && !includeUntaggedGloss) continue
       if (gloss.lang && gloss.lang !== targetGlossLang) continue
+      const normalized = gloss.text.toLowerCase().trim()
+      if (seenDefs.has(normalized)) continue
+      seenDefs.add(normalized)
       definitions.push({
         text: gloss.text,
         sources: ['jmdict'],
@@ -226,9 +237,10 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
   return {
     word,
     reading,
-    partOfSpeech: Array.from(posSet),
+    partOfSpeech: Array.from(posSet).map((value) => ({ value, sources: ['jmdict'] })),
     common: isCommon,
-    jlpt: [], // JMdict simplified doesn't include JLPT level
+    commonSources: isCommon ? ['jmdict'] : [],
+    jlpt: [],
     definitions,
     examples: [],
   }
@@ -254,13 +266,17 @@ function convertJMdictToDict(jmdict: JMdictFile, lang: string): Record<string, D
         }
       }
       // Merge POS
-      for (const pos of entry.partOfSpeech) {
-        if (!existing.partOfSpeech.includes(pos)) {
-          existing.partOfSpeech.push(pos)
+      for (const posEntry of entry.partOfSpeech) {
+        const ep = existing.partOfSpeech.find((p) => p.value === posEntry.value)
+        if (ep) {
+          ep.sources = mergeArrays(ep.sources, posEntry.sources)
+        } else {
+          existing.partOfSpeech.push(posEntry)
         }
       }
       // Preserve common if any duplicate marks it common
       existing.common = existing.common || entry.common
+      existing.commonSources = mergeArrays(existing.commonSources, entry.commonSources)
     } else {
       entries[key] = entry
     }
@@ -309,10 +325,17 @@ async function importJMdict(lang: string, mode: ImportMode): Promise<void> {
   console.log(`  Existing entries: ${existingCount.toLocaleString()}`)
 
   // Merge
-  const stats = mergeDictEntries(dict.entries, sourceEntries, mode)
-
-  // Print stats
-  printStats(stats, mode)
+  let stats: { added: number; updated: number; unchanged: number } | { added: number; updated: number; removed: number }
+  if (mode === 'refresh') {
+    stats = refreshDictSource(dict.entries, sourceEntries, 'jmdict')
+    console.log('\n=== Import Statistics ===')
+    console.log(`  New entries: ${stats.added.toLocaleString()}`)
+    console.log(`  Updated entries: ${stats.updated.toLocaleString()}`)
+    console.log(`  Removed entries: ${'removed' in stats ? stats.removed.toLocaleString() : 0}`)
+  } else {
+    stats = mergeDictEntries(dict.entries, sourceEntries, mode)
+    printStats(stats as { added: number; updated: number; unchanged: number }, mode)
+  }
 
   // Save if not diff mode
   if (mode !== 'diff') {
@@ -354,6 +377,7 @@ Options:
             merge   - Add new entries, merge definitions
             diff    - Preview changes, no modifications
             replace - Replace all JMdict entries (dangerous!)
+            refresh - Strip and re-import only JMdict data
 
 Examples:
   bun run import:jmdict --lang en
@@ -365,9 +389,9 @@ Examples:
   }
 
   // Validate mode
-  if (!['merge', 'diff', 'replace'].includes(mode)) {
+  if (!['merge', 'diff', 'replace', 'refresh'].includes(mode)) {
     console.error(`Invalid mode: ${mode}`)
-    console.error('Supported modes: merge, diff, replace')
+    console.error('Supported modes: merge, diff, replace, refresh')
     process.exit(1)
   }
 
@@ -380,7 +404,7 @@ Examples:
     }
   }
 
-  console.log('=== JMdict Importer ===')
+  console.log('=== [Base] JMdict Importer ===')
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
 

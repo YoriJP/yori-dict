@@ -1,7 +1,10 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { lookupWord, initSchema } from './db'
-import { SUPPORTED_LANGUAGES, type Language } from './types'
+import {
+  SUPPORTED_LANGUAGES,
+  normalizeLanguage,
+} from './types'
 
 const app = new Hono()
 
@@ -20,7 +23,8 @@ app.get('/health', (c) => {
 app.get('/v1/lookup', (c) => {
   // Get query parameters
   const word = c.req.query('word')
-  const lang = c.req.query('lang') || 'en'
+  const rawLang = c.req.query('lang')
+  const lang = rawLang ? normalizeLanguage(rawLang) : 'en'
 
   // Validate word parameter
   if (!word || word.trim() === '') {
@@ -28,7 +32,7 @@ app.get('/v1/lookup', (c) => {
   }
 
   // Validate language parameter
-  if (!SUPPORTED_LANGUAGES.includes(lang as Language)) {
+  if (!lang) {
     return c.json(
       { error: `Invalid language. Supported: ${SUPPORTED_LANGUAGES.join(', ')}` },
       400
@@ -36,7 +40,7 @@ app.get('/v1/lookup', (c) => {
   }
 
   // Lookup word
-  const result = lookupWord(word.trim(), lang as Language)
+  const result = lookupWord(word.trim(), lang)
 
   if (!result) {
     return c.json({ error: 'Word not found' }, 404)

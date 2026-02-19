@@ -72,7 +72,7 @@ function parseArgs(): AddOptions | null {
       case '--help':
       case '-h':
         printHelp()
-        return null
+        process.exit(0)
     }
   }
 
@@ -94,7 +94,7 @@ Usage:
   bun run add --lang <lang> --word <word> --reading <reading> [options]
 
 Required:
-  --lang      Language code (en, de, zh-TW, etc.)
+  --lang      Language code (en, de, ko, zh-cn, zh-tw)
   --word      Japanese word (kanji or kana)
   --reading   Hiragana reading
 
@@ -136,9 +136,10 @@ async function main(): Promise<void> {
   const newEntry: DictEntry = {
     word: opts.word,
     reading: opts.reading,
-    partOfSpeech: opts.pos ?? [],
+    partOfSpeech: (opts.pos ?? []).map((value) => ({ value, sources: ['manual'] })),
     common: opts.common || false,
-    jlpt: opts.jlpt ? [opts.jlpt] : [],
+    commonSources: opts.common ? ['manual'] : [],
+    jlpt: opts.jlpt ? [{ level: opts.jlpt, sources: ['manual'] }] : [],
     definitions: opts.def
       ? opts.def.map((text) => ({ text, sources: ['manual'] }))
       : [],
@@ -178,9 +179,9 @@ async function main(): Promise<void> {
   console.log('\nEntry:')
   console.log(`  Word: ${entry.word}`)
   console.log(`  Reading: ${entry.reading}`)
-  console.log(`  POS: ${entry.partOfSpeech.join(', ') || '(none)'}`)
+  console.log(`  POS: ${entry.partOfSpeech.map((p) => p.value).join(', ') || '(none)'}`)
   console.log(`  Common: ${entry.common}`)
-  console.log(`  JLPT: ${entry.jlpt.length > 0 ? entry.jlpt.join(', ') : '(none)'}`)
+  console.log(`  JLPT: ${entry.jlpt.length > 0 ? entry.jlpt.map((j) => `N${j.level}`).join(', ') : '(none)'}`)
   console.log(`  Definitions:`)
   for (const def of entry.definitions) {
     console.log(`    - "${def.text}" [${def.sources.join(', ')}]`)

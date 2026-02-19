@@ -6,7 +6,8 @@ dict.sqlite
 *.sqlite-wal
 *.sqlite-shm
 
-# Raw data files (large)
+# Downloaded source data (re-fetchable via import scripts)
+data/cache/
 data/raw/
 
 # Build output

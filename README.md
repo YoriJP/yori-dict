@@ -1,62 +1,28 @@
-# Yori Dict
+# Yori Dict 🈳
 
-Multilingual Japanese dictionary API with verb conjugations.
+[![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=for-the-badge&logo=bun&logoColor=white)](https://bun.sh)
+[![Hono](https://img.shields.io/badge/Hono-E36002?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev)
+[![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
+[![License](https://img.shields.io/badge/License-CC--BY--SA--4.0-green.svg?style=for-the-badge)](LICENSE)
 
-## Features
+**Fast, multilingual Japanese dictionary API with automatic verb conjugations.**
 
-- **Fast lookups** - SQLite with indexed queries, ~1ms response time
-- **Multilingual** - English, German (extensible to Chinese, Korean)
-- **Conjugations** - Auto-generated for ichidan, godan, suru, kuru verbs and i-adjectives
-- **Romaji conversion** - Automatic romanization via wanakana
-- **CORS enabled** - Ready for browser/frontend integration
-- **Two-stage pipeline** - Import to JSON, build to SQLite (debuggable, incremental)
+- ⚡ **~1ms response time** - SQLite with optimized indexes
+- 🌍 **Multilingual** - English, German, Korean, Chinese (Simplified & Traditional)
+- 🔤 **Auto conjugations** - ichidan, godan, suru, kuru verbs + i-adjectives
+- 📝 **Example sentences** - 138k+ curated examples from Tatoeba
+- 🎯 **JLPT levels** - N5-N1 tagged for study progress
 
-## Tech Stack
+---
 
-| Component | Technology |
-|-----------|------------|
-| Runtime | [Bun](https://bun.sh) |
-| Framework | [Hono](https://hono.dev) |
-| Database | SQLite (via bun:sqlite) |
-| Data Source | [JMdict-simplified](https://github.com/scriptin/jmdict-simplified) |
-
-## Quick Start
+## Quick Try
 
 ```bash
-# Install dependencies
-bun install
-
-# Import dictionary data (downloads ~50MB per language)
-bun run import:jmdict --lang en,de
-
-# Build SQLite database
-bun run build:db
-
-# Start server
-bun run dev
-```
-
-Server runs at http://localhost:3000
-
-## API Reference
-
-### `GET /v1/lookup`
-
-Lookup a Japanese word by kanji or reading.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `word` | string | required | Japanese word (kanji, hiragana, or katakana) |
-| `lang` | string | `en` | Target language: `en`, `de`, `zh-TW`, `zh-CN`, `ko` |
-
-**Example:**
-
-```bash
-curl "http://localhost:3000/v1/lookup?word=食べる&lang=en"
+# One-liner to start
+curl -s "https://api.yori-dict.com/v1/lookup?word=食べる&lang=en" | jq
 ```
 
 **Response:**
-
 ```json
 {
   "word": "食べる",
@@ -71,118 +37,262 @@ curl "http://localhost:3000/v1/lookup?word=食べる&lang=en"
     "past": "たべた",
     "te": "たべて"
   },
-  "examples": []
+  "examples": [
+    {"japanese": "毎朝食べます", "translation": "I eat every morning"}
+  ]
+}
+```
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- [Bun](https://bun.sh) v1.0+ (`curl -fsSL https://bun.sh/install | bash`)
+- ~500MB disk space
+- Git LFS (`git lfs install`)
+
+### Install & Run
+
+```bash
+# Clone and install
+git clone https://github.com/user/yori-dict.git
+cd yori-dict
+bun install
+
+# Option A: Use existing data (fastest)
+bun run data:pull    # Download from Git LFS
+bun run build:db     # Build SQLite (~10s)
+bun run dev          # Start server
+
+# Option B: Build from scratch (fresh data)
+bun run rebuild:all  # base imports + enrichment + build:db
+bun run dev
+```
+
+Server runs at `http://localhost:3000`
+
+---
+
+## API Reference
+
+### `GET /v1/lookup`
+
+Lookup a Japanese word by kanji or reading.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `word` | string | ✅ | Japanese word (kanji, hiragana, or katakana) |
+| `lang` | string | ❌ | Target language: `en`, `de`, `ko`, `zh-cn`, `zh-tw` (aliases `zh-CN`, `zh-TW` also accepted; default: `en`) |
+
+**Examples:**
+
+```bash
+# Basic lookup
+curl "localhost:3000/v1/lookup?word=日本語"
+
+# With language
+curl "localhost:3000/v1/lookup?word=食べる&lang=de"
+
+# Reading works too
+curl "localhost:3000/v1/lookup?word=たべる"
+```
+
+**Response Schema:**
+```json
+{
+  "word": "string",           // Kanji form
+  "reading": "string",        // Hiragana reading
+  "romaji": "string",         // Romanized reading
+  "partOfSpeech": ["string"], // Array of POS tags
+  "definitions": ["string"],  // Array of meanings
+  "conjugations": {           // Optional - only for verbs/adjectives
+    "dictionary": "string",
+    "polite": "string",
+    "negative": "string",
+    "past": "string",
+    "te": "string"
+  },
+  "examples": [               // Optional - may be empty
+    {"japanese": "string", "translation": "string"}
+  ]
 }
 ```
 
 **Errors:**
 
-| Status | Response |
-|--------|----------|
-| 400 | `{"error": "Missing required parameter: word"}` |
-| 400 | `{"error": "Invalid language. Supported: en, de, ..."}` |
-| 404 | `{"error": "Word not found"}` |
-
-**Examples behavior:**
-
-- API responses de-duplicate examples by `(japanese, translation)`
-- If the same example exists with multiple DB sources, only one example item is returned
+| Status | Response | When |
+|--------|----------|------|
+| 400 | `{"error": "Missing required parameter: word"}` | No word provided |
+| 400 | `{"error": "Invalid language..."}` | Unsupported language code |
+| 404 | `{"error": "Word not found"}` | Word not in dictionary |
 
 ### `GET /health`
 
-Health check endpoint. Returns `{"status": "ok"}`.
+Health check. Returns `{"status": "ok"}`.
+
+---
+
+## Data Sources & Coverage
+
+| Language | Entries | Examples | Sources |
+|----------|---------|----------|---------|
+| **English** | ~214k | ~64k | JMdict, Wiktionary (+55k defs), Tatoeba |
+| **German** | ~128k | ~45k | JMdict, Wadoku (+2.5k defs), Tatoeba |
+| **Chinese (CN)** | ~26k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Chinese (TW)** | ~26k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Korean** | ~5k | ~1.7k | Kaikki, Tatoeba (`jpn-kor`) |
+
+**Source Details:**
+
+| Source | Data | License | Imported Via |
+|--------|------|---------|--------------|
+| [JMdict-simplified](https://github.com/scriptin/jmdict-simplified) | Base dictionary | CC-BY-SA-4.0 | `import:jmdict` |
+| [Tatoeba](https://tatoeba.org) via [ManyThings](https://manythings.org/anki/) and [raw exports](https://downloads.tatoeba.org/exports/per_language/) | Example sentences | CC-BY-2.0 | `import:tatoeba` |
+| [Wiktionary](https://kaikki.org) | Additional definitions | CC-BY-SA-3.0 | `import:wiktionary` |
+| [Kaikki](https://kaikki.org) (kowiktionary/zhwiktionary) | Korean/Chinese definitions | CC-BY-SA-3.0 | `import:kaikki` |
+| [Wadoku](https://github.com/WaDoku/WaDokuJT-Data) | German definitions | CC-BY-SA-3.0 | `import:wadoku` |
+| [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) | JLPT N5-N1 levels | Public Domain | `import:jlpt` |
 
 ---
 
 ## Architecture
 
-### Data Pipeline Overview
-
 ```
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│  STAGE 1        │      │  STAGE 2        │      │  STAGE 3        │
-│  IMPORT         │ ──▶  │  BUILD          │ ──▶  │  SERVE          │
-│                 │      │                 │      │                 │
-│  JMdict JSON    │      │  data/*.json    │      │  dict.sqlite    │
-│  → data/en.json │      │  → dict.sqlite  │      │  → API response │
-└─────────────────┘      └─────────────────┘      └─────────────────┘
-     50MB/lang              ~200MB JSON            ~80MB SQLite
+┌─────────────────────────────────────────────────────────────────┐
+│                        DATA PIPELINE                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
+│   │   IMPORT     │    │   BUILD      │    │   SERVE      │     │
+│   │              │    │              │    │              │     │
+│   │ JMdict JSON  │───▶│ data/*.json  │───▶│ dict.sqlite  │     │
+│   │ Kaikki JSONL │    │              │    │              │     │
+│   │ Tatoeba TSV  │    │ ~130MB JSON  │    │ ~131MB SQLite│     │
+│   │ Wiktionary   │    │              │    │              │     │
+│   │ Wadoku/JLPT  │    │              │    │ ~1ms lookup  │     │
+│   └──────────────┘    └──────────────┘    └──────────────┘     │
+│         ▲                    ▲                   ▲              │
+│         │                    │                   │              │
+│    ┌────┴────┐          ┌────┴────┐        ┌────┴────┐         │
+│    │ Scripts │          │ Scripts │        │   API   │         │
+│    │ import/*│          │build-db │        │  Hono   │         │
+│    └─────────┘          └─────────┘        └─────────┘         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Why Two Stages?
+### Why Two-Stage Pipeline?
 
-| Benefit | Description |
-|---------|-------------|
-| **Debuggable** | Inspect `data/en.json` to verify import correctness |
-| **Incremental** | Re-run `build:db` without re-downloading data |
-| **Multi-source** | Merge data from JMdict, Wadoku, manual entries into same JSON |
-| **Diffable** | Use `--mode diff` to preview changes before applying |
+| Stage | Benefit |
+|-------|---------|
+| **Import** | Download once, cache raw data, convert to unified JSON format |
+| **Build** | Fast SQLite generation, supports incremental updates, debuggable |
+
+The intermediate JSON format allows:
+- **Multi-source merging** - Combine JMdict + Wiktionary + manual entries
+- **Language-specific builds** - Build only languages you need
+- **Diff support** - Preview changes with `--mode diff` before applying
+- **Git LFS storage** - Track dictionary data in version control
+
+### Database Schema
+
+```sql
+-- Core word data (shared across languages)
+CREATE TABLE words (
+  id TEXT PRIMARY KEY,          -- "word:reading" format
+  word TEXT NOT NULL,           -- Kanji form
+  reading TEXT NOT NULL,        -- Hiragana
+  part_of_speech TEXT NOT NULL, -- JSON array
+  common INTEGER DEFAULT 0,     -- 1 = common word flag
+  jlpt TEXT                     -- JSON array [5,4,3,2,1]
+);
+
+-- Per-language translations
+CREATE TABLE translations (
+  word_id TEXT NOT NULL,
+  lang TEXT NOT NULL,           -- "en", "de", etc.
+  definitions TEXT NOT NULL,    -- JSON array
+  sources TEXT NOT NULL,        -- ["jmdict", "wiktionary"]
+  PRIMARY KEY (word_id, lang)
+);
+
+-- Example sentences
+CREATE TABLE examples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  word_id TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  japanese TEXT NOT NULL,
+  translation TEXT NOT NULL,
+  source TEXT NOT NULL
+);
+```
+
+---
+
+## Development
 
 ### Project Structure
 
 ```
 yori-dict/
 ├── src/
-│   ├── index.ts          # Hono API server (routes, middleware)
-│   ├── db.ts             # SQLite queries & connection management
-│   ├── types.ts          # TypeScript types (API, DB rows, etc.)
-│   └── conjugator.ts     # Verb/adjective conjugation engine
+│   ├── index.ts          # Hono API server
+│   ├── db.ts             # SQLite queries
+│   ├── types.ts          # TypeScript types
+│   └── conjugator.ts     # Verb conjugation engine
 ├── scripts/
 │   ├── import/
-│   │   ├── base.ts       # Shared types, merge logic, file I/O
-│   │   └── jmdict.ts     # JMdict importer
-│   ├── build-db.ts       # Compiles JSON → SQLite
-│   ├── pull-data.ts      # Materializes Git LFS JSON data files
-│   └── add.ts            # CLI for manual entries
+│   │   ├── base.ts       # Shared types & merge logic
+│   │   ├── jmdict.ts     # JMdict importer
+│   │   ├── kaikki.ts     # Korean/Chinese definitions
+│   │   ├── jlpt.ts       # JLPT level importer
+│   │   ├── tatoeba.ts    # Example sentences
+│   │   ├── wadoku.ts     # German definitions
+│   │   └── wiktionary.ts # English definitions enrichment
+│   ├── build-db.ts       # JSON → SQLite compiler
+│   ├── pull-data.ts      # Git LFS materializer
+│   ├── verify-dict.ts    # Dictionary quality checker
+│   ├── cleanup-dict.ts   # Dictionary cleanup (dedup, fix artifacts)
+│   └── add.ts            # Manual entry CLI
+├── tests/
+│   ├── api.test.ts            # API endpoint tests
+│   ├── conjugator.test.ts     # Conjugation engine tests
+│   ├── import-base.test.ts    # Import merge logic tests
+│   ├── import-kaikki.test.ts  # Kaikki parser tests
+│   └── build-db.test.ts       # DB build pipeline tests
 ├── data/
-│   ├── en.json           # English dictionary (~215k entries)
-│   ├── de.json           # German dictionary (~128k entries)
-│   └── cache/            # Downloaded JMdict files (gitignored)
-├── Dockerfile            # Multi-stage production build
+│   ├── en.json           # English dictionary (Git LFS)
+│   ├── de.json           # German dictionary (Git LFS)
+│   ├── ko.json           # Korean dictionary (Git LFS)
+│   ├── zh-cn.json        # Chinese Simplified dictionary (Git LFS)
+│   ├── zh-tw.json        # Chinese Traditional dictionary (Git LFS)
+│   └── cache/            # Downloaded raw data (gitignored)
 └── dict.sqlite           # Built database (gitignored)
 ```
 
----
-
-## Development Guide
-
-### Prerequisites
-
-- [Bun](https://bun.sh) v1.0+
-- ~500MB disk space (for dictionary data)
-
-### Setup
-
-```bash
-git clone https://github.com/user/yori-dict.git
-cd yori-dict
-bun install
-```
-
-### Scripts
+### Available Scripts
 
 | Command | Description |
 |---------|-------------|
 | `bun run dev` | Start dev server with hot reload |
 | `bun run start` | Start production server |
 | `bun run test` | Run test suite |
-| `bun run import:jmdict` | Import JMdict data to JSON |
-| `bun run data:pull` | Materialize `data/*.json` from Git LFS |
+| `bun run rebuild:all` | Full rebuild: base imports + enrichment + build:db |
+| `bun run import:base` | Run all base importers (jmdict + kaikki, `--mode replace`) |
+| `bun run import:enrichment` | Run all enrichment importers (jlpt, tatoeba, wadoku, wiktionary) |
+| `bun run import:jmdict --lang en,de` | Import JMdict base dictionary |
+| `bun run import:kaikki` | Import Korean/Chinese definitions from Kaikki |
+| `bun run import:jlpt` | Import JLPT N5-N1 levels |
+| `bun run import:tatoeba` | Import example sentences (all languages) |
+| `bun run import:wadoku` | Import Wadoku German definitions |
+| `bun run import:wiktionary` | Import Wiktionary definitions |
 | `bun run build:db` | Build SQLite from JSON files |
+| `bun run verify:dict <path>` | Check dictionary for duplicates and artifacts |
+| `bun run cleanup:dict <path>` | Fix duplicates and artifacts (add `--apply` to write) |
+| `bun run data:pull` | Pull dictionary files from Git LFS |
 | `bun run add` | Add manual dictionary entries |
-
-### Running Tests
-
-```bash
-# Run all tests
-bun test
-
-# Run specific test file
-bun test tests/conjugator.test.ts
-
-# Watch mode
-bun test --watch
-```
 
 ### Environment Variables
 
@@ -193,358 +303,31 @@ bun test --watch
 
 ---
 
-## Extending the Project
-
-### Adding a New Language
-
-1. **Check JMdict support** - See [available languages](https://github.com/scriptin/jmdict-simplified/releases)
-
-2. **Add language mapping** in `scripts/import/jmdict.ts`:
-
-```typescript
-const LANG_MAP: Record<string, string> = {
-  eng: 'en',
-  ger: 'de',
-  fra: 'fr',  // Add French
-}
-
-const REVERSE_LANG_MAP: Record<string, string> = {
-  en: 'eng',
-  de: 'ger',
-  fr: 'fra',  // Add French
-}
-```
-
-3. **Update supported languages** in `src/types.ts`:
-
-```typescript
-export type Language = 'en' | 'de' | 'fr' | 'zh-TW' | 'zh-CN' | 'ko'
-export const SUPPORTED_LANGUAGES: Language[] = ['en', 'de', 'fr', ...]
-```
-
-4. **Import and build**:
-
-```bash
-bun run import:jmdict --lang fr
-bun run build:db
-```
-
-### Adding a New Data Source
-
-Create a new importer in `scripts/import/`. The importer should:
-
-1. Download/load source data
-2. Convert to `DictEntry` format
-3. Use `mergeDictEntries()` to combine with existing data
-
-`mergeDictEntries()` modes:
-
-- `merge`: add missing keys and merge fields for existing keys
-- `diff`: preview `added/updated/unchanged` without mutating entries or writing files
-- `replace`: full snapshot sync (remove stale keys not present in source, then overwrite/add source keys)
-
-**Example structure:**
-
-```typescript
-// scripts/import/wadoku.ts
-import { type DictEntry, loadDict, saveDict, mergeDictEntries } from './base'
-
-async function importWadoku(lang: string): Promise<void> {
-  // 1. Load source data
-  const sourceData = await fetchWadokuData()
-
-  // 2. Convert to DictEntry format
-  const entries: Record<string, DictEntry> = {}
-  for (const item of sourceData) {
-    const key = `${item.word}:${item.reading}`
-    entries[key] = {
-      word: item.word,
-      reading: item.reading,
-      partOfSpeech: item.pos,
-      common: false,
-      jlpt: [],
-      definitions: [{ text: item.meaning, sources: ['wadoku'] }],
-      examples: item.example
-        ? [{ ja: item.example.ja, text: item.example.text, sources: ['wadoku'] }]
-        : [],
-    }
-  }
-
-  // 3. Merge with existing data
-  const dict = await loadDict(`./data/${lang}.json`, lang)
-  mergeDictEntries(dict.entries, entries, 'merge')
-  await saveDict(`./data/${lang}.json`, dict)
-}
-```
-
-### Adding Conjugation Forms
-
-Edit `src/conjugator.ts` to add new forms:
-
-```typescript
-// Add to Conjugations interface in src/types.ts
-export interface Conjugations {
-  dictionary: string
-  polite: string
-  negative: string
-  past: string
-  te: string
-  potential: string   // Add new form
-  passive: string     // Add new form
-}
-
-// Add conjugation logic in src/conjugator.ts
-function conjugateIchidan(reading: string): Conjugations {
-  const stem = reading.slice(0, -1)
-  return {
-    // ... existing forms
-    potential: stem + 'られる',
-    passive: stem + 'られる',
-  }
-}
-```
-
----
-
-## Data Formats
-
-### Intermediate JSON (`data/{lang}.json`)
-
-```json
-{
-  "version": "1.0.0",
-  "lang": "en",
-  "updatedAt": "2024-01-01T00:00:00.000Z",
-  "stats": {
-    "entries": 214926,
-    "withExamples": 0,
-    "sources": { "jmdict": 214926 }
-  },
-  "entries": {
-    "食べる:たべる": {
-      "word": "食べる",
-      "reading": "たべる",
-      "partOfSpeech": ["ichidan verb", "transitive verb"],
-      "common": true,
-      "jlpt": [5],
-      "definitions": [
-        { "text": "to eat", "sources": ["jmdict"] }
-      ],
-      "examples": [
-        {
-          "ja": "毎朝食べます",
-          "text": "I eat every morning",
-          "sources": ["manual", "tatoeba"]
-        }
-      ]
-    }
-  }
-}
-```
-
-**Key format:** `{word}:{reading}` ensures uniqueness for homonyms.
-
-**Example merge semantics:**
-
-- Examples are deduped by `ja + text`
-- If the same `ja + text` appears from multiple importers, `sources` arrays are merged
-- Legacy example shape with a single `source` field is normalized on load
-- During DB build, one row is inserted per source attribution
-- During API lookup, rows are de-duplicated by `(japanese, translation)` before response mapping
-
-### Database Schema
-
-```sql
--- Shared word data (language-independent)
-CREATE TABLE words (
-  id TEXT PRIMARY KEY,          -- "食べる:たべる"
-  word TEXT NOT NULL,           -- "食べる"
-  reading TEXT NOT NULL,        -- "たべる"
-  part_of_speech TEXT NOT NULL, -- JSON array
-  common INTEGER DEFAULT 0,     -- 1 = common word
-  jlpt TEXT                     -- JSON array of levels, e.g. [5]
-);
-
--- Translations per language
-CREATE TABLE translations (
-  word_id TEXT NOT NULL,        -- FK → words.id
-  lang TEXT NOT NULL,           -- "en", "de", etc.
-  definitions TEXT NOT NULL,    -- JSON array
-  sources TEXT NOT NULL,        -- JSON array: ["jmdict", "manual"]
-  PRIMARY KEY (word_id, lang)
-);
-
--- Example sentences
-CREATE TABLE examples (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  word_id TEXT NOT NULL,        -- FK → words.id
-  lang TEXT NOT NULL,
-  japanese TEXT NOT NULL,
-  translation TEXT NOT NULL,
-  source TEXT NOT NULL          -- one row per source attribution (lookup de-duplicates by pair)
-);
-
--- Indexes
-CREATE INDEX idx_words_word ON words(word);
-CREATE INDEX idx_words_reading ON words(reading);
-```
-
----
-
-## Deployment
-
-### Docker
-
-Before building the image, materialize Git LFS dictionary files on the host:
-
-```bash
-bun run data:pull
-```
-
-```bash
-bun run docker:build   # Build image
-bun run docker:run     # Run container
-```
-
-Docker build does not fetch Git LFS blobs by itself; it only copies local files into the image context.
-If Docker build reports Git LFS pointer files, run `bun run data:pull` first on host.
-
-For CI/CD, ensure your checkout step pulls LFS objects before running `docker build`.
-
-The Dockerfile uses multi-stage builds:
-1. **Builder**: Install deps → build SQLite from JSON
-2. **Production**: Copy runtime deps + database only (~100MB image)
-
-### Railway
-
-Deployments are handled via GitHub Actions using `railway up`, which builds the Docker image locally (where Git LFS files are available) and pushes directly to Railway.
-
-**Setup:**
-
-1. Get Railway API token: Railway Dashboard → Account Settings → Tokens
-2. Get Project ID: Railway Dashboard → Your Project → Settings
-3. Get Service ID: Railway Dashboard → Your Service → Settings (copy from URL)
-4. Add GitHub repository secrets:
-   - `RAILWAY_TOKEN` - your Railway API token
-   - `RAILWAY_PROJECT_ID` - your project ID
-   - `RAILWAY_SERVICE_ID` - your service ID
-5. Disconnect GitHub repo in Railway Dashboard (to prevent duplicate builds)
-6. Create a GitHub release to trigger deployment
-
-**Workflow behavior:**
-
-- Triggers on GitHub release or manual dispatch
-- Checks out code with Git LFS files (real JSON, not pointers)
-- Builds Docker image on GitHub Actions runner
-- Pushes built image directly to Railway via `railway up`
-
-See `.github/workflows/docker.yml` for the workflow configuration.
-
-### Fly.io / Render
-
-1. Connect your repository
-2. Set build command: `bun run build:db`
-3. Set start command: `bun run start`
-4. Set `PORT` environment variable (usually auto-set)
-
----
-
-## Troubleshooting
-
-### Import mode behavior
-
-`import:jmdict` supports three modes:
-
-- `--mode merge` (default): merge new data into existing `data/{lang}.json`
-- `--mode diff`: preview changes only (no file writes)
-- `--mode replace`: full replace for that language (prunes stale keys, then writes source snapshot)
-
-### Language filtering behavior (JMdict)
-
-JMdict glosses are filtered by requested language during import:
-
-- `en`: accepts `eng` glosses and untagged glosses (JMdict default English)
-- non-`en` (for example `de`): accepts only matching tagged glosses (for example `ger`)
-
-This avoids mixed-language definitions in non-English files.
-
-### "No language files found"
-
-```bash
-# You need to import data first
-bun run import:jmdict --lang en
-bun run build:db
-```
-
-### "Word not found" for common words
-
-Check if the word exists in the database:
-
-```bash
-sqlite3 dict.sqlite "SELECT * FROM words WHERE word = '食べる'"
-```
-
-If missing, re-import:
-
-```bash
-bun run import:jmdict --lang en --mode replace
-bun run build:db
-```
-
-### Import fails with network error
-
-JMdict files are cached in `data/cache/`. Delete cache to re-download:
-
-```bash
-rm -rf data/cache
-bun run import:jmdict --lang en
-```
-
-### `Build failed: SyntaxError: Failed to parse JSON`
-
-This usually means `data/{lang}.json` is still a Git LFS pointer file, not the real JSON blob.
-
-```bash
-# materialize LFS-tracked language files
-bun run data:pull
-
-# rebuild database
-bun run build:db
-```
-
-### Database locked errors
-
-Ensure only one process accesses the database. In production, use `DATABASE_PATH` to point to a persistent volume.
-
-### `SQLiteError: no such table: main.words` during `build:db`
-
-If SQLite sidecar files are left over from an interrupted run, clean and rebuild:
-
-```bash
-rm -f dict.sqlite dict.sqlite-shm dict.sqlite-wal
-bun run build:db
-```
-
----
-
 ## Contributing
 
-Contributions are welcome! Here's how to help:
+### Setup for Development
 
-### Good First Issues
+```bash
+git clone https://github.com/user/yori-dict.git
+cd yori-dict
+git lfs install
+bun install
+bun run data:pull
+bun run build:db
+bun run dev
+```
 
-- Add support for a new language (French, Spanish, Russian)
-- Add more conjugation forms (potential, passive, causative)
-- Improve romaji conversion for edge cases
-- Add example sentences from Tatoeba
+### Running Tests
 
-### Pull Request Process
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/add-french`
-3. Make your changes
-4. Run tests: `bun test`
-5. Submit a PR with a clear description
+```bash
+bun test                        # Run all tests
+bun test --watch                # Watch mode
+bun test tests/conjugator.test  # Conjugation engine
+bun test tests/api.test         # API endpoints
+bun test tests/import-base      # Import merge logic
+bun test tests/import-kaikki    # Kaikki parser
+bun test tests/build-db         # DB build pipeline
+```
 
 ### Code Style
 
@@ -553,22 +336,155 @@ Contributions are welcome! Here's how to help:
 - 2-space indentation
 - Descriptive variable names
 
+### Adding a New Language
+
+1. Check source support first:
+   `en/de`: [scriptin/jmdict-simplified releases](https://github.com/scriptin/jmdict-simplified/releases)
+   `ko/zh`: [Kaikki index](https://kaikki.org)
+2. Update language definitions and aliases in `src/types.ts`.
+3. Add importer mapping in the relevant import script (`scripts/import/jmdict.ts` or `scripts/import/kaikki.ts`).
+4. Add example sentence support in `scripts/import/tatoeba.ts` if Tatoeba has a corpus for the language.
+5. Import and build:
+   ```bash
+   bun run rebuild:all
+   ```
+
 ---
 
-## Data Coverage
+## Deployment
 
-| Language | Entries | Coverage | Source |
-|----------|---------|----------|--------|
-| English | 214,926 | 100% | JMdict |
-| German | 127,994 | 59.6% | JMdict |
+### Docker
+
+```bash
+# Materialize LFS files first
+bun run data:pull
+
+# Build and run
+bun run docker:build
+bun run docker:run
+```
+
+**Note:** Docker build requires LFS files materialized on host. The Dockerfile uses multi-stage builds for a ~100MB production image.
+
+### Railway
+
+Deployments use GitHub Actions with `railway up`:
+
+1. Add repository secrets:
+   - `RAILWAY_TOKEN`
+   - `RAILWAY_SERVICE_ID`
+2. Disconnect GitHub repo in Railway Dashboard
+3. Create a GitHub release to trigger deployment
+
+See `.github/workflows/railway-deployment.yml`
+
+### Other Platforms (Fly.io, Render)
+
+1. Set build command: `bun run build:db`
+2. Set start command: `bun run start`
+3. Ensure Git LFS files are pulled during build
+
+---
+
+## Troubleshooting
+
+<details>
+<summary><b>Build failed: "No language files found"</b></summary>
+
+You need to import data first:
+```bash
+bun run import:jmdict --lang en
+bun run build:db
+```
+</details>
+
+<details>
+<summary><b>Build failed: "SyntaxError: Failed to parse JSON"</b></summary>
+
+The JSON files are still Git LFS pointers:
+```bash
+bun run data:pull   # Materialize actual files
+bun run build:db
+```
+</details>
+
+<details>
+<summary><b>Word not found for common words</b></summary>
+
+Check the database:
+```bash
+sqlite3 dict.sqlite "SELECT * FROM words WHERE word = '食べる'"
+```
+
+If missing, re-import:
+```bash
+bun run import:jmdict --lang en --mode replace
+bun run build:db
+```
+</details>
+
+<details>
+<summary><b>Import modes explained</b></summary>
+
+All import scripts support these modes via `--mode <mode>`:
+- `merge` (default): Add new entries/definitions, merge with existing
+- `diff`: Preview changes without writing files
+- `refresh`: Strip all data from a source and re-import it
+- `replace`: Full replace — remove stale keys, then write fresh (base importers only)
+
+Example:
+```bash
+bun run import:jmdict --lang en --mode diff   # Preview
+bun run import:jmdict --lang en --mode merge  # Apply
+```
+</details>
+
+---
+
+## Import Architecture
+
+Imports are split into two tiers:
+
+**Base importers** — create dictionary entries from scratch (must run first):
+- `bun run import:jmdict --lang en,de`  → data/en.json, data/de.json
+- `bun run import:kaikki`               → data/ko.json, data/zh-cn.json, data/zh-tw.json
+
+**Enrichment importers** — add data to existing entries (require base imports):
+- `bun run import:jlpt`       → adds JLPT levels to all languages
+- `bun run import:tatoeba`    → adds example sentences to all languages
+- `bun run import:wadoku`     → adds German definitions to de.json
+- `bun run import:wiktionary` → adds English definitions to en.json
+
+**Import modes:**
+
+| Script | Default mode | Available modes |
+|---|---|---|
+| `import:jmdict` | `merge` | `merge`, `diff`, `replace`, `refresh` |
+| `import:kaikki` | `merge` | `merge`, `diff`, `replace`, `refresh` |
+| `import:jlpt` | `merge` | `merge`, `diff`, `refresh` |
+| `import:tatoeba` | `merge` | `merge`, `diff`, `refresh` |
+| `import:wadoku` | `merge` | `merge`, `diff`, `refresh` |
+| `import:wiktionary` | `merge` | `merge`, `diff`, `refresh` |
+
+**Convenience scripts:**
+```bash
+bun run import:base        # run all base importers (--mode replace)
+bun run import:enrichment  # run all enrichment importers
+bun run rebuild:all        # base + enrichment + build:db (full rebuild)
+```
+
+---
 
 ## License
 
-- **Code**: MIT
-- **Dictionary data**: [CC-BY-SA-4.0](https://creativecommons.org/licenses/by-sa/4.0/) (JMDict/EDRDG)
+- **Code & Data**: CC-BY-SA-4.0 (see Data Sources table for individual source licenses)
 
 ## Acknowledgments
 
-- [JMdict/EDICT](https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project) - The original dictionary project
-- [jmdict-simplified](https://github.com/scriptin/jmdict-simplified) - Pre-processed JMdict JSON files
+- [JMdict/EDICT](https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project) - Original dictionary project
+- [jmdict-simplified](https://github.com/scriptin/jmdict-simplified) - Pre-processed JMdict JSON
+- [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) - JLPT vocabulary lists
+- [Tatoeba](https://tatoeba.org) / [ManyThings.org](https://manythings.org/anki/) / [Tatoeba raw exports](https://downloads.tatoeba.org/exports/per_language/) - Example sentences
+- [Wadoku](https://www.wadoku.de) - Japanese-German dictionary
+- [Wiktionary](https://kaikki.org) - Wiktionary extracts
 - [wanakana](https://github.com/WaniKani/WanaKana) - Japanese text utilities
