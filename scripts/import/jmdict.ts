@@ -19,6 +19,7 @@ import {
   loadDict,
   saveDict,
   mergeDictEntries,
+  refreshDictSource,
   printStats,
   createEmptyDict,
 } from './base'
@@ -313,10 +314,17 @@ async function importJMdict(lang: string, mode: ImportMode): Promise<void> {
   console.log(`  Existing entries: ${existingCount.toLocaleString()}`)
 
   // Merge
-  const stats = mergeDictEntries(dict.entries, sourceEntries, mode)
-
-  // Print stats
-  printStats(stats, mode)
+  let stats: { added: number; updated: number; unchanged: number } | { added: number; updated: number; removed: number }
+  if (mode === 'refresh') {
+    stats = refreshDictSource(dict.entries, sourceEntries, 'jmdict')
+    console.log('\n=== Import Statistics ===')
+    console.log(`  New entries: ${stats.added.toLocaleString()}`)
+    console.log(`  Updated entries: ${stats.updated.toLocaleString()}`)
+    console.log(`  Removed entries: ${'removed' in stats ? stats.removed.toLocaleString() : 0}`)
+  } else {
+    stats = mergeDictEntries(dict.entries, sourceEntries, mode)
+    printStats(stats as { added: number; updated: number; unchanged: number }, mode)
+  }
 
   // Save if not diff mode
   if (mode !== 'diff') {
@@ -358,6 +366,7 @@ Options:
             merge   - Add new entries, merge definitions
             diff    - Preview changes, no modifications
             replace - Replace all JMdict entries (dangerous!)
+            refresh - Strip and re-import only JMdict data
 
 Examples:
   bun run import:jmdict --lang en
@@ -369,9 +378,9 @@ Examples:
   }
 
   // Validate mode
-  if (!['merge', 'diff', 'replace'].includes(mode)) {
+  if (!['merge', 'diff', 'replace', 'refresh'].includes(mode)) {
     console.error(`Invalid mode: ${mode}`)
-    console.error('Supported modes: merge, diff, replace')
+    console.error('Supported modes: merge, diff, replace, refresh')
     process.exit(1)
   }
 

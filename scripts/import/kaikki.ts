@@ -27,6 +27,7 @@ import {
   saveDict,
   mergeDefinitions,
   mergeDictEntries,
+  refreshDictSource,
   printStats,
   downloadWithProgress,
 } from './base'
@@ -358,12 +359,21 @@ async function importKaikkiLanguage(
   stats.produced = Object.keys(sourceEntries).length
   console.log(`  Produced source entries: ${stats.produced.toLocaleString()}`)
 
-  const mergeStats = mergeDictEntries(dict.entries, sourceEntries, mode)
-  printStats(mergeStats, mode)
-
-  if (mode !== 'diff') {
+  if (mode === 'refresh') {
+    const refreshStats = refreshDictSource(dict.entries, sourceEntries, 'kaikki')
+    console.log('\n=== Import Statistics ===')
+    console.log(`  New entries: ${refreshStats.added.toLocaleString()}`)
+    console.log(`  Updated entries: ${refreshStats.updated.toLocaleString()}`)
+    console.log(`  Removed entries: ${refreshStats.removed.toLocaleString()}`)
     await saveDict(dictPath, dict)
     console.log(`Saved to: ${dictPath}`)
+  } else {
+    const mergeStats = mergeDictEntries(dict.entries, sourceEntries, mode)
+    printStats(mergeStats, mode)
+    if (mode !== 'diff') {
+      await saveDict(dictPath, dict)
+      console.log(`Saved to: ${dictPath}`)
+    }
   }
 
   return stats
@@ -442,7 +452,7 @@ Usage:
 
 Options:
   --lang <langs>    Comma-separated: ko,zh-cn,zh-tw (default: ko,zh-cn,zh-tw)
-  --mode <mode>     merge | diff | replace (default: merge)
+  --mode <mode>     merge | diff | replace | refresh (default: merge)
   --limit <n>       Max definitions per entry from source (default: 8)
   --file=<lang>=<path>
                     Override local JSONL file for ko or zh-cn
@@ -472,7 +482,7 @@ async function main(): Promise<void> {
         .map((lang) => lang.trim() as ImportLang)
       i++
     } else if (arg === '--mode' && next) {
-      if (next === 'merge' || next === 'diff' || next === 'replace') {
+      if (next === 'merge' || next === 'diff' || next === 'replace' || next === 'refresh') {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)

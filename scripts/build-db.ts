@@ -148,7 +148,11 @@ function collectData(
 
     // Collect translation
     if (entry.definitions.length > 0) {
-      const defs = entry.definitions.map((d) => d.text)
+      const seen = new Set<string>()
+      const defs: string[] = []
+      for (const def of entry.definitions) {
+        if (!seen.has(def.text)) { seen.add(def.text); defs.push(def.text) }
+      }
       const sources = [...new Set(entry.definitions.flatMap((d) => d.sources))]
 
       translations.push({

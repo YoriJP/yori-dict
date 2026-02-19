@@ -19,6 +19,7 @@ import {
   loadDict,
   saveDict,
   mergeDefinitions,
+  refreshDictSource,
 } from './base'
 
 // ============================================================================
@@ -31,7 +32,7 @@ const CACHE_DIR = './data/cache'
 // Wadoku data URL
 const WADOKU_URL = 'https://raw.githubusercontent.com/WaDoku/WaDokuJT-Data/master/WaDokuTest.tab'
 
-type ImportMode = 'merge' | 'diff'
+type ImportMode = 'merge' | 'diff' | 'refresh'
 
 // ============================================================================
 // Types
@@ -346,7 +347,20 @@ async function runImport(mode: ImportMode): Promise<void> {
 
   // Import Wadoku definitions
   console.log('\nImporting Wadoku definitions...')
-  const stats = importWadoku(dict, wadokuEntries, mode)
+
+  if (mode === 'refresh') {
+    // Strip all existing wadoku definitions before re-importing
+    console.log('  Stripping existing wadoku definitions...')
+    let stripped = 0
+    for (const entry of Object.values(dict.entries)) {
+      const before = entry.definitions.length
+      entry.definitions = entry.definitions.filter((d) => !d.sources.includes('wadoku'))
+      stripped += before - entry.definitions.length
+    }
+    console.log(`  Stripped ${stripped.toLocaleString()} wadoku definitions`)
+  }
+
+  const stats = importWadoku(dict, wadokuEntries, mode === 'refresh' ? 'merge' : mode)
 
   // Print stats
   console.log('\nResults:')
@@ -356,6 +370,10 @@ async function runImport(mode: ImportMode): Promise<void> {
   console.log(`  Entries updated: ${stats.entriesUpdated.toLocaleString()}`)
 
   if (mode !== 'diff' && stats.entriesUpdated > 0) {
+    await saveDict(dictPath, dict)
+    console.log(`\nSaved to: ${dictPath}`)
+  } else if (mode === 'refresh') {
+    // In refresh mode, always save even if no new defs (stripped data must be persisted)
     await saveDict(dictPath, dict)
     console.log(`\nSaved to: ${dictPath}`)
   } else if (mode === 'diff') {
@@ -379,8 +397,9 @@ Usage:
 
 Options:
   --mode    Import mode (default: merge)
-            merge - Add new definitions to entries
-            diff  - Preview changes, no modifications
+            merge   - Add new definitions to entries
+            diff    - Preview changes, no modifications
+            refresh - Strip and re-import only wadoku data
 
 Examples:
   bun run import:wadoku
@@ -398,11 +417,11 @@ async function main(): Promise<void> {
     const next = args[i + 1]
 
     if (arg === '--mode' && next) {
-      if (next === 'merge' || next === 'diff') {
+      if (next === 'merge' || next === 'diff' || next === 'refresh') {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)
-        console.error('Supported modes: merge, diff')
+        console.error('Supported modes: merge, diff, refresh')
         process.exit(1)
       }
       i++

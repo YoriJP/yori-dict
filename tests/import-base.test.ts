@@ -11,6 +11,7 @@ import {
   makeKey,
   parseKey,
   normalizeText,
+  refreshDictSource,
 } from '../scripts/import/base'
 
 // ============================================================================
@@ -77,21 +78,48 @@ describe('mergeDefinitions', () => {
     const d1 = [makeDef('to eat', ['jmdict'])]
     const d2 = [makeDef('to eat', ['kaikki']), makeDef('to consume', ['kaikki'])]
 
+    // 'to eat' from jmdict and kaikki have disjoint sources → kept separate
+    const merged = mergeDefinitions(d1, d2)
+    expect(merged).toHaveLength(3)
+    const toEatDefs = merged.filter((d) => d.text.toLowerCase() === 'to eat')
+    expect(toEatDefs).toHaveLength(2)
+    expect(toEatDefs.some((d) => d.sources.includes('jmdict'))).toBe(true)
+    expect(toEatDefs.some((d) => d.sources.includes('kaikki'))).toBe(true)
+    expect(merged.some((d) => d.text === 'to consume')).toBe(true)
+  })
+
+  test('merges definitions that share a source', () => {
+    const d1 = [makeDef('to eat', ['jmdict'])]
+    const d2 = [makeDef('to eat', ['jmdict']), makeDef('to consume', ['jmdict'])]
+
+    // Same source → merged into one 'to eat'
     const merged = mergeDefinitions(d1, d2)
     expect(merged).toHaveLength(2)
     expect(merged[0].text).toBe('to eat')
-    expect(merged[0].sources).toContain('jmdict')
-    expect(merged[0].sources).toContain('kaikki')
-    expect(merged[1].text).toBe('to consume')
+    expect(merged[0].sources).toEqual(['jmdict'])
   })
 
-  test('case-insensitive dedup', () => {
+  test('case-insensitive dedup with disjoint sources keeps separate', () => {
     const merged = mergeDefinitions(
       [makeDef('To Eat', ['a'])],
       [makeDef('to eat', ['b'])]
     )
+    // Disjoint sources → kept as 2 separate definitions
+    expect(merged).toHaveLength(2)
+    expect(merged.some((d) => d.sources.includes('a'))).toBe(true)
+    expect(merged.some((d) => d.sources.includes('b'))).toBe(true)
+  })
+
+  test('case-insensitive dedup with overlapping sources merges', () => {
+    const merged = mergeDefinitions(
+      [makeDef('To Eat', ['a', 'b'])],
+      [makeDef('to eat', ['b', 'c'])]
+    )
+    // Shares source 'b' → merged
     expect(merged).toHaveLength(1)
-    expect(merged[0].sources).toEqual(['a', 'b'])
+    expect(merged[0].sources).toContain('a')
+    expect(merged[0].sources).toContain('b')
+    expect(merged[0].sources).toContain('c')
   })
 })
 
@@ -138,13 +166,15 @@ describe('mergeEntries', () => {
     expect(merged.partOfSpeech).toContain('noun')
   })
 
-  test('handles source attribution correctly', () => {
+  test('handles source attribution correctly - disjoint sources stay separate', () => {
     const e1 = makeEntry({ definitions: [makeDef('to eat', ['jmdict'])] })
     const e2 = makeEntry({ definitions: [makeDef('to eat', ['kaikki'])] })
 
+    // Disjoint sources → kept as 2 separate definitions
     const merged = mergeEntries(e1, e2)
-    expect(merged.definitions).toHaveLength(1)
-    expect(merged.definitions[0].sources).toEqual(['jmdict', 'kaikki'])
+    expect(merged.definitions).toHaveLength(2)
+    expect(merged.definitions.some((d) => d.sources.includes('jmdict'))).toBe(true)
+    expect(merged.definitions.some((d) => d.sources.includes('kaikki'))).toBe(true)
   })
 })
 
@@ -251,7 +281,96 @@ describe('mergeDictEntries — replace mode', () => {
     expect(stats.added).toBe(1)
     expect(target['a:b']).toBeDefined()
   })
+})
 
+// ============================================================================
+// refreshDictSource
+// ============================================================================
+
+describe('refreshDictSource', () => {
+  test('strips all definitions for the given source', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({
+        word: 'a', reading: 'b',
+        definitions: [makeDef('x', ['jmdict']), makeDef('y', ['wadoku'])],
+      }),
+    }
+
+    refreshDictSource(target, {}, 'jmdict')
+    expect(target['a:b'].definitions).toHaveLength(1)
+    expect(target['a:b'].definitions[0].sources).toEqual(['wadoku'])
+  })
+
+  test('removes empty entries not in source', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({ word: 'a', reading: 'b', definitions: [makeDef('x', ['jmdict'])] }),
+    }
+
+    refreshDictSource(target, {}, 'jmdict')
+    expect(target['a:b']).toBeUndefined()
+  })
+
+  test('keeps empty entry if it is in source', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({ word: 'a', reading: 'b', definitions: [makeDef('x', ['jmdict'])] }),
+    }
+    const source: Record<string, DictEntry> = {
+      'a:b': makeEntry({ word: 'a', reading: 'b', definitions: [makeDef('new', ['jmdict'])] }),
+    }
+
+    refreshDictSource(target, source, 'jmdict')
+    expect(target['a:b']).toBeDefined()
+    expect(target['a:b'].definitions.some((d) => d.text === 'new')).toBe(true)
+  })
+
+  test('adds new entries from source', () => {
+    const target: Record<string, DictEntry> = {}
+    const source: Record<string, DictEntry> = {
+      'a:b': makeEntry({ word: 'a', reading: 'b', definitions: [makeDef('x', ['jmdict'])] }),
+    }
+
+    const stats = refreshDictSource(target, source, 'jmdict')
+    expect(stats.added).toBe(1)
+    expect(target['a:b']).toBeDefined()
+  })
+
+  test('leaves data from other sources untouched', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({
+        word: 'a', reading: 'b',
+        definitions: [makeDef('from jmdict', ['jmdict']), makeDef('from kaikki', ['kaikki'])],
+        examples: [{ ja: 'test', text: 'example', sources: ['tatoeba'] }],
+      }),
+    }
+    const source: Record<string, DictEntry> = {
+      'a:b': makeEntry({ word: 'a', reading: 'b', definitions: [makeDef('new jmdict', ['jmdict'])] }),
+    }
+
+    refreshDictSource(target, source, 'jmdict')
+    expect(target['a:b'].definitions.some((d) => d.sources.includes('kaikki'))).toBe(true)
+    expect(target['a:b'].examples).toHaveLength(1)
+    expect(target['a:b'].definitions.some((d) => d.text === 'new jmdict')).toBe(true)
+    expect(target['a:b'].definitions.some((d) => d.text === 'from jmdict')).toBe(false)
+  })
+
+  test('strips tatoeba examples from source', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({
+        word: 'a', reading: 'b',
+        examples: [
+          { ja: 'old', text: 'old example', sources: ['tatoeba'] },
+          { ja: 'keep', text: 'keep this', sources: ['other'] },
+        ],
+      }),
+    }
+
+    refreshDictSource(target, {}, 'tatoeba')
+    expect(target['a:b'].examples).toHaveLength(1)
+    expect(target['a:b'].examples[0].sources).toEqual(['other'])
+  })
+})
+
+describe('mergeDictEntries — replace mode — other tests', () => {
   test('leaves entries from other sources untouched when source keys differ', () => {
     // Simulate: target has entries from jmdict and kaikki sources.
     // Replace mode with a source snapshot that only contains one key

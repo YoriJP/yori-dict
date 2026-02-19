@@ -41,7 +41,7 @@ export interface DictFile {
   entries: Record<string, DictEntry>
 }
 
-export type ImportMode = 'merge' | 'diff' | 'replace'
+export type ImportMode = 'merge' | 'diff' | 'replace' | 'refresh'
 
 // ============================================================================
 // Key Generation
@@ -131,38 +131,82 @@ export function isDefinitionArtifact(text: string): boolean {
 }
 
 /**
- * Merge definitions - same text gets sources merged
+ * Merge definitions - same text gets sources merged only when sources overlap.
+ * Definitions with the same text but disjoint sources are kept separate.
  */
 export function mergeDefinitions(defs1: Definition[], defs2: Definition[]): Definition[] {
-  const defMap = new Map<string, Definition>()
+  const result: Definition[] = []
+
+  const findMatchingDef = (normalized: string, sources: string[]): Definition | undefined => {
+    return result.find(
+      (d) => normalizeText(d.text) === normalized && d.sources.some((s) => sources.includes(s))
+    )
+  }
+
   const upsert = (def: Definition): void => {
     const text = sanitizeDefinitionText(def.text)
     if (isDefinitionArtifact(text)) return
 
     const normalized = normalizeText(text)
-    const existing = defMap.get(normalized)
+    const existing = findMatchingDef(normalized, def.sources)
 
     if (existing) {
       existing.sources = mergeArrays(existing.sources, def.sources)
     } else {
-      defMap.set(normalized, {
-        text,
-        sources: mergeArrays([], def.sources),
-      })
+      result.push({ text, sources: mergeArrays([], def.sources) })
     }
   }
 
-  // Add all from defs1
-  for (const def of defs1) {
-    upsert(def)
+  for (const def of defs1) upsert(def)
+  for (const def of defs2) upsert(def)
+
+  return result
+}
+
+/**
+ * Re-import a single source's data into the target dictionary.
+ * Strips all existing data attributed to sourceName, then merges the new source data.
+ */
+export function refreshDictSource(
+  target: Record<string, DictEntry>,
+  source: Record<string, DictEntry>,
+  sourceName: string
+): { added: number; updated: number; removed: number } {
+  let added = 0
+  let updated = 0
+  let removed = 0
+
+  // Step 1: Strip all defs and examples attributed to sourceName
+  for (const entry of Object.values(target)) {
+    entry.definitions = entry.definitions.filter((d) => !d.sources.includes(sourceName))
+    entry.examples = entry.examples.filter((e) => !e.sources.includes(sourceName))
   }
 
-  // Merge from defs2
-  for (const def of defs2) {
-    upsert(def)
+  // Step 2: Remove entries that are now empty and not in source
+  const sourceKeys = new Set(Object.keys(source))
+  for (const key of Object.keys(target)) {
+    const entry = target[key]
+    if (entry.definitions.length === 0 && entry.examples.length === 0 && !sourceKeys.has(key)) {
+      delete target[key]
+      removed++
+    }
   }
 
-  return Array.from(defMap.values())
+  // Step 3: Merge source entries into target
+  for (const [key, sourceEntry] of Object.entries(source)) {
+    if (!target[key]) {
+      target[key] = sourceEntry
+      added++
+    } else {
+      const before = JSON.stringify(target[key])
+      target[key] = mergeEntries(target[key], sourceEntry)
+      if (JSON.stringify(target[key]) !== before) {
+        updated++
+      }
+    }
+  }
+
+  return { added, updated, removed }
 }
 
 /**

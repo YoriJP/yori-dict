@@ -34,7 +34,7 @@ const CACHE_DIR = './data/cache'
 // Wiktionary data URL (Japanese JSONL from kaikki.org)
 const WIKTIONARY_URL = 'https://kaikki.org/dictionary/Japanese/kaikki.org-dictionary-Japanese.jsonl'
 
-type ImportMode = 'merge' | 'diff'
+type ImportMode = 'merge' | 'diff' | 'refresh'
 
 // POS types to include (skip romanizations, soft redirects, etc.)
 const INCLUDED_POS = new Set([
@@ -421,9 +421,21 @@ async function runImport(
   const dict = await loadDict(dictPath, 'en')
   console.log(`  Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
 
+  if (mode === 'refresh') {
+    // Strip all existing wiktionary definitions before re-importing
+    console.log('\nStripping existing wiktionary definitions...')
+    let stripped = 0
+    for (const entry of Object.values(dict.entries)) {
+      const before = entry.definitions.length
+      entry.definitions = entry.definitions.filter((d) => !d.sources.includes('wiktionary'))
+      stripped += before - entry.definitions.length
+    }
+    console.log(`  Stripped ${stripped.toLocaleString()} wiktionary definitions`)
+  }
+
   // Import Wiktionary definitions
   console.log('\nImporting Wiktionary definitions...')
-  const stats = await importWiktionary(dict, filePath, mode, maxDefsPerEntry)
+  const stats = await importWiktionary(dict, filePath, mode === 'refresh' ? 'merge' : mode, maxDefsPerEntry)
 
   // Print stats
   console.log('\nResults:')
@@ -433,7 +445,10 @@ async function runImport(
   console.log(`  New definitions: ${stats.newDefinitions.toLocaleString()}`)
   console.log(`  Entries updated: ${stats.entriesUpdated.toLocaleString()}`)
 
-  if (mode !== 'diff' && stats.entriesUpdated > 0) {
+  if (mode === 'refresh') {
+    await saveDict(dictPath, dict)
+    console.log(`\nSaved to: ${dictPath}`)
+  } else if (mode !== 'diff' && stats.entriesUpdated > 0) {
     await saveDict(dictPath, dict)
     console.log(`\nSaved to: ${dictPath}`)
   } else if (mode === 'diff') {
@@ -457,8 +472,9 @@ Usage:
 
 Options:
   --mode    Import mode (default: merge)
-            merge - Add new definitions to entries
-            diff  - Preview changes, no modifications
+            merge   - Add new definitions to entries
+            diff    - Preview changes, no modifications
+            refresh - Strip and re-import only wiktionary data
   --limit   Maximum definitions per entry (default: 10)
 
 Examples:
@@ -479,11 +495,11 @@ async function main(): Promise<void> {
     const next = args[i + 1]
 
     if (arg === '--mode' && next) {
-      if (next === 'merge' || next === 'diff') {
+      if (next === 'merge' || next === 'diff' || next === 'refresh') {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)
-        console.error('Supported modes: merge, diff')
+        console.error('Supported modes: merge, diff, refresh')
         process.exit(1)
       }
       i++

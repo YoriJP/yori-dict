@@ -50,7 +50,7 @@ interface JlptVocab {
   level: JlptLevel
 }
 
-type ImportMode = 'merge' | 'diff'
+type ImportMode = 'merge' | 'diff' | 'refresh'
 
 // ============================================================================
 // Download Functions
@@ -268,7 +268,15 @@ async function importJlpt(levels: JlptLevel[], mode: ImportMode): Promise<void> 
 
     console.log(`Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
 
-    const stats = enrichDictWithJlpt(dict, jlptMap, mode)
+    if (mode === 'refresh') {
+      // Reset all JLPT levels before re-applying
+      console.log('  Resetting JLPT levels...')
+      for (const entry of Object.values(dict.entries)) {
+        entry.jlpt = []
+      }
+    }
+
+    const stats = enrichDictWithJlpt(dict, jlptMap, mode === 'refresh' ? 'merge' : mode)
 
     console.log('\nResults:')
     console.log(`  Matched: ${stats.matched.toLocaleString()}`)
@@ -276,7 +284,10 @@ async function importJlpt(levels: JlptLevel[], mode: ImportMode): Promise<void> 
     console.log(`  Updated: ${stats.updated.toLocaleString()}`)
     console.log(`  JLPT words not in dict: ${stats.notFound.toLocaleString()}`)
 
-    if (mode !== 'diff' && stats.updated > 0) {
+    if (mode === 'refresh') {
+      await saveDict(dictPath, dict)
+      console.log(`\nSaved to: ${dictPath}`)
+    } else if (mode !== 'diff' && stats.updated > 0) {
       await saveDict(dictPath, dict)
       console.log(`\nSaved to: ${dictPath}`)
     } else if (mode === 'diff') {
@@ -304,8 +315,9 @@ Options:
             Examples: --level 5 (N5 only)
                       --level 5,4,3 (N5, N4, N3)
   --mode    Import mode (default: merge)
-            merge - Update entries with JLPT levels
-            diff  - Preview changes, no modifications
+            merge   - Update entries with JLPT levels
+            diff    - Preview changes, no modifications
+            refresh - Reset all JLPT levels and re-apply
 
 Examples:
   bun run import:jlpt
@@ -331,11 +343,11 @@ async function main(): Promise<void> {
         .filter((n): n is JlptLevel => JLPT_LEVELS.includes(n as JlptLevel))
       i++
     } else if (arg === '--mode' && next) {
-      if (next === 'merge' || next === 'diff') {
+      if (next === 'merge' || next === 'diff' || next === 'refresh') {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)
-        console.error('Supported modes: merge, diff')
+        console.error('Supported modes: merge, diff, refresh')
         process.exit(1)
       }
       i++

@@ -33,7 +33,7 @@ const DATA_DIR = './data'
 const CACHE_DIR = './data/cache'
 const TATOEBA_BASE = 'https://downloads.tatoeba.org/exports/per_language'
 
-type ImportMode = 'merge' | 'diff'
+type ImportMode = 'merge' | 'diff' | 'refresh'
 
 type ManyThingsConfig = {
   kind: 'manythings'
@@ -523,8 +523,20 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
     const dict = await loadDict(dictPath, lang)
     console.log(`  Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
 
+    if (mode === 'refresh') {
+      // Strip all existing tatoeba examples before re-importing
+      console.log('\nStripping existing tatoeba examples...')
+      let stripped = 0
+      for (const entry of Object.values(dict.entries)) {
+        const before = entry.examples.length
+        entry.examples = entry.examples.filter((e) => !e.sources.includes('tatoeba'))
+        stripped += before - entry.examples.length
+      }
+      console.log(`  Stripped ${stripped.toLocaleString()} tatoeba examples`)
+    }
+
     console.log('\nImporting examples...')
-    const stats = importExamples(dict, sentences, maxExamples, mode)
+    const stats = importExamples(dict, sentences, maxExamples, mode === 'refresh' ? 'merge' : mode)
 
     console.log('\nResults:')
     console.log(`  Sentences processed: ${stats.sentencesProcessed.toLocaleString()}`)
@@ -532,7 +544,10 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
     console.log(`  Examples added: ${stats.examplesAdded.toLocaleString()}`)
     console.log(`  Entries updated: ${stats.entriesUpdated.toLocaleString()}`)
 
-    if (mode !== 'diff' && stats.examplesAdded > 0) {
+    if (mode === 'refresh') {
+      await saveDict(dictPath, dict)
+      console.log(`\nSaved to: ${dictPath}`)
+    } else if (mode !== 'diff' && stats.examplesAdded > 0) {
       await saveDict(dictPath, dict)
       console.log(`\nSaved to: ${dictPath}`)
     } else if (mode === 'diff') {
@@ -563,8 +578,9 @@ Options:
   --lang    Comma-separated language codes (default: all available)
             Supported: en, de, ko, zh-cn, zh-tw
   --mode    Import mode (default: merge)
-            merge - Add examples to entries
-            diff  - Preview changes, no modifications
+            merge   - Add examples to entries
+            diff    - Preview changes, no modifications
+            refresh - Strip and re-import only tatoeba examples
   --limit   Maximum examples per word (default: ${DEFAULT_MAX_EXAMPLES})
 
 Examples:
@@ -607,11 +623,11 @@ async function main(): Promise<void> {
       langs = next.split(',').map((s) => s.trim())
       i++
     } else if (arg === '--mode' && next) {
-      if (next === 'merge' || next === 'diff') {
+      if (next === 'merge' || next === 'diff' || next === 'refresh') {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)
-        console.error('Supported modes: merge, diff')
+        console.error('Supported modes: merge, diff, refresh')
         process.exit(1)
       }
       i++
