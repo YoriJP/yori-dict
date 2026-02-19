@@ -72,7 +72,7 @@ function parseArgs(): AddOptions | null {
       case '--help':
       case '-h':
         printHelp()
-        return null
+        process.exit(0)
     }
   }
 
@@ -179,9 +179,9 @@ async function main(): Promise<void> {
   console.log('\nEntry:')
   console.log(`  Word: ${entry.word}`)
   console.log(`  Reading: ${entry.reading}`)
-  console.log(`  POS: ${entry.partOfSpeech.join(', ') || '(none)'}`)
+  console.log(`  POS: ${entry.partOfSpeech.map((p) => p.value).join(', ') || '(none)'}`)
   console.log(`  Common: ${entry.common}`)
-  console.log(`  JLPT: ${entry.jlpt.length > 0 ? entry.jlpt.join(', ') : '(none)'}`)
+  console.log(`  JLPT: ${entry.jlpt.length > 0 ? entry.jlpt.map((j) => `N${j.level}`).join(', ') : '(none)'}`)
   console.log(`  Definitions:`)
   for (const def of entry.definitions) {
     console.log(`    - "${def.text}" [${def.sources.join(', ')}]`)
