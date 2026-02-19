@@ -77,6 +77,10 @@ for (const [key, entry] of Object.entries(entries)) {
         if (dupSamples.length < 10) {
           dupSamples.push({ key, text })
         }
+      } else {
+        // Disjoint sources — intentional separate entry, but union sources so
+        // future occurrences are compared against the full accumulated source set.
+        seen.set(normalized, [...prevSources, ...sources.filter((s) => !prevSources.includes(s))])
       }
     } else {
       seen.set(normalized, sources)

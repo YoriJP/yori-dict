@@ -53,20 +53,22 @@ for (const entry of entries) {
     stripped.push({ text, sources: [...def.sources] })
   }
 
-  // 2. Deduplicate definitions (normalize by lowercase+trim, keep first, merge sources)
+  // 2. Deduplicate definitions — mirrors mergeDefinitions() in base.ts:
+  // same text + overlapping sources → collapse and merge sources.
+  // same text + disjoint sources → keep as separate entries (intentional structure).
   const cleaned: Definition[] = []
-  const seen = new Map<string, Definition>()
 
   for (const def of stripped) {
-    const key = normalizeText(def.text)
-    const existing = seen.get(key)
+    const normalizedText = normalizeText(def.text)
+    const existing = cleaned.find(
+      (d) => normalizeText(d.text) === normalizedText && d.sources.some((s) => def.sources.includes(s))
+    )
     if (existing) {
       existing.sources = mergeArrays(existing.sources, def.sources)
       dupsRemoved++
       modified = true
     } else {
-      seen.set(key, def)
-      cleaned.push(def)
+      cleaned.push({ text: def.text, sources: [...def.sources] })
     }
   }
 
