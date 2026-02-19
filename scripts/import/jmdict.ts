@@ -399,7 +399,7 @@ Examples:
     }
   }
 
-  console.log('=== JMdict Importer ===')
+  console.log('=== [Base] JMdict Importer ===')
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
 

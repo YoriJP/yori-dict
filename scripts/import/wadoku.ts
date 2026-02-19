@@ -320,14 +320,16 @@ function importWadoku(
 // ============================================================================
 
 async function runImport(mode: ImportMode): Promise<void> {
-  console.log('=== Wadoku German Importer ===')
+  console.log('=== [Enrichment] Wadoku German Importer ===')
   console.log(`Mode: ${mode}`)
 
   // Check if German dictionary exists
   const dictPath = `${DATA_DIR}/de.json`
   if (!existsSync(dictPath)) {
-    console.error('\nGerman dictionary not found.')
-    console.error('Run "bun run import:jmdict --lang de" first.')
+    console.error(`\nGerman dictionary not found: ${dictPath}`)
+    console.error('This is an enrichment importer — run base importers first:')
+    console.error('  bun run import:jmdict --lang de')
+    console.error('  (or: bun run rebuild:all for a full rebuild)')
     process.exit(1)
   }
 

@@ -400,15 +400,17 @@ async function runImport(
   mode: ImportMode,
   maxDefsPerEntry: number
 ): Promise<void> {
-  console.log('=== Wiktionary Importer ===')
+  console.log('=== [Enrichment] Wiktionary Importer ===')
   console.log(`Mode: ${mode}`)
   console.log(`Max definitions per entry: ${maxDefsPerEntry}`)
 
   // Check if English dictionary exists
   const dictPath = `${DATA_DIR}/en.json`
   if (!existsSync(dictPath)) {
-    console.error('\nEnglish dictionary not found.')
-    console.error('Run "bun run import:jmdict --lang en" first.')
+    console.error(`\nEnglish dictionary not found: ${dictPath}`)
+    console.error('This is an enrichment importer — run base importers first:')
+    console.error('  bun run import:jmdict --lang en')
+    console.error('  (or: bun run rebuild:all for a full rebuild)')
     process.exit(1)
   }
 

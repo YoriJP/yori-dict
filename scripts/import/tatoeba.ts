@@ -496,7 +496,7 @@ function importExamples(
 }
 
 async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: number): Promise<void> {
-  console.log('=== Tatoeba Examples Importer ===')
+  console.log('=== [Enrichment] Tatoeba Examples Importer ===')
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
   console.log(`Max examples per word: ${maxExamples}`)
@@ -602,7 +602,9 @@ async function main(): Promise<void> {
 
   if (!existsSync(DATA_DIR)) {
     console.error(`Data directory not found: ${DATA_DIR}`)
-    console.error('Run "bun run import:jmdict --lang en" first to create language files.')
+    console.error('This is an enrichment importer — run base importers first:')
+    console.error('  bun run import:jmdict --lang en')
+    console.error('  (or: bun run rebuild:all for a full rebuild)')
     process.exit(1)
   }
 

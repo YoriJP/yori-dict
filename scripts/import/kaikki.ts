@@ -524,7 +524,7 @@ async function main(): Promise<void> {
     langs = [...langs.filter((l) => l !== 'zh-tw'), 'zh-tw' as ImportLang]
   }
 
-  console.log('=== Kaikki Importer ===')
+  console.log('=== [Base] Kaikki Importer ===')
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
   console.log(`Max defs per entry: ${maxDefsPerEntry}`)

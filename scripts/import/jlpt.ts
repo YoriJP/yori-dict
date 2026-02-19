@@ -241,7 +241,7 @@ function enrichDictWithJlpt(
 // ============================================================================
 
 async function importJlpt(levels: JlptLevel[], mode: ImportMode): Promise<void> {
-  console.log('=== JLPT Level Importer ===')
+  console.log('=== [Enrichment] JLPT Level Importer ===')
   console.log(`Levels: N${levels.join(', N')}`)
   console.log(`Mode: ${mode}`)
 
@@ -255,7 +255,9 @@ async function importJlpt(levels: JlptLevel[], mode: ImportMode): Promise<void> 
 
   if (langFiles.length === 0) {
     console.error('\nNo language files found in data/')
-    console.error('Run "bun run import:jmdict --lang en" first.')
+    console.error('This is an enrichment importer — run base importers first:')
+    console.error('  bun run import:jmdict --lang en')
+    console.error('  (or: bun run rebuild:all for a full rebuild)')
     process.exit(1)
   }
 
