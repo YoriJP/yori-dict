@@ -461,9 +461,22 @@ Imports are split into two tiers:
 - `bun run import:wadoku`     → adds German definitions to de.json
 - `bun run import:wiktionary` → adds English definitions to en.json
 
-**Full rebuild:**
+**Import modes:**
+
+| Script | Default mode | Available modes |
+|---|---|---|
+| `import:jmdict` | `merge` | `merge`, `diff`, `replace`, `refresh` |
+| `import:kaikki` | `merge` | `merge`, `diff`, `replace`, `refresh` |
+| `import:jlpt` | `merge` | `merge`, `diff`, `refresh` |
+| `import:tatoeba` | `merge` | `merge`, `diff`, `refresh` |
+| `import:wadoku` | `merge` | `merge`, `diff`, `refresh` |
+| `import:wiktionary` | `merge` | `merge`, `diff`, `refresh` |
+
+**Convenience scripts:**
 ```bash
-bun run rebuild:all
+bun run import:base        # run all base importers (--mode replace)
+bun run import:enrichment  # run all enrichment importers
+bun run rebuild:all        # base + enrichment + build:db (full rebuild)
 ```
 
 ---
