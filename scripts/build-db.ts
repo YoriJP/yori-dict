@@ -123,26 +123,26 @@ function collectData(
     const existing = wordsMap.get(key)
     if (existing) {
       // Merge POS
-      for (const pos of entry.partOfSpeech) {
-        if (!existing.partOfSpeech.includes(pos)) {
-          existing.partOfSpeech.push(pos)
+      for (const posEntry of entry.partOfSpeech) {
+        if (!existing.partOfSpeech.includes(posEntry.value)) {
+          existing.partOfSpeech.push(posEntry.value)
         }
       }
       // Merge common flag
-      existing.common = existing.common || entry.common
+      existing.common = existing.common || entry.commonSources.length > 0
       // Merge JLPT levels
-      for (const level of entry.jlpt) {
-        if (!existing.jlpt.includes(level)) {
-          existing.jlpt.push(level)
+      for (const jlptEntry of entry.jlpt) {
+        if (!existing.jlpt.includes(jlptEntry.level)) {
+          existing.jlpt.push(jlptEntry.level)
         }
       }
     } else {
       wordsMap.set(key, {
         word: entry.word,
         reading: entry.reading,
-        partOfSpeech: [...entry.partOfSpeech],
-        common: entry.common,
-        jlpt: [...entry.jlpt],
+        partOfSpeech: entry.partOfSpeech.map((p) => p.value),
+        common: entry.commonSources.length > 0,
+        jlpt: entry.jlpt.map((j) => j.level),
       })
     }
 
@@ -163,8 +163,12 @@ function collectData(
       })
     }
 
-    // Collect examples
+    // Collect examples (deduplicate by ja+text)
+    const seenExamples = new Set<string>()
     for (const example of entry.examples) {
+      const exKey = `${example.ja}\u0000${example.text}`
+      if (seenExamples.has(exKey)) continue
+      seenExamples.add(exKey)
       const sources = example.sources.length > 0 ? example.sources : ['unknown']
       for (const source of sources) {
         examples.push({

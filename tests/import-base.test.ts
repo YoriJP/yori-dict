@@ -2,12 +2,15 @@ import { describe, test, expect } from 'bun:test'
 import {
   type DictEntry,
   type Definition,
+  type PosEntry,
+  type JlptEntry,
   mergeEntries,
   mergeDictEntries,
   mergeDefinitions,
   mergeExamples,
   mergeArrays,
-  mergeJlpt,
+  mergePartOfSpeech,
+  mergeJlptEntries,
   makeKey,
   parseKey,
   normalizeText,
@@ -26,8 +29,9 @@ function makeEntry(overrides: Partial<DictEntry> = {}): DictEntry {
   return {
     word: '食べる',
     reading: 'たべる',
-    partOfSpeech: ['verb'],
+    partOfSpeech: [{ value: 'verb', sources: ['jmdict'] }],
     common: false,
+    commonSources: [],
     jlpt: [],
     definitions: [makeDef('to eat', ['jmdict'])],
     examples: [],
@@ -57,9 +61,45 @@ describe('mergeArrays', () => {
   })
 })
 
-describe('mergeJlpt', () => {
-  test('merges and sorts descending', () => {
-    expect(mergeJlpt([3], [5, 1])).toEqual([5, 3, 1])
+describe('mergeJlptEntries', () => {
+  test('deduplicates by level and sorts descending', () => {
+    const result = mergeJlptEntries(
+      [{ level: 3, sources: ['jlpt'] }],
+      [{ level: 5, sources: ['jlpt'] }, { level: 1, sources: ['jlpt'] }]
+    )
+    expect(result.map((j) => j.level)).toEqual([5, 3, 1])
+  })
+
+  test('unions sources for same level', () => {
+    const result = mergeJlptEntries(
+      [{ level: 5, sources: ['a'] }],
+      [{ level: 5, sources: ['b'] }]
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].sources).toContain('a')
+    expect(result[0].sources).toContain('b')
+  })
+})
+
+describe('mergePartOfSpeech', () => {
+  test('unions sources for same value', () => {
+    const result = mergePartOfSpeech(
+      [{ value: 'noun', sources: ['jmdict'] }],
+      [{ value: 'noun', sources: ['kaikki'] }]
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].sources).toContain('jmdict')
+    expect(result[0].sources).toContain('kaikki')
+  })
+
+  test('keeps distinct values separate', () => {
+    const result = mergePartOfSpeech(
+      [{ value: 'noun', sources: ['jmdict'] }],
+      [{ value: 'verb', sources: ['jmdict'] }]
+    )
+    expect(result).toHaveLength(2)
+    expect(result.map((p) => p.value)).toContain('noun')
+    expect(result.map((p) => p.value)).toContain('verb')
   })
 })
 
@@ -128,7 +168,7 @@ describe('mergeDefinitions', () => {
 // ============================================================================
 
 describe('mergeExamples', () => {
-  test('deduplicates by ja+text pair', () => {
+  test('disjoint sources keep separate entries for same ja+text', () => {
     const ex1 = [{ ja: '猫が食べる', text: 'The cat eats', sources: ['jmdict'] }]
     const ex2 = [
       { ja: '猫が食べる', text: 'The cat eats', sources: ['kaikki'] },
@@ -136,9 +176,18 @@ describe('mergeExamples', () => {
     ]
 
     const merged = mergeExamples(ex1, ex2)
-    expect(merged).toHaveLength(2)
-    expect(merged[0].sources).toContain('jmdict')
-    expect(merged[0].sources).toContain('kaikki')
+    // Disjoint sources → separate entries
+    expect(merged).toHaveLength(3)
+    expect(merged.filter((e) => e.ja === '猫が食べる')).toHaveLength(2)
+  })
+
+  test('same source merges overlapping examples', () => {
+    const ex1 = [{ ja: '猫が食べる', text: 'The cat eats', sources: ['tatoeba'] }]
+    const ex2 = [{ ja: '猫が食べる', text: 'The cat eats', sources: ['tatoeba'] }]
+
+    const merged = mergeExamples(ex1, ex2)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].sources).toEqual(['tatoeba'])
   })
 })
 
@@ -156,14 +205,24 @@ describe('mergeEntries', () => {
   })
 
   test('preserves existing fields (jlpt, common, pos)', () => {
-    const e1 = makeEntry({ common: true, jlpt: [5], partOfSpeech: ['verb'] })
-    const e2 = makeEntry({ common: false, jlpt: [3], partOfSpeech: ['noun'] })
+    const e1 = makeEntry({
+      common: true,
+      commonSources: ['jmdict'],
+      jlpt: [{ level: 5, sources: ['jlpt'] }],
+      partOfSpeech: [{ value: 'verb', sources: ['jmdict'] }],
+    })
+    const e2 = makeEntry({
+      common: false,
+      commonSources: [],
+      jlpt: [{ level: 3, sources: ['jlpt'] }],
+      partOfSpeech: [{ value: 'noun', sources: ['jmdict'] }],
+    })
 
     const merged = mergeEntries(e1, e2)
     expect(merged.common).toBe(true)
-    expect(merged.jlpt).toEqual([5, 3])
-    expect(merged.partOfSpeech).toContain('verb')
-    expect(merged.partOfSpeech).toContain('noun')
+    expect(merged.jlpt.map((j) => j.level)).toEqual([5, 3])
+    expect(merged.partOfSpeech.map((p) => p.value)).toContain('verb')
+    expect(merged.partOfSpeech.map((p) => p.value)).toContain('noun')
   })
 
   test('handles source attribution correctly - disjoint sources stay separate', () => {
@@ -351,6 +410,53 @@ describe('refreshDictSource', () => {
     expect(target['a:b'].examples).toHaveLength(1)
     expect(target['a:b'].definitions.some((d) => d.text === 'new jmdict')).toBe(true)
     expect(target['a:b'].definitions.some((d) => d.text === 'from jmdict')).toBe(false)
+  })
+
+  test('strips partOfSpeech entries attributed to source', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({
+        word: 'a', reading: 'b',
+        partOfSpeech: [
+          { value: 'verb', sources: ['jmdict'] },
+          { value: 'noun', sources: ['kaikki'] },
+        ],
+        definitions: [makeDef('x', ['kaikki'])],
+      }),
+    }
+
+    refreshDictSource(target, {}, 'jmdict')
+    expect(target['a:b'].partOfSpeech.map((p) => p.value)).toEqual(['noun'])
+  })
+
+  test('strips jlpt entries attributed to source', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({
+        word: 'a', reading: 'b',
+        jlpt: [
+          { level: 5, sources: ['jlpt'] },
+          { level: 3, sources: ['other'] },
+        ],
+        definitions: [makeDef('x', ['kaikki'])],
+      }),
+    }
+
+    refreshDictSource(target, {}, 'jlpt')
+    expect(target['a:b'].jlpt.map((j) => j.level)).toEqual([3])
+  })
+
+  test('strips commonSources and recalculates common=false', () => {
+    const target: Record<string, DictEntry> = {
+      'a:b': makeEntry({
+        word: 'a', reading: 'b',
+        common: true,
+        commonSources: ['jmdict'],
+        definitions: [makeDef('x', ['kaikki'])],
+      }),
+    }
+
+    refreshDictSource(target, {}, 'jmdict')
+    expect(target['a:b'].common).toBe(false)
+    expect(target['a:b'].commonSources).toEqual([])
   })
 
   test('strips tatoeba examples from source', () => {

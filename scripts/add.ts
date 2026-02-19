@@ -136,9 +136,10 @@ async function main(): Promise<void> {
   const newEntry: DictEntry = {
     word: opts.word,
     reading: opts.reading,
-    partOfSpeech: opts.pos ?? [],
+    partOfSpeech: (opts.pos ?? []).map((value) => ({ value, sources: ['manual'] })),
     common: opts.common || false,
-    jlpt: opts.jlpt ? [opts.jlpt] : [],
+    commonSources: opts.common ? ['manual'] : [],
+    jlpt: opts.jlpt ? [{ level: opts.jlpt, sources: ['manual'] }] : [],
     definitions: opts.def
       ? opts.def.map((text) => ({ text, sources: ['manual'] }))
       : [],

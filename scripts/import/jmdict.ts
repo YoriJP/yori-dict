@@ -22,6 +22,7 @@ import {
   refreshDictSource,
   printStats,
   createEmptyDict,
+  mergeArrays,
 } from './base'
 
 // ============================================================================
@@ -231,9 +232,10 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
   return {
     word,
     reading,
-    partOfSpeech: Array.from(posSet),
+    partOfSpeech: Array.from(posSet).map((value) => ({ value, sources: ['jmdict'] })),
     common: isCommon,
-    jlpt: [], // JMdict simplified doesn't include JLPT level
+    commonSources: isCommon ? ['jmdict'] : [],
+    jlpt: [],
     definitions,
     examples: [],
   }
@@ -259,13 +261,17 @@ function convertJMdictToDict(jmdict: JMdictFile, lang: string): Record<string, D
         }
       }
       // Merge POS
-      for (const pos of entry.partOfSpeech) {
-        if (!existing.partOfSpeech.includes(pos)) {
-          existing.partOfSpeech.push(pos)
+      for (const posEntry of entry.partOfSpeech) {
+        const ep = existing.partOfSpeech.find((p) => p.value === posEntry.value)
+        if (ep) {
+          ep.sources = mergeArrays(ep.sources, posEntry.sources)
+        } else {
+          existing.partOfSpeech.push(posEntry)
         }
       }
       // Preserve common if any duplicate marks it common
       existing.common = existing.common || entry.common
+      existing.commonSources = mergeArrays(existing.commonSources, entry.commonSources)
     } else {
       entries[key] = entry
     }

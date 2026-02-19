@@ -19,12 +19,23 @@ export interface Example {
   sources: string[]
 }
 
+export interface PosEntry {
+  value: string
+  sources: string[]
+}
+
+export interface JlptEntry {
+  level: number
+  sources: string[]
+}
+
 export interface DictEntry {
   word: string
   reading: string
-  partOfSpeech: string[]
+  partOfSpeech: PosEntry[]
   common: boolean
-  jlpt: number[]
+  commonSources: string[]
+  jlpt: JlptEntry[]
   definitions: Definition[]
   examples: Example[]
 }
@@ -75,11 +86,41 @@ export function mergeArrays<T>(arr1: T[], arr2: T[]): T[] {
 }
 
 /**
- * Merge JLPT levels - keep all unique levels, sorted descending (N5=5 first)
+ * Merge PosEntry arrays - same value gets sources unioned
  */
-export function mergeJlpt(levels1: number[], levels2: number[]): number[] {
-  const merged = mergeArrays(levels1, levels2)
-  return merged.sort((a, b) => b - a) // Sort descending: [5, 4, 3, 2, 1]
+export function mergePartOfSpeech(pos1: PosEntry[], pos2: PosEntry[]): PosEntry[] {
+  const map = new Map<string, PosEntry>()
+  for (const p of pos1) {
+    map.set(p.value, { value: p.value, sources: [...p.sources] })
+  }
+  for (const p of pos2) {
+    const existing = map.get(p.value)
+    if (existing) {
+      existing.sources = mergeArrays(existing.sources, p.sources)
+    } else {
+      map.set(p.value, { value: p.value, sources: [...p.sources] })
+    }
+  }
+  return Array.from(map.values())
+}
+
+/**
+ * Merge JlptEntry arrays - same level gets sources unioned, sorted descending (N5=5 first)
+ */
+export function mergeJlptEntries(jlpt1: JlptEntry[], jlpt2: JlptEntry[]): JlptEntry[] {
+  const map = new Map<number, JlptEntry>()
+  for (const j of jlpt1) {
+    map.set(j.level, { level: j.level, sources: [...j.sources] })
+  }
+  for (const j of jlpt2) {
+    const existing = map.get(j.level)
+    if (existing) {
+      existing.sources = mergeArrays(existing.sources, j.sources)
+    } else {
+      map.set(j.level, { level: j.level, sources: [...j.sources] })
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.level - a.level)
 }
 
 /**
@@ -176,17 +217,29 @@ export function refreshDictSource(
   let updated = 0
   let removed = 0
 
-  // Step 1: Strip all defs and examples attributed to sourceName
+  // Step 1: Strip all data attributed to sourceName from every field
   for (const entry of Object.values(target)) {
     entry.definitions = entry.definitions.filter((d) => !d.sources.includes(sourceName))
     entry.examples = entry.examples.filter((e) => !e.sources.includes(sourceName))
+    entry.partOfSpeech = entry.partOfSpeech
+      .map((p) => ({ ...p, sources: p.sources.filter((s) => s !== sourceName) }))
+      .filter((p) => p.sources.length > 0)
+    entry.jlpt = entry.jlpt
+      .map((j) => ({ ...j, sources: j.sources.filter((s) => s !== sourceName) }))
+      .filter((j) => j.sources.length > 0)
+    entry.commonSources = entry.commonSources.filter((s) => s !== sourceName)
+    entry.common = entry.commonSources.length > 0
   }
 
   // Step 2: Remove entries that are now empty and not in source
+  const isEmpty = (e: DictEntry) =>
+    e.definitions.length === 0 && e.examples.length === 0 &&
+    e.partOfSpeech.length === 0 && e.jlpt.length === 0 && e.commonSources.length === 0
+
   const sourceKeys = new Set(Object.keys(source))
   for (const key of Object.keys(target)) {
     const entry = target[key]
-    if (entry.definitions.length === 0 && entry.examples.length === 0 && !sourceKeys.has(key)) {
+    if (isEmpty(entry) && !sourceKeys.has(key)) {
       delete target[key]
       removed++
     }
@@ -210,33 +263,29 @@ export function refreshDictSource(
 }
 
 /**
- * Merge examples - dedupe by Japanese text + translation
+ * Merge examples - same ja+text with overlapping sources get merged;
+ * same ja+text with disjoint sources stay separate (source isolation).
  */
 export function mergeExamples(ex1: Example[], ex2: Example[]): Example[] {
-  const exMap = new Map<string, Example>()
-  const makeExampleKey = (ex: Example) => `${ex.ja}\u0000${ex.text}`
+  const result: Example[] = []
+  const makeExKey = (ex: Example) => `${ex.ja}\u0000${ex.text}`
 
-  for (const ex of ex1) {
-    exMap.set(makeExampleKey(ex), {
-      ...ex,
-      sources: [...ex.sources],
-    })
-  }
+  const findMatch = (key: string, sources: string[]): Example | undefined =>
+    result.find((e) => makeExKey(e) === key && e.sources.some((s) => sources.includes(s)))
 
-  for (const ex of ex2) {
-    const key = makeExampleKey(ex)
-    const existing = exMap.get(key)
-    if (!existing) {
-      exMap.set(key, {
-        ...ex,
-        sources: [...ex.sources],
-      })
-      continue
+  const upsert = (ex: Example) => {
+    const key = makeExKey(ex)
+    const existing = findMatch(key, ex.sources)
+    if (existing) {
+      existing.sources = mergeArrays(existing.sources, ex.sources)
+    } else {
+      result.push({ ...ex, sources: [...ex.sources] })
     }
-    existing.sources = mergeArrays(existing.sources, ex.sources)
   }
 
-  return Array.from(exMap.values())
+  for (const ex of ex1) upsert(ex)
+  for (const ex of ex2) upsert(ex)
+  return result
 }
 
 type RawExample = {
@@ -275,9 +324,10 @@ export function mergeEntries(entry1: DictEntry, entry2: DictEntry): DictEntry {
   return {
     word: entry1.word,
     reading: entry1.reading,
-    partOfSpeech: mergeArrays(entry1.partOfSpeech, entry2.partOfSpeech),
+    partOfSpeech: mergePartOfSpeech(entry1.partOfSpeech, entry2.partOfSpeech),
     common: entry1.common || entry2.common,
-    jlpt: mergeJlpt(entry1.jlpt, entry2.jlpt),
+    commonSources: mergeArrays(entry1.commonSources, entry2.commonSources),
+    jlpt: mergeJlptEntries(entry1.jlpt, entry2.jlpt),
     definitions: mergeDefinitions(entry1.definitions, entry2.definitions),
     examples: mergeExamples(entry1.examples, entry2.examples),
   }
@@ -337,6 +387,7 @@ export function mergeDictEntries(
         JSON.stringify(merged.partOfSpeech) !== JSON.stringify(targetEntry.partOfSpeech) ||
         JSON.stringify(merged.jlpt) !== JSON.stringify(targetEntry.jlpt) ||
         merged.common !== targetEntry.common ||
+        JSON.stringify(merged.commonSources) !== JSON.stringify(targetEntry.commonSources) ||
         JSON.stringify(merged.examples) !== JSON.stringify(targetEntry.examples)
 
       if (changed) {
@@ -447,6 +498,19 @@ export async function loadDict(path: string, lang: string): Promise<DictFile> {
     const dict = await file.json() as DictFile
     for (const entry of Object.values(dict.entries)) {
       entry.examples = (entry.examples ?? []).map((ex) => normalizeExampleSources(ex))
+
+      // Shim: string[] → PosEntry[]
+      if (entry.partOfSpeech.length > 0 && typeof (entry.partOfSpeech as unknown[])[0] === 'string') {
+        entry.partOfSpeech = (entry.partOfSpeech as unknown as string[])
+          .map((value) => ({ value, sources: [] }))
+      }
+      // Shim: number[] → JlptEntry[]
+      if (entry.jlpt.length > 0 && typeof (entry.jlpt as unknown[])[0] === 'number') {
+        entry.jlpt = (entry.jlpt as unknown as number[])
+          .map((level) => ({ level, sources: [] }))
+      }
+      // Shim: default missing commonSources
+      if (!entry.commonSources) entry.commonSources = []
     }
     return dict
   }

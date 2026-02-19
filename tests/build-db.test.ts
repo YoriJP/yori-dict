@@ -59,9 +59,11 @@ function insertFromDict(db: Database, dict: DictFile): void {
       key,
       entry.word,
       entry.reading,
-      JSON.stringify(entry.partOfSpeech),
-      entry.common ? 1 : 0,
-      entry.jlpt.length > 0 ? JSON.stringify(entry.jlpt) : null
+      JSON.stringify(entry.partOfSpeech.map((p) => p.value)),
+      entry.commonSources.length > 0 ? 1 : 0,
+      entry.jlpt.length > 0
+        ? JSON.stringify(entry.jlpt.map((j) => j.level).sort((a, b) => b - a))
+        : null
     )
 
     if (entry.definitions.length > 0) {
@@ -89,18 +91,20 @@ const testDict: DictFile = {
     '食べる:たべる': {
       word: '食べる',
       reading: 'たべる',
-      partOfSpeech: ['ichidan verb'],
+      partOfSpeech: [{ value: 'ichidan verb', sources: ['jmdict'] }],
       common: true,
-      jlpt: [5],
+      commonSources: ['jmdict'],
+      jlpt: [{ level: 5, sources: ['jlpt'] }],
       definitions: [{ text: 'to eat', sources: ['jmdict'] }],
       examples: [{ ja: '猫が食べる', text: 'The cat eats', sources: ['tatoeba'] }],
     },
     '猫:ねこ': {
       word: '猫',
       reading: 'ねこ',
-      partOfSpeech: ['noun'],
+      partOfSpeech: [{ value: 'noun', sources: ['jmdict'] }],
       common: true,
-      jlpt: [4],
+      commonSources: ['jmdict'],
+      jlpt: [{ level: 4, sources: ['jlpt'] }],
       definitions: [{ text: 'cat', sources: ['jmdict'] }],
       examples: [],
     },

@@ -30,6 +30,7 @@ import {
   refreshDictSource,
   printStats,
   downloadWithProgress,
+  mergeArrays,
 } from './base'
 
 // ============================================================================
@@ -339,7 +340,12 @@ async function importKaikkiLanguage(
 
     const existing = sourceEntries[key]
     if (existing) {
-      existing.partOfSpeech = Array.from(new Set([...existing.partOfSpeech, parsed.pos]))
+      const ep = existing.partOfSpeech.find((p) => p.value === parsed.pos)
+      if (ep) {
+        ep.sources = mergeArrays(ep.sources, ['kaikki'])
+      } else {
+        existing.partOfSpeech.push({ value: parsed.pos, sources: ['kaikki'] })
+      }
       existing.definitions = mergeDefinitions(existing.definitions, newDefinitions).slice(0, maxDefsPerEntry)
       continue
     }
@@ -347,8 +353,9 @@ async function importKaikkiLanguage(
     sourceEntries[key] = {
       word: parsed.word,
       reading: parsed.reading,
-      partOfSpeech: [parsed.pos],
+      partOfSpeech: [{ value: parsed.pos, sources: ['kaikki'] }],
       common: false,
+      commonSources: [],
       jlpt: [],
       definitions: newDefinitions,
       examples: [],

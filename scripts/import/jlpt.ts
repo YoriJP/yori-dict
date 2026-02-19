@@ -16,9 +16,12 @@ import { existsSync, readdirSync } from 'fs'
 import {
   type DictEntry,
   type DictFile,
+  type JlptEntry,
   makeKey,
   loadDict,
   saveDict,
+  mergeArrays,
+  mergeJlptEntries,
 } from './base'
 
 // ============================================================================
@@ -37,7 +40,7 @@ type JlptLevel = (typeof JLPT_LEVELS)[number]
 // Types
 // ============================================================================
 
-interface JlptEntry {
+interface JlptCsvEntry {
   jmdict_seq: string
   kana: string
   kanji: string
@@ -56,7 +59,7 @@ type ImportMode = 'merge' | 'diff' | 'refresh'
 // Download Functions
 // ============================================================================
 
-async function downloadJlptLevel(level: JlptLevel): Promise<JlptEntry[]> {
+async function downloadJlptLevel(level: JlptLevel): Promise<JlptCsvEntry[]> {
   const cachePath = `${CACHE_DIR}/jlpt-n${level}.csv`
 
   // Check cache
@@ -88,9 +91,9 @@ async function downloadJlptLevel(level: JlptLevel): Promise<JlptEntry[]> {
   return parseJlptCsv(text)
 }
 
-function parseJlptCsv(text: string): JlptEntry[] {
+function parseJlptCsv(text: string): JlptCsvEntry[] {
   const lines = text.trim().split('\n')
-  const entries: JlptEntry[] = []
+  const entries: JlptCsvEntry[] = []
 
   // Skip header row
   for (let i = 1; i < lines.length; i++) {
@@ -206,18 +209,18 @@ function enrichDictWithJlpt(
       stats.matched++
 
       // Check if entry already has these levels
-      const existingLevels = new Set(entry.jlpt)
-      const newLevels = levels.filter((l) => !existingLevels.has(l))
+      const existingLevelSet = new Set(entry.jlpt.map((j) => j.level))
+      const newLevels = levels.filter((l) => !existingLevelSet.has(l))
 
       if (newLevels.length === 0) {
         stats.alreadyHad++
       } else {
         stats.updated++
         if (mode !== 'diff') {
-          // Merge and sort JLPT levels (descending, so N5=5 comes first)
-          const merged = [...new Set([...entry.jlpt, ...levels])]
-          merged.sort((a, b) => b - a)
-          entry.jlpt = merged
+          entry.jlpt = mergeJlptEntries(
+            entry.jlpt,
+            levels.map((l) => ({ level: l, sources: ['jlpt'] }))
+          )
         }
       }
     }
@@ -269,10 +272,10 @@ async function importJlpt(levels: JlptLevel[], mode: ImportMode): Promise<void> 
     console.log(`Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
 
     if (mode === 'refresh') {
-      // Reset all JLPT levels before re-applying
+      // Strip only jlpt-sourced entries before re-applying
       console.log('  Resetting JLPT levels...')
       for (const entry of Object.values(dict.entries)) {
-        entry.jlpt = []
+        entry.jlpt = entry.jlpt.filter((j) => !j.sources.includes('jlpt'))
       }
     }
 
