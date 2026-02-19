@@ -33,46 +33,37 @@ function initDb(): Database {
   db.exec('PRAGMA journal_mode = WAL')
   db.exec('PRAGMA foreign_keys = ON')
 
-  db.exec(`
-    -- Core word data (shared across languages)
-    CREATE TABLE words (
-      id TEXT PRIMARY KEY,
-      word TEXT NOT NULL,
-      reading TEXT NOT NULL,
-      part_of_speech TEXT NOT NULL,
-      common INTEGER DEFAULT 0,
-      jlpt TEXT
-    );
-
-    -- Translations per language
-    CREATE TABLE translations (
-      word_id TEXT NOT NULL,
-      lang TEXT NOT NULL,
-      definitions TEXT NOT NULL,
-      sources TEXT NOT NULL,
-      PRIMARY KEY (word_id, lang),
-      FOREIGN KEY (word_id) REFERENCES words(id)
-    );
-
-    -- Examples per language
-    CREATE TABLE examples (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      word_id TEXT NOT NULL,
-      lang TEXT NOT NULL,
-      japanese TEXT NOT NULL,
-      translation TEXT NOT NULL,
-      source TEXT NOT NULL,
-      FOREIGN KEY (word_id) REFERENCES words(id)
-    );
-
-    -- Indexes for fast lookups
-    CREATE INDEX idx_words_word ON words(word);
-    CREATE INDEX idx_words_reading ON words(reading);
-    CREATE INDEX idx_words_common ON words(common);
-    CREATE INDEX idx_translations_lang ON translations(lang);
-    CREATE INDEX idx_examples_word_id ON examples(word_id);
-    CREATE INDEX idx_examples_lang ON examples(lang);
-  `)
+  db.exec(`CREATE TABLE words (
+    id TEXT PRIMARY KEY,
+    word TEXT NOT NULL,
+    reading TEXT NOT NULL,
+    part_of_speech TEXT NOT NULL,
+    common INTEGER DEFAULT 0,
+    jlpt TEXT
+  )`)
+  db.exec(`CREATE TABLE translations (
+    word_id TEXT NOT NULL,
+    lang TEXT NOT NULL,
+    definitions TEXT NOT NULL,
+    sources TEXT NOT NULL,
+    PRIMARY KEY (word_id, lang),
+    FOREIGN KEY (word_id) REFERENCES words(id)
+  )`)
+  db.exec(`CREATE TABLE examples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    word_id TEXT NOT NULL,
+    lang TEXT NOT NULL,
+    japanese TEXT NOT NULL,
+    translation TEXT NOT NULL,
+    source TEXT NOT NULL,
+    FOREIGN KEY (word_id) REFERENCES words(id)
+  )`)
+  db.exec('CREATE INDEX idx_words_word ON words(word)')
+  db.exec('CREATE INDEX idx_words_reading ON words(reading)')
+  db.exec('CREATE INDEX idx_words_common ON words(common)')
+  db.exec('CREATE INDEX idx_translations_lang ON translations(lang)')
+  db.exec('CREATE INDEX idx_examples_word_id ON examples(word_id)')
+  db.exec('CREATE INDEX idx_examples_lang ON examples(lang)')
 
   return db
 }
