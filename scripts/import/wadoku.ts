@@ -88,20 +88,32 @@ async function downloadWadoku(): Promise<string> {
  * Format: <TrE: translation> or <TrE: <HW f: translation>>
  */
 function extractTranslations(markup: string): string[] {
-  const translations: string[] = []
+  const flattenMarkup = (text: string): string => {
+    let cleaned = text
+    let prev = ''
 
-  // Match <TrE: ...> patterns, allowing nested angle brackets
+    while (prev !== cleaned) {
+      prev = cleaned
+      // Unwrap tags that carry payloads, e.g. <HW f: ...>, <Def.: ...>.
+      cleaned = cleaned.replace(/<[^>]*:\s*([^<>]*)>/g, '$1')
+      // Remove marker tags with no payload, e.g. <Prior_1>, <JLPT2>.
+      cleaned = cleaned.replace(/<[^>]+>/g, ' ')
+    }
+
+    return cleaned.replace(/\s+/g, ' ').trim()
+  }
+
+  const translations: string[] = []
+  // Non-balanced regex is intentional: Wadoku has malformed rows where
+  // balanced scanning can over-consume into the next segments.
   const trePattern = /<TrE:\s*((?:[^<>]|<[^>]*>)*)>/g
   let match
 
   while ((match = trePattern.exec(markup)) !== null) {
-    let text = match[1].trim()
+    const text = flattenMarkup(match[1])
 
-    // Remove nested tags like <HW f: ...>, <Prior_1>, <JLPT2>, etc.
-    text = text.replace(/<[^>]+>/g, '').trim()
-
-    // Skip empty or very short results
-    if (text.length >= 2) {
+    // Skip results that still contain markup fragments, are empty, or too short
+    if (text.length >= 2 && !text.includes('<')) {
       translations.push(text)
     }
   }
