@@ -181,11 +181,16 @@ async function downloadAndExtract(url: string, cachePath: string): Promise<JMdic
   // Extract using unzip
   const proc = Bun.spawn(['unzip', '-p', zipPath], { stdout: 'pipe' })
   const text = await new Response(proc.stdout).text()
-  await proc.exited
+  const exitCode = await proc.exited
 
-  // Clean up ZIP and cache JSON
+  // Clean up ZIP regardless of outcome
   const { unlinkSync } = await import('fs')
   unlinkSync(zipPath)
+
+  if (exitCode !== 0) {
+    throw new Error(`unzip failed with exit code ${exitCode}`)
+  }
+
   await Bun.write(cachePath, text)
   console.log(`  Cached to: ${cachePath}`)
 
