@@ -10,7 +10,7 @@
 - ⚡ **~1ms response time** - SQLite with optimized indexes
 - 🌍 **Multilingual** - English, German, Korean, Chinese (Simplified & Traditional)
 - 🔤 **Auto conjugations** - ichidan, godan, suru, kuru verbs + i-adjectives
-- 📝 **Example sentences** - 175k+ curated examples from Tatoeba
+- 📝 **Example sentences** - 138k+ curated examples from Tatoeba
 - 🎯 **JLPT levels** - N5-N1 tagged for study progress
 
 ---
@@ -67,13 +67,7 @@ bun run build:db     # Build SQLite (~10s)
 bun run dev          # Start server
 
 # Option B: Build from scratch (fresh data)
-bun run import:jmdict --lang en,de   # Base dictionaries
-bun run import:kaikki --lang ko,zh-cn,zh-tw  # Korean/Chinese definitions
-bun run import:jlpt                  # JLPT levels
-bun run import:wadoku                # German definitions
-bun run import:wiktionary            # English definitions
-bun run import:tatoeba               # Example sentences (all languages)
-bun run build:db
+bun run rebuild:all  # base imports + enrichment + build:db
 bun run dev
 ```
 
@@ -142,13 +136,13 @@ Health check. Returns `{"status": "ok"}`.
 
 ## Data Sources & Coverage
 
-| Language | Entries | Examples | JLPT | Sources |
-|----------|---------|----------|------|---------|
-| **English** | ~214k | ~28k | 7.4k | JMdict, Wiktionary (+60k), Tatoeba |
-| **German** | ~128k | ~21k | 7.4k | JMdict, Wadoku (+13k), Tatoeba |
-| **Chinese (CN)** | ~26k | ~6k | - | Kaikki, Tatoeba (`jpn-cmn`) |
-| **Chinese (TW)** | ~26k | ~6k | - | Kaikki, Tatoeba (`jpn-cmn`) |
-| **Korean** | ~5k | ~800 | - | Kaikki, Tatoeba (`jpn-kor`) |
+| Language | Entries | Examples | Sources |
+|----------|---------|----------|---------|
+| **English** | ~214k | ~64k | JMdict, Wiktionary (+55k defs), Tatoeba |
+| **German** | ~128k | ~45k | JMdict, Wadoku (+2.5k defs), Tatoeba |
+| **Chinese (CN)** | ~26k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Chinese (TW)** | ~26k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Korean** | ~5k | ~1.7k | Kaikki, Tatoeba (`jpn-kor`) |
 
 **Source Details:**
 
@@ -175,7 +169,7 @@ Health check. Returns `{"status": "ok"}`.
 │   │              │    │              │    │              │     │
 │   │ JMdict JSON  │───▶│ data/*.json  │───▶│ dict.sqlite  │     │
 │   │ Kaikki JSONL │    │              │    │              │     │
-│   │ Tatoeba TSV  │    │ ~130MB JSON  │    │ ~80MB SQLite │     │
+│   │ Tatoeba TSV  │    │ ~130MB JSON  │    │ ~131MB SQLite│     │
 │   │ Wiktionary   │    │              │    │              │     │
 │   │ Wadoku/JLPT  │    │              │    │ ~1ms lookup  │     │
 │   └──────────────┘    └──────────────┘    └──────────────┘     │
@@ -259,6 +253,8 @@ yori-dict/
 │   │   └── wiktionary.ts # English definitions enrichment
 │   ├── build-db.ts       # JSON → SQLite compiler
 │   ├── pull-data.ts      # Git LFS materializer
+│   ├── verify-dict.ts    # Dictionary quality checker
+│   ├── cleanup-dict.ts   # Dictionary cleanup (dedup, fix artifacts)
 │   └── add.ts            # Manual entry CLI
 ├── tests/
 │   ├── api.test.ts            # API endpoint tests
@@ -283,13 +279,18 @@ yori-dict/
 | `bun run dev` | Start dev server with hot reload |
 | `bun run start` | Start production server |
 | `bun run test` | Run test suite |
+| `bun run rebuild:all` | Full rebuild: base imports + enrichment + build:db |
+| `bun run import:base` | Run all base importers (jmdict + kaikki, `--mode replace`) |
+| `bun run import:enrichment` | Run all enrichment importers (jlpt, tatoeba, wadoku, wiktionary) |
 | `bun run import:jmdict --lang en,de` | Import JMdict base dictionary |
-| `bun run import:kaikki --lang ko,zh-cn,zh-tw` | Import Korean/Chinese definitions from Kaikki |
+| `bun run import:kaikki` | Import Korean/Chinese definitions from Kaikki |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
-| `bun run import:tatoeba` | Import example sentences (`en`, `de`, `ko`, `zh-cn`, `zh-tw`) |
+| `bun run import:tatoeba` | Import example sentences (all languages) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
 | `bun run import:wiktionary` | Import Wiktionary definitions |
 | `bun run build:db` | Build SQLite from JSON files |
+| `bun run verify:dict <path>` | Check dictionary for duplicates and artifacts |
+| `bun run cleanup:dict <path>` | Fix duplicates and artifacts (add `--apply` to write) |
 | `bun run data:pull` | Pull dictionary files from Git LFS |
 | `bun run add` | Add manual dictionary entries |
 
@@ -345,10 +346,7 @@ bun test tests/build-db         # DB build pipeline
 4. Add example sentence support in `scripts/import/tatoeba.ts` if Tatoeba has a corpus for the language.
 5. Import and build:
    ```bash
-   bun run import:jmdict --lang en,de
-   bun run import:kaikki --lang ko,zh-cn,zh-tw
-   bun run import:tatoeba
-   bun run build:db
+   bun run rebuild:all
    ```
 
 ---
@@ -374,7 +372,6 @@ Deployments use GitHub Actions with `railway up`:
 
 1. Add repository secrets:
    - `RAILWAY_TOKEN`
-   - `RAILWAY_PROJECT_ID`
    - `RAILWAY_SERVICE_ID`
 2. Disconnect GitHub repo in Railway Dashboard
 3. Create a GitHub release to trigger deployment
@@ -429,12 +426,11 @@ bun run build:db
 <details>
 <summary><b>Import modes explained</b></summary>
 
-Most import scripts support three modes:
-- `--mode merge` (default): Add new entries, merge with existing
-- `--mode diff`: Preview changes without writing files
-- `--mode replace`: Full replace (removes stale keys, then writes source snapshot)
-
-Note: `import:tatoeba` only supports `merge` and `diff`.
+All import scripts support these modes via `--mode <mode>`:
+- `merge` (default): Add new entries/definitions, merge with existing
+- `diff`: Preview changes without writing files
+- `refresh`: Strip all data from a source and re-import it
+- `replace`: Full replace — remove stale keys, then write fresh (base importers only)
 
 Example:
 ```bash
@@ -442,8 +438,6 @@ bun run import:jmdict --lang en --mode diff   # Preview
 bun run import:jmdict --lang en --mode merge  # Apply
 ```
 </details>
-
-For more issues, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ---
 
