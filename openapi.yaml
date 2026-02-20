@@ -11,7 +11,7 @@ info:
   license:
     name: CC-BY-SA-4.0
 servers:
-  - url: https://api.yori-dict.com
+  - url: https://yori-dict-production.up.railway.app
     description: Production
   - url: http://localhost:3000
     description: Local development

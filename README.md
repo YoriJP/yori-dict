@@ -19,7 +19,7 @@
 
 ```bash
 # One-liner to start
-curl -s "https://api.yori-dict.com/v1/lookup?word=食べる&lang=en" | jq
+curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&lang=en" | jq
 ```
 
 **Response:**
@@ -312,6 +312,52 @@ yori-dict/
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `DATABASE_PATH` | `./dict.sqlite` | SQLite database path |
+
+---
+
+## SDK
+
+A generated TypeScript client lives in `sdk/`. It's committed to the repo and requires no publish step.
+
+### Usage
+
+**1. Copy or reference `sdk/` in your project.**
+
+If this repo is a monorepo dependency, import directly. Otherwise copy the `sdk/` directory into your project.
+
+**2. Configure the base URL once:**
+
+```ts
+import { client } from './sdk'
+
+client.setConfig({ baseUrl: 'https://yori-dict-production.up.railway.app' })
+```
+
+**3. Call `lookupWord` with full type safety:**
+
+```ts
+import { lookupWord } from './sdk'
+
+const { data, error } = await lookupWord({
+  query: { word: '食べる', lang: 'en' },
+})
+
+if (data) {
+  console.log(data.word)        // '食べる'
+  console.log(data.definitions) // ['to eat', ...]
+  console.log(data.conjugations?.polite) // 'たべます'
+}
+```
+
+All request parameters and response shapes are fully typed from the OpenAPI spec. The `lang` parameter accepts `'en' | 'de' | 'ko' | 'zh-CN' | 'zh-TW'` (and lowercase aliases).
+
+### Regenerating
+
+The SDK is auto-generated from `openapi.yaml`. After any API changes, regenerate with:
+
+```bash
+bun run sdk:generate
+```
 
 ---
 
