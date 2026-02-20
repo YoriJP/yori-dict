@@ -1,0 +1,253 @@
+openapi: 3.0.3
+info:
+  title: Yori Dict API
+  version: 1.0.0
+  description: |
+    Fast multilingual Japanese dictionary API with automatic conjugations.
+    Supports lookup by kanji or reading with per-language translations.
+
+    **Deduplication:** `definitions` are deduplicated across sources (JMdict, Kaikki, Wiktionary, Wadoku).
+    `examples` are also deduplicated — each unique `japanese` sentence appears at most once.
+  license:
+    name: CC-BY-SA-4.0
+servers:
+  - url: https://api.yori-dict.com
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+tags:
+  - name: Health
+  - name: Dictionary
+  - name: Docs
+paths:
+  /openapi.yaml:
+    get:
+      tags:
+        - Docs
+      summary: OpenAPI specification
+      operationId: getOpenApiSpec
+      responses:
+        '200':
+          description: OpenAPI 3.0 YAML document
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /docs:
+    get:
+      tags:
+        - Docs
+      summary: Interactive API reference (Scalar UI)
+      operationId: getApiDocs
+      responses:
+        '200':
+          description: HTML page with Scalar API reference UI
+          content:
+            text/html:
+              schema:
+                type: string
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+  /v1/lookup:
+    get:
+      tags:
+        - Dictionary
+      summary: Lookup a Japanese word
+      description: |
+        Looks up a Japanese word by exact match on kanji (`word`) or reading.
+        Returns `404` when the word does not exist, or when no translation is available for the requested language.
+      operationId: lookupWord
+      parameters:
+        - name: word
+          in: query
+          required: true
+          description: Japanese word in kanji, hiragana, or katakana.
+          schema:
+            type: string
+            minLength: 1
+          example: 食べる
+        - name: lang
+          in: query
+          required: false
+          description: |
+            Translation language code. Default is `en`.
+            Canonical values: `en`, `de`, `ko`, `zh-cn`, `zh-tw`.
+            Accepted aliases: `zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant`.
+          schema:
+            type: string
+            default: en
+            enum:
+              - en
+              - de
+              - ko
+              - zh-cn
+              - zh-tw
+              - zh-CN
+              - zh-TW
+              - zh_cn
+              - zh_tw
+              - zh-hans
+              - zh-hant
+          example: en
+      responses:
+        '200':
+          description: Lookup result
+          content:
+            application/json; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/LookupResponse'
+              examples:
+                verbWithConjugations:
+                  summary: Verb response (conjugations included)
+                  value:
+                    word: 食べる
+                    reading: たべる
+                    romaji: taberu
+                    partOfSpeech:
+                      - ichidan verb
+                      - transitive verb
+                    definitions:
+                      - to eat
+                      - to live on (e.g. a salary)
+                    conjugations:
+                      dictionary: 食べる
+                      polite: たべます
+                      negative: たべない
+                      past: たべた
+                      te: たべて
+                    examples:
+                      - japanese: 毎朝食べます
+                        translation: I eat every morning
+                nounWithoutConjugations:
+                  summary: Non-conjugatable word
+                  value:
+                    word: 猫
+                    reading: ねこ
+                    romaji: neko
+                    partOfSpeech:
+                      - noun
+                    definitions:
+                      - cat
+                    examples: []
+        '400':
+          description: Invalid request (missing word or invalid language)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingWord:
+                  value:
+                    error: 'Missing required parameter: word'
+                invalidLanguage:
+                  value:
+                    error: 'Invalid language. Supported: en, de, ko, zh-cn, zh-tw'
+        '404':
+          description: Word not found or language translation unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Word not found
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Internal server error
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+    LookupResponse:
+      type: object
+      required:
+        - word
+        - reading
+        - romaji
+        - partOfSpeech
+        - definitions
+        - examples
+      properties:
+        word:
+          type: string
+          description: Kanji form
+        reading:
+          type: string
+          description: Hiragana reading
+        romaji:
+          type: string
+          description: Romanized reading
+        partOfSpeech:
+          type: array
+          items:
+            type: string
+        definitions:
+          type: array
+          items:
+            type: string
+        conjugations:
+          $ref: '#/components/schemas/Conjugations'
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExampleSentence'
+    Conjugations:
+      type: object
+      required:
+        - dictionary
+        - polite
+        - negative
+        - past
+        - te
+      properties:
+        dictionary:
+          type: string
+        polite:
+          type: string
+        negative:
+          type: string
+        past:
+          type: string
+        te:
+          type: string
+    ExampleSentence:
+      type: object
+      required:
+        - japanese
+        - translation
+      properties:
+        japanese:
+          type: string
+        translation:
+          type: string
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
