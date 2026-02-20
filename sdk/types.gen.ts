@@ -55,7 +55,7 @@ export type GetOpenApiSpecResponses = {
     /**
      * OpenAPI 3.0 YAML document
      */
-    200: Blob | File;
+    200: string;
 };
 
 export type GetOpenApiSpecResponse = GetOpenApiSpecResponses[keyof GetOpenApiSpecResponses];
