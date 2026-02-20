@@ -40,14 +40,10 @@ import {
 const DATA_DIR = './data'
 const CACHE_DIR = './data/cache'
 
-type ImportLang = 'ko' | 'zh-cn' | 'zh-tw'
+type ImportLang = 'zh-cn' | 'zh-tw'
 type KaikkiSourceLang = Exclude<ImportLang, 'zh-tw'>
 
 const SOURCE_CONFIG: Record<KaikkiSourceLang, { url: string; cacheName: string }> = {
-  ko: {
-    url: 'https://kaikki.org/kowiktionary/raw-wiktextract-data.jsonl.gz',
-    cacheName: 'kaikki-kowiktionary-raw.jsonl.gz',
-  },
   'zh-cn': {
     url: 'https://kaikki.org/zhwiktionary/raw-wiktextract-data.jsonl.gz',
     cacheName: 'kaikki-zhwiktionary-raw.jsonl.gz',
@@ -439,7 +435,7 @@ function parseFileOverrides(args: string[]): Partial<Record<KaikkiSourceLang, st
 
     const [lang, ...rest] = value.split('=')
     const filePath = rest.join('=')
-    if ((lang === 'ko' || lang === 'zh-cn') && filePath) {
+    if (lang === 'zh-cn' && filePath) {
       overrides[lang] = filePath
     }
   }
@@ -451,25 +447,24 @@ function printHelp(): void {
   console.log(`
 Kaikki Importer
 
-Imports Korean and Chinese definitions for Japanese entries.
+Imports Chinese definitions for Japanese entries.
 Data source:
-  https://kaikki.org/kowiktionary/raw-wiktextract-data.jsonl.gz
   https://kaikki.org/zhwiktionary/raw-wiktextract-data.jsonl.gz
 
 Usage:
   bun run import:kaikki [options]
 
 Options:
-  --lang <langs>    Comma-separated: ko,zh-cn,zh-tw (default: ko,zh-cn,zh-tw)
+  --lang <langs>    Comma-separated: zh-cn,zh-tw (default: zh-cn,zh-tw)
   --mode <mode>     merge | diff | replace | refresh (default: merge)
   --limit <n>       Max definitions per entry from source (default: 8)
   --file=<lang>=<path>
-                    Override local JSONL file for ko or zh-cn
-                    Example: --file=ko=./data/cache/kowiktionary.jsonl
+                    Override local JSONL file for zh-cn
+                    Example: --file=zh-cn=./data/cache/zhwiktionary.jsonl
 
 Examples:
   bun run import:kaikki
-  bun run import:kaikki --lang ko,zh-cn --mode diff
+  bun run import:kaikki --lang zh-cn --mode diff
   bun run import:kaikki --file=zh-cn=./data/cache/zhwiktionary.jsonl
 `)
 }
@@ -477,7 +472,7 @@ Examples:
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
 
-  let langs: ImportLang[] = ['ko', 'zh-cn', 'zh-tw']
+  let langs: ImportLang[] = ['zh-cn', 'zh-tw']
   let mode: ImportMode = 'merge'
   let maxDefsPerEntry = DEFAULT_MAX_DEFINITIONS
 
@@ -512,9 +507,9 @@ async function main(): Promise<void> {
   }
 
   for (const lang of langs) {
-    if (!['ko', 'zh-cn', 'zh-tw'].includes(lang)) {
+    if (!['zh-cn', 'zh-tw'].includes(lang)) {
       console.error(`Unsupported language: ${lang}`)
-      console.error('Supported: ko, zh-cn, zh-tw')
+      console.error('Supported: zh-cn, zh-tw')
       process.exit(1)
     }
   }
@@ -534,7 +529,7 @@ async function main(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true })
 
   for (const lang of langs) {
-    if (lang === 'ko' || lang === 'zh-cn') {
+    if (lang === 'zh-cn') {
       await importKaikkiLanguage(lang, mode, maxDefsPerEntry, fileOverrides[lang])
       continue
     }
