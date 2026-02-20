@@ -30,7 +30,7 @@ paths:
         '200':
           description: OpenAPI 3.0 YAML document
           content:
-            application/yaml:
+            text/yaml:
               schema:
                 type: string
   /docs:
