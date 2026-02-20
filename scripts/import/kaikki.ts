@@ -1,16 +1,21 @@
 /**
- * Kaikki Importer - Imports Korean/Chinese definitions for Japanese entries
+ * Kaikki Importer - Imports Chinese definitions for Japanese entries
  *
  * Data source:
- *   - https://kaikki.org/kowiktionary/raw-wiktextract-data.jsonl.gz
  *   - https://kaikki.org/zhwiktionary/raw-wiktextract-data.jsonl.gz
  * License: CC-BY-SA 3.0 (Wiktionary) / MIT (wiktextract)
  *
  * Usage:
  *   bun run import:kaikki
- *   bun run import:kaikki --lang ko,zh-cn
+ *   bun run import:kaikki --lang zh-cn
  *   bun run import:kaikki --mode diff
- *   bun run import:kaikki --file=ko=/path/to/raw-kowiktionary.jsonl
+ *   bun run import:kaikki --file=zh-cn=/path/to/raw-zhwiktionary.jsonl
+ *
+ * Key normalization:
+ *   Kaikki source data often uses truncated or variant readings (e.g. "行く:い"
+ *   instead of "行く:いく"). After collecting source entries, keys are
+ *   automatically normalized against en.json so that zh-cn/zh-tw translations
+ *   are always keyed identically to JMdict entries.
  */
 
 import { mkdir } from 'fs/promises'
@@ -287,6 +292,79 @@ async function resolveSourcePath(
 }
 
 // ============================================================================
+// Key normalization against en.json
+// ============================================================================
+
+/**
+ * Build a word → canonical keys index from en.json (JMdict).
+ * Used to normalize source keys that use variant/truncated readings.
+ */
+async function buildEnIndex(): Promise<{ enKeys: Set<string>; enByWord: Map<string, string[]> }> {
+  const enPath = `${DATA_DIR}/en.json`
+  if (!existsSync(enPath)) {
+    return { enKeys: new Set(), enByWord: new Map() }
+  }
+
+  const en = await loadDict(enPath, 'en')
+  const enKeys = new Set(Object.keys(en.entries))
+  const enByWord = new Map<string, string[]>()
+
+  for (const key of enKeys) {
+    const word = key.split(':')[0]
+    const existing = enByWord.get(word) ?? []
+    existing.push(key)
+    enByWord.set(word, existing)
+  }
+
+  return { enKeys, enByWord }
+}
+
+/**
+ * Normalize source entry keys to match JMdict canonical keys from en.json.
+ *
+ * For each source key not present in en.json: if the word part (before ":")
+ * matches exactly one en.json key, re-key the entry to the canonical form,
+ * merging definitions if the canonical key already exists. Ambiguous matches
+ * (word has multiple readings in en.json) are left as-is.
+ */
+function normalizeSourceKeys(
+  sourceEntries: Record<string, DictEntry>,
+  enKeys: Set<string>,
+  enByWord: Map<string, string[]>
+): { rekeyed: number; merged: number; ambiguous: number } {
+  let rekeyed = 0
+  let merged = 0
+  let ambiguous = 0
+
+  const toProcess = Object.keys(sourceEntries).filter((k) => !enKeys.has(k))
+
+  for (const srcKey of toProcess) {
+    const word = srcKey.split(':')[0]
+    const candidates = enByWord.get(word)
+
+    if (!candidates || candidates.length === 0) continue
+    if (candidates.length > 1) { ambiguous++; continue }
+
+    const canonicalKey = candidates[0]
+    const srcEntry = sourceEntries[srcKey]
+    const existing = sourceEntries[canonicalKey]
+
+    if (existing) {
+      existing.definitions = mergeDefinitions(existing.definitions, srcEntry.definitions)
+      merged++
+    } else {
+      const [canonicalWord, canonicalReading] = canonicalKey.split(':')
+      sourceEntries[canonicalKey] = { ...srcEntry, word: canonicalWord, reading: canonicalReading }
+      rekeyed++
+    }
+
+    delete sourceEntries[srcKey]
+  }
+
+  return { rekeyed, merged, ambiguous }
+}
+
+// ============================================================================
 // Import logic
 // ============================================================================
 
@@ -359,6 +437,17 @@ async function importKaikkiLanguage(
   }
 
   console.log('')
+
+  // Normalize keys against en.json so entries align with JMdict canonical keys
+  const { enKeys, enByWord } = await buildEnIndex()
+  if (enKeys.size > 0) {
+    const normStats = normalizeSourceKeys(sourceEntries, enKeys, enByWord)
+    console.log(
+      `  Key normalization: ${normStats.rekeyed} rekeyed, ` +
+      `${normStats.merged} merged, ${normStats.ambiguous} ambiguous (skipped)`
+    )
+  }
+
   stats.produced = Object.keys(sourceEntries).length
   console.log(`  Produced source entries: ${stats.produced.toLocaleString()}`)
 
