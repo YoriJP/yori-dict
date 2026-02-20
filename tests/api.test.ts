@@ -347,6 +347,32 @@ describe('API contract — response shape', () => {
   })
 })
 
+describe('GET /openapi.yaml — SDK contract', () => {
+  test('returns 200', async () => {
+    const res = await request('/openapi.yaml')
+    expect(res.status).toBe(200)
+  })
+
+  test('Content-Type is text/plain (matches SDK string parse mode)', async () => {
+    const res = await request('/openapi.yaml')
+    expect(res.headers.get('content-type')).toContain('text/plain')
+  })
+
+  test('body is a string (not binary), parseable as YAML text', async () => {
+    const res = await request('/openapi.yaml')
+    const body = await res.text()
+    expect(typeof body).toBe('string')
+    expect(body).toContain('openapi:')
+    expect(body).toContain('/v1/lookup')
+  })
+
+  test('body cannot be parsed as JSON (confirms it is not accidentally JSON)', async () => {
+    const res = await request('/openapi.yaml')
+    const body = await res.text()
+    expect(() => JSON.parse(body)).toThrow()
+  })
+})
+
 describe('404 Handler', () => {
   test('unknown route returns 404', async () => {
     const res = await request('/unknown-route')
