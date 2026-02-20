@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { apiReference } from '@scalar/hono-api-reference'
+import { readFileSync } from 'fs'
 import { lookupWord, initSchema } from './db'
 import {
   SUPPORTED_LANGUAGES,
@@ -13,6 +15,16 @@ initSchema()
 
 // Middleware
 app.use('*', cors())
+
+// Serve OpenAPI spec
+app.get('/openapi.yaml', (c) => {
+  return c.text(readFileSync('./openapi.yaml', 'utf-8'), 200, {
+    'Content-Type': 'application/yaml; charset=utf-8',
+  })
+})
+
+// Scalar API reference UI
+app.get('/docs', apiReference({ url: '/openapi.yaml' }))
 
 // Health check
 app.get('/health', (c) => {
