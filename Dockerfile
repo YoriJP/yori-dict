@@ -37,6 +37,9 @@ RUN bun install --frozen-lockfile --production
 # Copy source code
 COPY src/ ./src/
 
+# Copy OpenAPI spec (served at /openapi.yaml and used by /docs)
+COPY openapi.yaml ./
+
 # Copy built database from builder stage
 COPY --from=builder /app/dict.sqlite ./
 

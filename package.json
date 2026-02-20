@@ -23,13 +23,16 @@
     "cleanup:dict": "bun run scripts/cleanup-dict.ts",
     "add": "bun run scripts/add.ts",
     "docker:build": "docker build -t yori-dict .",
-    "docker:run": "docker run -p 3000:3000 -e PORT=3000 yori-dict"
+    "docker:run": "docker run -p 3000:3000 -e PORT=3000 yori-dict",
+    "sdk:generate": "openapi-ts"
   },
   "dependencies": {
+    "@scalar/hono-api-reference": "^0.9.44",
     "hono": "^4.6.0",
     "wanakana": "^5.3.1"
   },
   "devDependencies": {
+    "@hey-api/openapi-ts": "^0.92.4",
     "@types/bun": "latest"
   },
   "license": "CC-BY-SA-4.0"

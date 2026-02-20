@@ -19,7 +19,7 @@
 
 ```bash
 # One-liner to start
-curl -s "https://api.yori-dict.com/v1/lookup?word=食べる&lang=en" | jq
+curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&lang=en" | jq
 ```
 
 **Response:**
@@ -77,6 +77,18 @@ Server runs at `http://localhost:3000`
 
 ## API Reference
 
+### `GET /docs`
+
+Interactive API reference UI (Scalar). Open in a browser:
+
+```
+http://localhost:3000/docs
+```
+
+The spec is also available as a raw file at `GET /openapi.yaml` and in the repo at [`openapi.yaml`](openapi.yaml).
+
+---
+
 ### `GET /v1/lookup`
 
 Lookup a Japanese word by kanji or reading.
@@ -130,7 +142,7 @@ curl "localhost:3000/v1/lookup?word=たべる"
 
 ### `GET /health`
 
-Health check. Returns `{"status": "ok"}`.
+Returns `{"status": "ok"}` when the server is running.
 
 ---
 
@@ -242,6 +254,13 @@ yori-dict/
 │   ├── db.ts             # SQLite queries
 │   ├── types.ts          # TypeScript types
 │   └── conjugator.ts     # Verb conjugation engine
+├── sdk/                  # Generated TypeScript client (do not edit manually)
+│   ├── index.ts          # Re-exports everything
+│   ├── types.gen.ts      # Generated types (LookupResponse, Conjugations, etc.)
+│   ├── sdk.gen.ts        # Generated service functions (lookupWord, healthCheck)
+│   ├── client.gen.ts     # Client factory
+│   ├── client/           # Fetch client implementation
+│   └── core/             # Serialization, auth, SSE utilities
 ├── scripts/
 │   ├── import/
 │   │   ├── base.ts       # Shared types & merge logic
@@ -269,6 +288,8 @@ yori-dict/
 │   ├── zh-cn.json        # Chinese Simplified dictionary (Git LFS)
 │   ├── zh-tw.json        # Chinese Traditional dictionary (Git LFS)
 │   └── cache/            # Downloaded raw data (gitignored)
+├── openapi.yaml          # OpenAPI 3.0 spec (source of truth for SDK codegen)
+├── openapi-ts.config.ts  # SDK codegen config (@hey-api/openapi-ts)
 └── dict.sqlite           # Built database (gitignored)
 ```
 
@@ -293,6 +314,7 @@ yori-dict/
 | `bun run cleanup:dict <path>` | Fix duplicates and artifacts (add `--apply` to write) |
 | `bun run data:pull` | Pull dictionary files from Git LFS |
 | `bun run add` | Add manual dictionary entries |
+| `bun run sdk:generate` | Regenerate `sdk/` from `openapi.yaml` |
 
 ### Environment Variables
 
@@ -300,6 +322,52 @@ yori-dict/
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `DATABASE_PATH` | `./dict.sqlite` | SQLite database path |
+
+---
+
+## SDK
+
+A generated TypeScript client lives in `sdk/`. It's committed to the repo and requires no publish step.
+
+### Usage
+
+**1. Copy or reference `sdk/` in your project.**
+
+If this repo is a monorepo dependency, import directly. Otherwise copy the `sdk/` directory into your project.
+
+**2. Configure the base URL once:**
+
+```ts
+import { client } from './sdk/client.gen'
+
+client.setConfig({ baseUrl: 'https://yori-dict-production.up.railway.app' })
+```
+
+**3. Call `lookupWord` with full type safety:**
+
+```ts
+import { lookupWord } from './sdk'
+
+const { data, error } = await lookupWord({
+  query: { word: '食べる', lang: 'en' },
+})
+
+if (data) {
+  console.log(data.word)        // '食べる'
+  console.log(data.definitions) // ['to eat', ...]
+  console.log(data.conjugations?.polite) // 'たべます'
+}
+```
+
+All request parameters and response shapes are fully typed from the OpenAPI spec. The `lang` parameter accepts `'en' | 'de' | 'ko' | 'zh-CN' | 'zh-TW'` (and lowercase aliases).
+
+### Regenerating
+
+The SDK is auto-generated from `openapi.yaml`. After any API changes, regenerate with:
+
+```bash
+bun run sdk:generate
+```
 
 ---
 
@@ -320,13 +388,27 @@ bun run dev
 ### Running Tests
 
 ```bash
-bun test                        # Run all tests
-bun test --watch                # Watch mode
-bun test tests/conjugator.test  # Conjugation engine
-bun test tests/api.test         # API endpoints
-bun test tests/import-base      # Import merge logic
-bun test tests/import-kaikki    # Kaikki parser
-bun test tests/build-db         # DB build pipeline
+bun test               # Run all 124 tests across 5 files
+bun test --watch       # Watch mode
+```
+
+**Test files:**
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `tests/api.test.ts` | 39 | HTTP endpoints, response contracts, multi-language coverage, error handling |
+| `tests/conjugator.test.ts` | 29 | Verb/adjective conjugation for all word types |
+| `tests/import-base.test.ts` | 34 | Multi-source merge logic, deduplication, import modes |
+| `tests/import-kaikki.test.ts` | 20 | Kaikki JSONL parser (Korean/Chinese) |
+| `tests/build-db.test.ts` | 2 | SQLite build pipeline smoke test |
+
+Run a single file:
+```bash
+bun test tests/api.test.ts
+bun test tests/conjugator.test.ts
+bun test tests/import-base.test.ts
+bun test tests/import-kaikki.test.ts
+bun test tests/build-db.test.ts
 ```
 
 ### Code Style

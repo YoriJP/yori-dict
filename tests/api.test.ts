@@ -184,6 +184,195 @@ describe('GET /v1/lookup - Error Cases', () => {
   })
 })
 
+describe('API contract — multi-language coverage', () => {
+  // いいえ has translations in all 5 languages under the same word entry
+  const langs = ['en', 'de', 'ko', 'zh-cn', 'zh-tw'] as const
+
+  for (const lang of langs) {
+    test(`いいえ returns 200 + definitions in ${lang}`, async () => {
+      const res = await request(`/v1/lookup?word=いいえ&lang=${lang}`)
+      expect(res.status).toBe(200)
+
+      const body = await res.json()
+      expect(body.definitions.length).toBeGreaterThan(0)
+      expect(Array.isArray(body.examples)).toBe(true)
+    })
+  }
+
+  test('zh-CN alias returns same data as zh-cn', async () => {
+    const [upper, lower] = await Promise.all([
+      request('/v1/lookup?word=いいえ&lang=zh-CN').then((r) => r.json()),
+      request('/v1/lookup?word=いいえ&lang=zh-cn').then((r) => r.json()),
+    ])
+    expect(upper.definitions).toEqual(lower.definitions)
+  })
+
+  test('zh-TW alias returns same data as zh-tw', async () => {
+    const [upper, lower] = await Promise.all([
+      request('/v1/lookup?word=いいえ&lang=zh-TW').then((r) => r.json()),
+      request('/v1/lookup?word=いいえ&lang=zh-tw').then((r) => r.json()),
+    ])
+    expect(upper.definitions).toEqual(lower.definitions)
+  })
+
+  test('examples have correct shape and no duplicates', async () => {
+    const res = await request('/v1/lookup?word=食べる')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    for (const ex of body.examples) {
+      expect(typeof ex.japanese).toBe('string')
+      expect(typeof ex.translation).toBe('string')
+    }
+
+    const seen = new Set<string>()
+    for (const ex of body.examples) {
+      expect(seen.has(ex.japanese)).toBe(false)
+      seen.add(ex.japanese)
+    }
+  })
+})
+
+describe('API contract — response shape', () => {
+  test('definitions array contains only strings (no nulls or objects)', async () => {
+    const res = await request('/v1/lookup?word=出る')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.definitions.length).toBeGreaterThan(0)
+    for (const def of body.definitions) {
+      expect(typeof def).toBe('string')
+      expect(def.length).toBeGreaterThan(0)
+    }
+  })
+
+  test('definitions are deduplicated (no exact string repeats)', async () => {
+    // 出る merges 76 definitions from multiple sources — dedup is critical
+    const res = await request('/v1/lookup?word=出る')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    const seen = new Set<string>()
+    for (const def of body.definitions) {
+      expect(seen.has(def)).toBe(false)
+      seen.add(def)
+    }
+  })
+
+  test('partOfSpeech array contains only non-empty strings', async () => {
+    const res = await request('/v1/lookup?word=食べる')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.partOfSpeech.length).toBeGreaterThan(0)
+    for (const pos of body.partOfSpeech) {
+      expect(typeof pos).toBe('string')
+      expect(pos.length).toBeGreaterThan(0)
+    }
+  })
+
+  test('reading is valid hiragana/katakana (not empty, not kanji)', async () => {
+    const res = await request('/v1/lookup?word=食べる')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.reading).toBe('たべる')
+    expect(body.romaji).toBe('taberu')
+  })
+
+  test('conjugations object has all required keys when present', async () => {
+    const res = await request('/v1/lookup?word=飲む')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.conjugations).toBeDefined()
+    expect(body.conjugations).toHaveProperty('dictionary')
+    expect(body.conjugations).toHaveProperty('polite')
+    expect(body.conjugations).toHaveProperty('negative')
+    expect(body.conjugations).toHaveProperty('past')
+    expect(body.conjugations).toHaveProperty('te')
+    for (const val of Object.values(body.conjugations)) {
+      expect(typeof val).toBe('string')
+      expect((val as string).length).toBeGreaterThan(0)
+    }
+  })
+
+  test('de translation returns different definitions than en', async () => {
+    const [en, de] = await Promise.all([
+      request('/v1/lookup?word=飲む&lang=en').then((r) => r.json()),
+      request('/v1/lookup?word=飲む&lang=de').then((r) => r.json()),
+    ])
+    expect(en.definitions.length).toBeGreaterThan(0)
+    expect(de.definitions.length).toBeGreaterThan(0)
+    // German and English definitions should not be identical arrays
+    expect(en.definitions).not.toEqual(de.definitions)
+  })
+
+  test('noun lookup returns no conjugations field', async () => {
+    const res = await request('/v1/lookup?word=猫')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.conjugations).toBeUndefined()
+  })
+
+  test('i-adjective returns correct conjugation forms', async () => {
+    const res = await request('/v1/lookup?word=大きい')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.conjugations).toBeDefined()
+    expect(body.conjugations.negative).toBe('おおきくない')
+    expect(body.conjugations.past).toBe('おおきかった')
+  })
+
+  test('lookup by reading returns the canonical kanji form', async () => {
+    const res = await request('/v1/lookup?word=のむ')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.word).toBe('飲む')
+    expect(body.reading).toBe('のむ')
+  })
+
+  test('response has no extra undocumented top-level fields', async () => {
+    const res = await request('/v1/lookup?word=食べる')
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    const allowedKeys = new Set(['word', 'reading', 'romaji', 'partOfSpeech', 'definitions', 'examples', 'conjugations'])
+    for (const key of Object.keys(body)) {
+      expect(allowedKeys.has(key)).toBe(true)
+    }
+  })
+})
+
+describe('GET /openapi.yaml — SDK contract', () => {
+  test('returns 200', async () => {
+    const res = await request('/openapi.yaml')
+    expect(res.status).toBe(200)
+  })
+
+  test('Content-Type is text/plain (matches SDK string parse mode)', async () => {
+    const res = await request('/openapi.yaml')
+    expect(res.headers.get('content-type')).toContain('text/plain')
+  })
+
+  test('body is a string (not binary), parseable as YAML text', async () => {
+    const res = await request('/openapi.yaml')
+    const body = await res.text()
+    expect(typeof body).toBe('string')
+    expect(body).toContain('openapi:')
+    expect(body).toContain('/v1/lookup')
+  })
+
+  test('body cannot be parsed as JSON (confirms it is not accidentally JSON)', async () => {
+    const res = await request('/openapi.yaml')
+    const body = await res.text()
+    expect(() => JSON.parse(body)).toThrow()
+  })
+})
+
 describe('404 Handler', () => {
   test('unknown route returns 404', async () => {
     const res = await request('/unknown-route')
