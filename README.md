@@ -254,6 +254,13 @@ yori-dict/
 │   ├── db.ts             # SQLite queries
 │   ├── types.ts          # TypeScript types
 │   └── conjugator.ts     # Verb conjugation engine
+├── sdk/                  # Generated TypeScript client (do not edit manually)
+│   ├── index.ts          # Re-exports everything
+│   ├── types.gen.ts      # Generated types (LookupResponse, Conjugations, etc.)
+│   ├── sdk.gen.ts        # Generated service functions (lookupWord, healthCheck)
+│   ├── client.gen.ts     # Client factory
+│   ├── client/           # Fetch client implementation
+│   └── core/             # Serialization, auth, SSE utilities
 ├── scripts/
 │   ├── import/
 │   │   ├── base.ts       # Shared types & merge logic
@@ -281,6 +288,8 @@ yori-dict/
 │   ├── zh-cn.json        # Chinese Simplified dictionary (Git LFS)
 │   ├── zh-tw.json        # Chinese Traditional dictionary (Git LFS)
 │   └── cache/            # Downloaded raw data (gitignored)
+├── openapi.yaml          # OpenAPI 3.0 spec (source of truth for SDK codegen)
+├── openapi-ts.config.ts  # SDK codegen config (@hey-api/openapi-ts)
 └── dict.sqlite           # Built database (gitignored)
 ```
 
@@ -305,6 +314,7 @@ yori-dict/
 | `bun run cleanup:dict <path>` | Fix duplicates and artifacts (add `--apply` to write) |
 | `bun run data:pull` | Pull dictionary files from Git LFS |
 | `bun run add` | Add manual dictionary entries |
+| `bun run sdk:generate` | Regenerate `sdk/` from `openapi.yaml` |
 
 ### Environment Variables
 
