@@ -152,9 +152,9 @@ Returns `{"status": "ok"}` when the server is running.
 |----------|---------|----------|---------|
 | **English** | ~214k | ~64k | JMdict, Wiktionary (+55k defs), Tatoeba |
 | **German** | ~128k | ~45k | JMdict, Wadoku (+2.5k defs), Tatoeba |
-| **Chinese (CN)** | ~26k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
-| **Chinese (TW)** | ~26k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
-| **Korean** | ~5k | ~1.7k | Kaikki, Tatoeba (`jpn-kor`) |
+| **Chinese (CN)** | ~25k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Chinese (TW)** | ~25k | ~14k | Kaikki, Tatoeba (`jpn-cmn`) |
+| **Korean** | ~32k | ~1.7k | KRDICT (NIKL), Tatoeba (`jpn-kor`) |
 
 **Source Details:**
 
@@ -163,7 +163,8 @@ Returns `{"status": "ok"}` when the server is running.
 | [JMdict-simplified](https://github.com/scriptin/jmdict-simplified) | Base dictionary | CC-BY-SA-4.0 | `import:jmdict` |
 | [Tatoeba](https://tatoeba.org) via [ManyThings](https://manythings.org/anki/) and [raw exports](https://downloads.tatoeba.org/exports/per_language/) | Example sentences | CC-BY-2.0 | `import:tatoeba` |
 | [Wiktionary](https://kaikki.org) | Additional definitions | CC-BY-SA-3.0 | `import:wiktionary` |
-| [Kaikki](https://kaikki.org) (kowiktionary/zhwiktionary) | Korean/Chinese definitions | CC-BY-SA-3.0 | `import:kaikki` |
+| [Kaikki](https://kaikki.org) (zhwiktionary) | Chinese definitions | CC-BY-SA-3.0 | `import:kaikki` |
+| [KRDICT](https://krdict.korean.go.kr) (via [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic)) | Korean translations | CC-BY-SA-2.0-KR | `import:krdict` |
 | [Wadoku](https://github.com/WaDoku/WaDokuJT-Data) | German definitions | CC-BY-SA-3.0 | `import:wadoku` |
 | [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) | JLPT N5-N1 levels | Public Domain | `import:jlpt` |
 
@@ -265,7 +266,8 @@ yori-dict/
 │   ├── import/
 │   │   ├── base.ts       # Shared types & merge logic
 │   │   ├── jmdict.ts     # JMdict importer
-│   │   ├── kaikki.ts     # Korean/Chinese definitions
+│   │   ├── kaikki.ts     # Chinese definitions (Kaikki/zhwiktionary)
+│   │   ├── krdict.ts     # Korean translations (KRDICT/NIKL)
 │   │   ├── jlpt.ts       # JLPT level importer
 │   │   ├── tatoeba.ts    # Example sentences
 │   │   ├── wadoku.ts     # German definitions
@@ -304,7 +306,8 @@ yori-dict/
 | `bun run import:base` | Run all base importers (jmdict + kaikki, `--mode replace`) |
 | `bun run import:enrichment` | Run all enrichment importers (jlpt, tatoeba, wadoku, wiktionary) |
 | `bun run import:jmdict --lang en,de` | Import JMdict base dictionary |
-| `bun run import:kaikki` | Import Korean/Chinese definitions from Kaikki |
+| `bun run import:kaikki` | Import Chinese definitions from Kaikki (zhwiktionary) |
+| `bun run import:krdict` | Import Korean translations from KRDICT (NIKL) |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
 | `bun run import:tatoeba` | Import example sentences (all languages) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
@@ -422,7 +425,7 @@ bun test tests/build-db.test.ts
 
 1. Check source support first:
    `en/de`: [scriptin/jmdict-simplified releases](https://github.com/scriptin/jmdict-simplified/releases)
-   `ko/zh`: [Kaikki index](https://kaikki.org)
+   `zh`: [Kaikki index](https://kaikki.org)
 2. Update language definitions and aliases in `src/types.ts`.
 3. Add importer mapping in the relevant import script (`scripts/import/jmdict.ts` or `scripts/import/kaikki.ts`).
 4. Add example sentence support in `scripts/import/tatoeba.ts` if Tatoeba has a corpus for the language.
@@ -529,7 +532,10 @@ Imports are split into two tiers:
 
 **Base importers** — create dictionary entries from scratch (must run first):
 - `bun run import:jmdict --lang en,de`  → data/en.json, data/de.json
-- `bun run import:kaikki`               → data/ko.json, data/zh-cn.json, data/zh-tw.json
+- `bun run import:kaikki`               → data/zh-cn.json, data/zh-tw.json
+- `bun run import:krdict`               → data/ko.json
+
+> **Note:** `import:krdict` copies JLPT levels directly from JMdict entries, so `import:jlpt` is a no-op for `ko` — no need to run it separately.
 
 **Enrichment importers** — add data to existing entries (require base imports):
 - `bun run import:jlpt`       → adds JLPT levels to all languages
@@ -543,6 +549,7 @@ Imports are split into two tiers:
 |---|---|---|
 | `import:jmdict` | `merge` | `merge`, `diff`, `replace`, `refresh` |
 | `import:kaikki` | `merge` | `merge`, `diff`, `replace`, `refresh` |
+| `import:krdict` | `replace` | `merge`, `diff`, `replace`, `refresh` |
 | `import:jlpt` | `merge` | `merge`, `diff`, `refresh` |
 | `import:tatoeba` | `merge` | `merge`, `diff`, `refresh` |
 | `import:wadoku` | `merge` | `merge`, `diff`, `refresh` |
@@ -569,4 +576,5 @@ bun run rebuild:all        # base + enrichment + build:db (full rebuild)
 - [Tatoeba](https://tatoeba.org) / [ManyThings.org](https://manythings.org/anki/) / [Tatoeba raw exports](https://downloads.tatoeba.org/exports/per_language/) - Example sentences
 - [Wadoku](https://www.wadoku.de) - Japanese-German dictionary
 - [Wiktionary](https://kaikki.org) - Wiktionary extracts
+- [KRDICT](https://krdict.korean.go.kr) / [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic) - Korean-Japanese dictionary (NIKL)
 - [wanakana](https://github.com/WaniKani/WanaKana) - Japanese text utilities
