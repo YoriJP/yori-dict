@@ -338,7 +338,7 @@ If this repo is a monorepo dependency, import directly. Otherwise copy the `sdk/
 **2. Configure the base URL once:**
 
 ```ts
-import { client } from './sdk'
+import { client } from './sdk/client.gen'
 
 client.setConfig({ baseUrl: 'https://yori-dict-production.up.railway.app' })
 ```
