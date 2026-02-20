@@ -26,6 +26,7 @@
     "docker:run": "docker run -p 3000:3000 -e PORT=3000 yori-dict"
   },
   "dependencies": {
+    "@scalar/hono-api-reference": "^0.9.44",
     "hono": "^4.6.0",
     "wanakana": "^5.3.1"
   },
