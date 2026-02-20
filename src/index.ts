@@ -19,7 +19,7 @@ app.use('*', cors())
 // Serve OpenAPI spec
 app.get('/openapi.yaml', (c) => {
   return c.text(readFileSync('./openapi.yaml', 'utf-8'), 200, {
-    'Content-Type': 'application/yaml; charset=utf-8',
+    'Content-Type': 'text/yaml; charset=utf-8',
   })
 })
 
