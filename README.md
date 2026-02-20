@@ -77,6 +77,18 @@ Server runs at `http://localhost:3000`
 
 ## API Reference
 
+### `GET /docs`
+
+Interactive API reference UI (Scalar). Open in a browser:
+
+```
+http://localhost:3000/docs
+```
+
+The spec is also available as a raw file at `GET /openapi.yaml` and in the repo at [`openapi.yaml`](openapi.yaml).
+
+---
+
 ### `GET /v1/lookup`
 
 Lookup a Japanese word by kanji or reading.
@@ -130,7 +142,7 @@ curl "localhost:3000/v1/lookup?word=たべる"
 
 ### `GET /health`
 
-Health check. Returns `{"status": "ok"}`.
+Returns `{"status": "ok"}` when the server is running.
 
 ---
 
@@ -320,13 +332,27 @@ bun run dev
 ### Running Tests
 
 ```bash
-bun test                        # Run all tests
-bun test --watch                # Watch mode
-bun test tests/conjugator.test  # Conjugation engine
-bun test tests/api.test         # API endpoints
-bun test tests/import-base      # Import merge logic
-bun test tests/import-kaikki    # Kaikki parser
-bun test tests/build-db         # DB build pipeline
+bun test               # Run all 124 tests across 5 files
+bun test --watch       # Watch mode
+```
+
+**Test files:**
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `tests/api.test.ts` | 39 | HTTP endpoints, response contracts, multi-language coverage, error handling |
+| `tests/conjugator.test.ts` | 29 | Verb/adjective conjugation for all word types |
+| `tests/import-base.test.ts` | 34 | Multi-source merge logic, deduplication, import modes |
+| `tests/import-kaikki.test.ts` | 20 | Kaikki JSONL parser (Korean/Chinese) |
+| `tests/build-db.test.ts` | 2 | SQLite build pipeline smoke test |
+
+Run a single file:
+```bash
+bun test tests/api.test.ts
+bun test tests/conjugator.test.ts
+bun test tests/import-base.test.ts
+bun test tests/import-kaikki.test.ts
+bun test tests/build-db.test.ts
 ```
 
 ### Code Style
