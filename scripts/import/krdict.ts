@@ -322,10 +322,10 @@ async function importKrdict(
     sourceEntries[key] = {
       word: enEntry.word,
       reading: enEntry.reading,
-      partOfSpeech: enEntry.partOfSpeech,
+      partOfSpeech: enEntry.partOfSpeech, // attributed to 'jmdict' — correct ownership
       common: enEntry.common,
-      commonSources: [],
-      jlpt: enEntry.jlpt,
+      commonSources: [SOURCE_NAME],
+      jlpt: enEntry.jlpt,                 // attributed to 'jmdict' — correct ownership
       definitions,
       examples: [],
     }
@@ -340,6 +340,21 @@ async function importKrdict(
 
   if (mode === 'refresh') {
     const stats = refreshDictSource(dict.entries, sourceEntries, SOURCE_NAME)
+
+    // refreshDictSource only deletes entries that are fully empty after stripping
+    // krdict data. But ko entries retain jmdict-attributed POS/JLPT, so isEmpty()
+    // stays false even for stale entries KRDICT no longer covers. Prune them here:
+    // an entry with no krdict definitions and not in the new source set is stale.
+    const sourceKeys = new Set(Object.keys(sourceEntries))
+    for (const key of Object.keys(dict.entries)) {
+      const entry = dict.entries[key]
+      const hasKrDefs = entry.definitions.some((d) => d.sources.includes(SOURCE_NAME))
+      if (!hasKrDefs && !sourceKeys.has(key)) {
+        delete dict.entries[key]
+        stats.removed++
+      }
+    }
+
     console.log('\n=== Import Statistics ===')
     console.log(`  New entries: ${stats.added.toLocaleString()}`)
     console.log(`  Updated entries: ${stats.updated.toLocaleString()}`)
