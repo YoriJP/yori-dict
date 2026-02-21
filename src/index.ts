@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { apiReference } from '@scalar/hono-api-reference'
 import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import { lookupWord, initSchema } from './db'
 import {
   SUPPORTED_LANGUAGES,
@@ -13,12 +14,15 @@ const app = new Hono()
 // Initialize database schema on startup
 initSchema()
 
+// Load OpenAPI spec once at startup with an absolute path (cwd-independent)
+const openapiSpec = readFileSync(resolve(import.meta.dir, '../openapi.yaml'), 'utf-8')
+
 // Middleware
 app.use('*', cors())
 
 // Serve OpenAPI spec
 app.get('/openapi.yaml', (c) => {
-  return c.text(readFileSync('./openapi.yaml', 'utf-8'), 200, {
+  return c.text(openapiSpec, 200, {
     'Content-Type': 'text/plain; charset=utf-8',
   })
 })
