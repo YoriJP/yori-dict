@@ -26,6 +26,31 @@ import {
 } from './base'
 
 // ============================================================================
+// Sudachi tokenizer (initialized once at startup)
+// ============================================================================
+
+type SudachiMorpheme = {
+  surface: string
+  normalized_form: string
+}
+
+type SudachiTokenize = (text: string, mode: unknown) => string
+
+let _tokenize: SudachiTokenize | null = null
+let _TokenizeMode: { C: unknown } | null = null
+
+async function initSudachi(): Promise<void> {
+  const sudachi = await import('sudachi')
+  _tokenize = sudachi.tokenize as SudachiTokenize
+  _TokenizeMode = sudachi.TokenizeMode as { C: unknown }
+}
+
+function tokenizeSentence(text: string): SudachiMorpheme[] {
+  if (!_tokenize || !_TokenizeMode) throw new Error('Sudachi not initialized')
+  return JSON.parse(_tokenize(text, _TokenizeMode.C)) as SudachiMorpheme[]
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -366,15 +391,11 @@ function buildWordIndex(dict: DictFile): WordIndex {
   const wordToKeys = new Map<string, Set<string>>()
 
   for (const [key, entry] of Object.entries(dict.entries)) {
+    // Index by word (kanji) form only — readings are not indexed to avoid false
+    // positives from kana substrings that appear inside unrelated words.
     const wordKeys = wordToKeys.get(entry.word) || new Set()
     wordKeys.add(key)
     wordToKeys.set(entry.word, wordKeys)
-
-    if (entry.reading !== entry.word) {
-      const readingKeys = wordToKeys.get(entry.reading) || new Set()
-      readingKeys.add(key)
-      wordToKeys.set(entry.reading, readingKeys)
-    }
   }
 
   return {
@@ -383,31 +404,28 @@ function buildWordIndex(dict: DictFile): WordIndex {
   }
 }
 
-function extractCandidateWords(text: string, minLen: number, maxLen: number): Set<string> {
-  const candidates = new Set<string>()
-  const japaneseRegex = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/
-
-  for (let i = 0; i < text.length; i++) {
-    for (let len = minLen; len <= Math.min(maxLen, text.length - i); len++) {
-      const substr = text.substring(i, i + len)
-      if (japaneseRegex.test(substr)) {
-        candidates.add(substr)
-      }
-    }
-  }
-
-  return candidates
-}
-
 function findMatchingEntries(
   sentence: TatoebaSentence,
   index: WordIndex,
-  minWordLength: number = 2,
-  maxWordLength: number = 10
 ): MatchResult[] {
   const results: MatchResult[] = []
   const seenKeys = new Set<string>()
-  const candidates = extractCandidateWords(sentence.japanese, minWordLength, maxWordLength)
+
+  // Tokenize with sudachi to get proper word boundaries and normalized forms.
+  // For each token, try both its surface form and normalized_form (lemma) so
+  // that inflected forms like 食べた match dictionary entry 食べる.
+  let morphemes: SudachiMorpheme[]
+  try {
+    morphemes = tokenizeSentence(sentence.japanese)
+  } catch {
+    return results
+  }
+
+  const candidates = new Set<string>()
+  for (const m of morphemes) {
+    candidates.add(m.surface)
+    candidates.add(m.normalized_form)
+  }
 
   for (const candidate of candidates) {
     const keys = index.wordToKeys.get(candidate)
@@ -442,7 +460,7 @@ function importExamples(
 
   console.log('  Building word index...')
   const index = buildWordIndex(dict)
-  console.log(`  Indexed ${index.wordToKeys.size.toLocaleString()} unique words/readings`)
+  console.log(`  Indexed ${index.wordToKeys.size.toLocaleString()} unique words`)
 
   const exampleCounts = new Map<string, number>()
   for (const [key, entry] of Object.entries(dict.entries)) {
@@ -500,6 +518,10 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
   console.log(`Max examples per word: ${maxExamples}`)
+
+  console.log('\nInitializing Sudachi tokenizer...')
+  await initSudachi()
+  console.log('Sudachi ready.')
 
   for (const lang of langs) {
     console.log(`\n=== Processing ${lang} ===`)
