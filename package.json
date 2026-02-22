@@ -30,6 +30,7 @@
   "dependencies": {
     "@scalar/hono-api-reference": "^0.9.44",
     "hono": "^4.6.0",
+    "sudachi": "^0.1.5",
     "wanakana": "^5.3.1"
   },
   "devDependencies": {
