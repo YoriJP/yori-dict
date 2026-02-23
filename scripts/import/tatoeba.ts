@@ -26,12 +26,13 @@ import {
 } from './base'
 
 // ============================================================================
-// Sudachi tokenizer — native subprocess, batch mode
+// Sudachi tokenizer — native subprocess, streaming mode
 //
 // Requires: pip install sudachipy sudachidict-core
 //
-// All sentences are written to sudachipy stdin at once (-m C = most granular
-// split mode). Output format per token (with -a flag):
+// Sentences are streamed to sudachipy stdin line by line; output is read
+// line by line as it arrives (-m C = most granular split mode).
+// Output format per token (with -a flag):
 //   surface\tPOS\tnormalized_form\tdictionary_form\treading\t...
 // Sentences are separated by "EOS" lines.
 // ============================================================================
@@ -41,13 +42,13 @@ interface SudachiMorpheme {
   dictionaryForm: string  // col 4 with -a flag
 }
 
-/**
- * Tokenize all sentences in a single sudachipy subprocess call.
- * Returns a parallel array of morpheme arrays (one per sentence).
- * Throws a descriptive error if sudachipy is not installed.
- */
-async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
-  // Check sudachipy is available
+const SUDACHI_TIMEOUT_MS = 30_000  // 30s timeout waiting for next EOS
+
+// Cache result of sudachipy --version so we only check once per process.
+let _sudachiChecked = false
+
+async function checkSudachi(): Promise<void> {
+  if (_sudachiChecked) return
   try {
     const check = Bun.spawn(['sudachipy', '--version'], { stdout: 'pipe', stderr: 'pipe' })
     await check.exited
@@ -57,8 +58,16 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
       '  pip install sudachipy sudachidict-core'
     )
   }
+  _sudachiChecked = true
+}
 
-  const input = sentences.join('\n') + '\n'
+/**
+ * Tokenize sentences using a single long-running sudachipy subprocess.
+ * Sentences are written to stdin one by one; output is read line by line.
+ * Returns a parallel array of morpheme arrays (one per sentence).
+ */
+async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
+  await checkSudachi()
 
   const proc = Bun.spawn(['sudachipy', '-m', 'C', '-a'], {
     stdin: 'pipe',
@@ -66,35 +75,59 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
     stderr: 'pipe',
   })
 
-  proc.stdin.write(input)
-  proc.stdin.end()
+  const result: SudachiMorpheme[][] = []
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
+  // Read stdout line by line via async iterator
+  const reader = proc.stdout.getReader()
+  let buf = ''
+
+  async function readNextEOS(): Promise<SudachiMorpheme[]> {
+    const morphemes: SudachiMorpheme[] = []
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`sudachipy timed out after ${SUDACHI_TIMEOUT_MS}ms`)), SUDACHI_TIMEOUT_MS)
+    )
+
+    while (true) {
+      // Read chunks until we have a full line
+      while (!buf.includes('\n')) {
+        const chunk = await Promise.race([
+          reader.read(),
+          timeoutPromise,
+        ])
+        if (chunk.done) break
+        buf += new TextDecoder().decode(chunk.value)
+      }
+
+      const nl = buf.indexOf('\n')
+      if (nl === -1) break  // EOF without EOS
+
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+
+      if (line === 'EOS') return morphemes
+
+      const cols = line.split('\t')
+      if (cols.length >= 4) {
+        morphemes.push({ surface: cols[0], dictionaryForm: cols[3] })
+      }
+    }
+
+    return morphemes
+  }
+
+  // Stream sentences to stdin, collect one EOS group per sentence
+  for (const sentence of sentences) {
+    proc.stdin.write(sentence + '\n')
+    result.push(await readNextEOS())
+  }
+
+  proc.stdin.end()
   await proc.exited
 
   if (proc.exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text()
     throw new Error(`sudachipy failed: ${stderr}`)
-  }
-
-  // Parse output: tokens separated by newlines, sentences separated by "EOS"
-  const result: SudachiMorpheme[][] = []
-  let current: SudachiMorpheme[] = []
-
-  for (const line of stdout.split('\n')) {
-    if (line === 'EOS' || line === '') {
-      if (current.length > 0) {
-        result.push(current)
-        current = []
-      }
-      continue
-    }
-    const cols = line.split('\t')
-    if (cols.length >= 4) {
-      current.push({ surface: cols[0], dictionaryForm: cols[3] })
-    }
   }
 
   return result
