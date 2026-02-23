@@ -7,7 +7,6 @@
       "dependencies": {
         "@scalar/hono-api-reference": "^0.9.44",
         "hono": "^4.6.0",
-        "sudachi": "^0.1.5",
         "wanakana": "^5.3.1",
       },
       "devDependencies": {
@@ -130,8 +129,6 @@
     "shebang-command": ["shebang-command@2.0.0", "", { "dependencies": { "shebang-regex": "^3.0.0" } }, "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA=="],
 
     "shebang-regex": ["shebang-regex@3.0.0", "", {}, "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A=="],
-
-    "sudachi": ["sudachi@0.1.5", "", {}, "sha512-sZn/ofVtfCnOdhyyeMWIEaTwDB4iat9UbrskSiin0gBBnkitfE46estP8yjwF7MaEWKFVh//9GPd/RUQ2RhnGA=="],
 
     "tagged-tag": ["tagged-tag@1.0.0", "", {}, "sha512-yEFYrVhod+hdNyx7g5Bnkkb0G6si8HJurOoOEgC8B/O0uXLHlaey/65KRv6cuWBNhBgHKAROVpc7QyYqE5gFng=="],
 
