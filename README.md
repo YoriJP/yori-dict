@@ -392,7 +392,7 @@ bun run dev
 ### Running Tests
 
 ```bash
-bun test               # Run all 124 tests across 5 files
+bun test               # Run all 128 tests across 5 files
 bun test --watch       # Watch mode
 ```
 
@@ -400,7 +400,7 @@ bun test --watch       # Watch mode
 
 | File | Tests | Covers |
 |------|-------|--------|
-| `tests/api.test.ts` | 39 | HTTP endpoints, response contracts, multi-language coverage, error handling |
+| `tests/api.test.ts` | 43 | HTTP endpoints, response contracts, multi-language coverage, error handling |
 | `tests/conjugator.test.ts` | 29 | Verb/adjective conjugation for all word types |
 | `tests/import-base.test.ts` | 34 | Multi-source merge logic, deduplication, import modes |
 | `tests/import-kaikki.test.ts` | 20 | Kaikki JSONL parser (Korean/Chinese) |
