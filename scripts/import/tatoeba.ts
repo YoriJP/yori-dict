@@ -26,6 +26,123 @@ import {
 } from './base'
 
 // ============================================================================
+// Sudachi tokenizer — native subprocess, streaming mode
+//
+// Requires: pip install sudachipy sudachidict-core
+//
+// Sentences are streamed to sudachipy stdin line by line; output is read
+// line by line as it arrives (-m C = most granular split mode).
+// Output format per token (with -a flag):
+//   surface\tPOS\tnormalized_form\tdictionary_form\treading\t...
+// Sentences are separated by "EOS" lines.
+// ============================================================================
+
+interface SudachiMorpheme {
+  surface: string
+  dictionaryForm: string  // col 4 with -a flag
+}
+
+const SUDACHI_TIMEOUT_MS = 30_000  // 30s timeout waiting for next EOS
+
+// Cache result of sudachipy --version so we only check once per process.
+let _sudachiChecked = false
+
+async function checkSudachi(): Promise<void> {
+  if (_sudachiChecked) return
+  try {
+    const check = Bun.spawn(['sudachipy', '--version'], { stdout: 'pipe', stderr: 'pipe' })
+    await check.exited
+  } catch {
+    throw new Error(
+      'sudachipy not found. Install it with:\n' +
+      '  pip install sudachipy sudachidict-core'
+    )
+  }
+  _sudachiChecked = true
+}
+
+/**
+ * Tokenize sentences using a single long-running sudachipy subprocess.
+ * Sentences are written to stdin one by one; output is read line by line.
+ * Returns a parallel array of morpheme arrays (one per sentence).
+ */
+async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
+  await checkSudachi()
+
+  const proc = Bun.spawn(['sudachipy', '-m', 'C', '-a'], {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+
+  const result: SudachiMorpheme[][] = []
+
+  // Single persistent decoder with stream:true so multibyte characters
+  // (e.g. Japanese kanji) split across chunk boundaries are reassembled
+  // correctly rather than being replaced with U+FFFD.
+  const decoder = new TextDecoder('utf-8', { fatal: false })
+  const reader = proc.stdout.getReader()
+  let buf = ''
+
+  async function readNextEOS(): Promise<SudachiMorpheme[]> {
+    const morphemes: SudachiMorpheme[] = []
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`sudachipy timed out after ${SUDACHI_TIMEOUT_MS}ms`)), SUDACHI_TIMEOUT_MS)
+    )
+
+    while (true) {
+      // Read chunks until we have a full line
+      while (!buf.includes('\n')) {
+        const chunk = await Promise.race([
+          reader.read(),
+          timeoutPromise,
+        ])
+        if (chunk.done) {
+          // Flush any remaining bytes held by the streaming decoder
+          buf += decoder.decode()
+          break
+        }
+        // stream:true keeps incomplete multibyte sequences buffered inside
+        // the decoder until the next chunk completes them
+        buf += decoder.decode(chunk.value, { stream: true })
+      }
+
+      const nl = buf.indexOf('\n')
+      if (nl === -1) break  // EOF without EOS
+
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+
+      if (line === 'EOS') return morphemes
+
+      const cols = line.split('\t')
+      if (cols.length >= 4) {
+        morphemes.push({ surface: cols[0], dictionaryForm: cols[3] })
+      }
+    }
+
+    return morphemes
+  }
+
+  // Stream sentences to stdin, collect one EOS group per sentence
+  for (const sentence of sentences) {
+    proc.stdin.write(sentence + '\n')
+    result.push(await readNextEOS())
+  }
+
+  proc.stdin.end()
+  await proc.exited
+
+  if (proc.exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text()
+    throw new Error(`sudachipy failed: ${stderr}`)
+  }
+
+  return result
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -366,15 +483,11 @@ function buildWordIndex(dict: DictFile): WordIndex {
   const wordToKeys = new Map<string, Set<string>>()
 
   for (const [key, entry] of Object.entries(dict.entries)) {
+    // Index by word (kanji) form only — readings are not indexed to avoid false
+    // positives from kana substrings that appear inside unrelated words.
     const wordKeys = wordToKeys.get(entry.word) || new Set()
     wordKeys.add(key)
     wordToKeys.set(entry.word, wordKeys)
-
-    if (entry.reading !== entry.word) {
-      const readingKeys = wordToKeys.get(entry.reading) || new Set()
-      readingKeys.add(key)
-      wordToKeys.set(entry.reading, readingKeys)
-    }
   }
 
   return {
@@ -383,31 +496,21 @@ function buildWordIndex(dict: DictFile): WordIndex {
   }
 }
 
-function extractCandidateWords(text: string, minLen: number, maxLen: number): Set<string> {
-  const candidates = new Set<string>()
-  const japaneseRegex = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/
-
-  for (let i = 0; i < text.length; i++) {
-    for (let len = minLen; len <= Math.min(maxLen, text.length - i); len++) {
-      const substr = text.substring(i, i + len)
-      if (japaneseRegex.test(substr)) {
-        candidates.add(substr)
-      }
-    }
-  }
-
-  return candidates
-}
-
 function findMatchingEntries(
   sentence: TatoebaSentence,
+  morphemes: SudachiMorpheme[],
   index: WordIndex,
-  minWordLength: number = 2,
-  maxWordLength: number = 10
 ): MatchResult[] {
   const results: MatchResult[] = []
   const seenKeys = new Set<string>()
-  const candidates = extractCandidateWords(sentence.japanese, minWordLength, maxWordLength)
+
+  // Try both surface form and dictionary form so inflected forms like
+  // 食べた (surface) match dictionary entry 食べる (dictionaryForm).
+  const candidates = new Set<string>()
+  for (const m of morphemes) {
+    candidates.add(m.surface)
+    candidates.add(m.dictionaryForm)
+  }
 
   for (const candidate of candidates) {
     const keys = index.wordToKeys.get(candidate)
@@ -427,12 +530,12 @@ function findMatchingEntries(
 // Import logic
 // ============================================================================
 
-function importExamples(
+async function importExamples(
   dict: DictFile,
   sentences: TatoebaSentence[],
   maxExamples: number,
   mode: ImportMode
-): ImportStats {
+): Promise<ImportStats> {
   const stats: ImportStats = {
     sentencesProcessed: 0,
     matchesFound: 0,
@@ -442,7 +545,11 @@ function importExamples(
 
   console.log('  Building word index...')
   const index = buildWordIndex(dict)
-  console.log(`  Indexed ${index.wordToKeys.size.toLocaleString()} unique words/readings`)
+  console.log(`  Indexed ${index.wordToKeys.size.toLocaleString()} unique words`)
+
+  console.log(`  Tokenizing ${sentences.length.toLocaleString()} sentences with sudachi...`)
+  const allMorphemes = await tokenizeAll(sentences.map((s) => s.japanese))
+  console.log('  Tokenization complete.')
 
   const exampleCounts = new Map<string, number>()
   for (const [key, entry] of Object.entries(dict.entries)) {
@@ -450,18 +557,14 @@ function importExamples(
   }
 
   const updatedEntries = new Set<string>()
-  const updateInterval = Math.max(1, Math.floor(sentences.length / 10))
 
   console.log('  Matching sentences to entries...')
   for (let i = 0; i < sentences.length; i++) {
     const sentence = sentences[i]
+    const morphemes = allMorphemes[i] ?? []
     stats.sentencesProcessed++
 
-    if (i > 0 && i % updateInterval === 0) {
-      process.stdout.write(`\r  Processed ${i.toLocaleString()}/${sentences.length.toLocaleString()}...`)
-    }
-
-    const matches = findMatchingEntries(sentence, index)
+    const matches = findMatchingEntries(sentence, morphemes, index)
     stats.matchesFound += matches.length
 
     for (const match of matches) {
@@ -536,7 +639,7 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
     }
 
     console.log('\nImporting examples...')
-    const stats = importExamples(dict, sentences, maxExamples, mode === 'refresh' ? 'merge' : mode)
+    const stats = await importExamples(dict, sentences, maxExamples, mode === 'refresh' ? 'merge' : mode)
 
     console.log('\nResults:')
     console.log(`  Sentences processed: ${stats.sentencesProcessed.toLocaleString()}`)

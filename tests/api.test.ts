@@ -153,34 +153,34 @@ describe('GET /v1/lookup - Error Cases', () => {
   })
 
   test('word exists but no translation for language returns 404', async () => {
-    // zh aliases are accepted, even if translation is missing
-    const res = await request('/v1/lookup?word=食べる&lang=zh-TW')
+    // 彼処 (あそこ) exists in en but has no zh-tw translation
+    const res = await request('/v1/lookup?word=彼処&lang=zh-tw')
     expect(res.status).toBe(404)
   })
 
   test('canonical lowercase zh code is accepted', async () => {
     const res = await request('/v1/lookup?word=食べる&lang=zh-tw')
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
   })
 
   test('zh-CN alias is accepted', async () => {
     const res = await request('/v1/lookup?word=食べる&lang=zh-CN')
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
   })
 
   test('ko language is accepted', async () => {
     const res = await request('/v1/lookup?word=食べる&lang=ko')
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
   })
 
   test('zh-cn language is accepted for Chinese definitions', async () => {
     const res = await request('/v1/lookup?word=食べる&lang=zh-cn')
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
   })
 
   test('zh-tw language is accepted for Traditional Chinese definitions', async () => {
     const res = await request('/v1/lookup?word=食べる&lang=zh-tw')
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
   })
 })
 
