@@ -322,10 +322,10 @@ async function importKrdict(
     sourceEntries[key] = {
       word: enEntry.word,
       reading: enEntry.reading,
-      partOfSpeech: enEntry.partOfSpeech, // attributed to 'jmdict' — correct ownership
+      partOfSpeech: enEntry.partOfSpeech,   // attributed to 'jmdict' — correct ownership
       common: enEntry.common,
-      commonSources: [SOURCE_NAME],
-      jlpt: enEntry.jlpt,                 // attributed to 'jmdict' — correct ownership
+      commonSources: enEntry.commonSources, // attributed to 'jmdict' — preserve actual commonness
+      jlpt: enEntry.jlpt,                   // attributed to 'jmdict' — correct ownership
       definitions,
       examples: [],
     }
