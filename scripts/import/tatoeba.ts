@@ -16,6 +16,7 @@
 import { mkdir } from 'fs/promises'
 import { existsSync, readdirSync, createReadStream, renameSync, unlinkSync } from 'fs'
 import { createInterface } from 'readline'
+import * as OpenCC from 'opencc-js'
 import {
   type DictEntry,
   type DictFile,
@@ -24,6 +25,13 @@ import {
   saveDict,
   downloadWithProgress,
 } from './base'
+
+// Lazy-initialized converter: Simplified Chinese → Traditional Chinese (Taiwan variant)
+let _s2twConverter: ((text: string) => string) | null = null
+function toTraditional(text: string): string {
+  if (!_s2twConverter) _s2twConverter = OpenCC.Converter({ from: 'cn', to: 'tw' })
+  return _s2twConverter(text)
+}
 
 // ============================================================================
 // Sudachi tokenizer — native subprocess, streaming mode
@@ -187,7 +195,6 @@ const LANG_CONFIG: Record<string, LangConfig> = {
     code: 'jpn-cmn',
     targetCode: 'cmn',
   },
-  // Until script conversion is added, we bootstrap zh-tw examples from the same cmn corpus.
   'zh-tw': {
     kind: 'raw-pair',
     code: 'jpn-cmn',
@@ -472,7 +479,17 @@ async function downloadTatoeba(lang: string): Promise<TatoebaSentence[]> {
     return downloadManyThings(config)
   }
 
-  return downloadRawPair(config)
+  const pairs = await downloadRawPair(config)
+
+  // zh-tw shares the cmn (Simplified Chinese) corpus — convert translations to Traditional
+  if (lang === 'zh-tw') {
+    console.log('  Converting Simplified Chinese → Traditional Chinese (Taiwan)...')
+    const converted = pairs.map((p) => ({ ...p, translation: toTraditional(p.translation) }))
+    console.log(`  Converted ${converted.length.toLocaleString()} sentences`)
+    return converted
+  }
+
+  return pairs
 }
 
 // ============================================================================
