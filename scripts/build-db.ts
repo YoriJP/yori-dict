@@ -23,10 +23,13 @@ const LFS_POINTER_HEADER = 'version https://git-lfs.github.com/spec/v1'
 // ============================================================================
 
 function initDb(): Database {
-  // Remove existing database
-  if (existsSync(DB_PATH)) {
-    console.log(`Removing existing database: ${DB_PATH}`)
-    unlinkSync(DB_PATH)
+  // Remove existing database and WAL sidecar files
+  for (const suffix of ['', '-wal', '-shm']) {
+    const path = DB_PATH + suffix
+    if (existsSync(path)) {
+      if (suffix === '') console.log(`Removing existing database: ${DB_PATH}`)
+      unlinkSync(path)
+    }
   }
 
   const db = new Database(DB_PATH)
