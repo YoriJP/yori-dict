@@ -26,28 +26,78 @@ import {
 } from './base'
 
 // ============================================================================
-// Sudachi tokenizer (initialized once at startup)
+// Sudachi tokenizer — native subprocess, batch mode
+//
+// Requires: pip install sudachipy sudachidict-core
+//
+// All sentences are written to sudachipy stdin at once (-m C = most granular
+// split mode). Output format per token (with -a flag):
+//   surface\tPOS\tnormalized_form\tdictionary_form\treading\t...
+// Sentences are separated by "EOS" lines.
 // ============================================================================
 
-type SudachiMorpheme = {
+interface SudachiMorpheme {
   surface: string
-  normalized_form: string
+  dictionaryForm: string  // col 4 with -a flag
 }
 
-type SudachiTokenize = (text: string, mode: unknown) => string
+/**
+ * Tokenize all sentences in a single sudachipy subprocess call.
+ * Returns a parallel array of morpheme arrays (one per sentence).
+ * Throws a descriptive error if sudachipy is not installed.
+ */
+async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
+  // Check sudachipy is available
+  try {
+    const check = Bun.spawn(['sudachipy', '--version'], { stdout: 'pipe', stderr: 'pipe' })
+    await check.exited
+  } catch {
+    throw new Error(
+      'sudachipy not found. Install it with:\n' +
+      '  pip install sudachipy sudachidict-core'
+    )
+  }
 
-let _tokenize: SudachiTokenize | null = null
-let _TokenizeMode: { C: unknown } | null = null
+  const input = sentences.join('\n') + '\n'
 
-async function initSudachi(): Promise<void> {
-  const sudachi = await import('sudachi')
-  _tokenize = sudachi.tokenize as SudachiTokenize
-  _TokenizeMode = sudachi.TokenizeMode as { C: unknown }
-}
+  const proc = Bun.spawn(['sudachipy', '-m', 'C', '-a'], {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
 
-function tokenizeSentence(text: string): SudachiMorpheme[] {
-  if (!_tokenize || !_TokenizeMode) throw new Error('Sudachi not initialized')
-  return JSON.parse(_tokenize(text, _TokenizeMode.C)) as SudachiMorpheme[]
+  proc.stdin.write(input)
+  proc.stdin.end()
+
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  await proc.exited
+
+  if (proc.exitCode !== 0) {
+    throw new Error(`sudachipy failed: ${stderr}`)
+  }
+
+  // Parse output: tokens separated by newlines, sentences separated by "EOS"
+  const result: SudachiMorpheme[][] = []
+  let current: SudachiMorpheme[] = []
+
+  for (const line of stdout.split('\n')) {
+    if (line === 'EOS' || line === '') {
+      if (current.length > 0) {
+        result.push(current)
+        current = []
+      }
+      continue
+    }
+    const cols = line.split('\t')
+    if (cols.length >= 4) {
+      current.push({ surface: cols[0], dictionaryForm: cols[3] })
+    }
+  }
+
+  return result
 }
 
 // ============================================================================
@@ -406,25 +456,18 @@ function buildWordIndex(dict: DictFile): WordIndex {
 
 function findMatchingEntries(
   sentence: TatoebaSentence,
+  morphemes: SudachiMorpheme[],
   index: WordIndex,
 ): MatchResult[] {
   const results: MatchResult[] = []
   const seenKeys = new Set<string>()
 
-  // Tokenize with sudachi to get proper word boundaries and normalized forms.
-  // For each token, try both its surface form and normalized_form (lemma) so
-  // that inflected forms like 食べた match dictionary entry 食べる.
-  let morphemes: SudachiMorpheme[]
-  try {
-    morphemes = tokenizeSentence(sentence.japanese)
-  } catch {
-    return results
-  }
-
+  // Try both surface form and dictionary form so inflected forms like
+  // 食べた (surface) match dictionary entry 食べる (dictionaryForm).
   const candidates = new Set<string>()
   for (const m of morphemes) {
     candidates.add(m.surface)
-    candidates.add(m.normalized_form)
+    candidates.add(m.dictionaryForm)
   }
 
   for (const candidate of candidates) {
@@ -445,12 +488,12 @@ function findMatchingEntries(
 // Import logic
 // ============================================================================
 
-function importExamples(
+async function importExamples(
   dict: DictFile,
   sentences: TatoebaSentence[],
   maxExamples: number,
   mode: ImportMode
-): ImportStats {
+): Promise<ImportStats> {
   const stats: ImportStats = {
     sentencesProcessed: 0,
     matchesFound: 0,
@@ -462,24 +505,24 @@ function importExamples(
   const index = buildWordIndex(dict)
   console.log(`  Indexed ${index.wordToKeys.size.toLocaleString()} unique words`)
 
+  console.log(`  Tokenizing ${sentences.length.toLocaleString()} sentences with sudachi...`)
+  const allMorphemes = await tokenizeAll(sentences.map((s) => s.japanese))
+  console.log('  Tokenization complete.')
+
   const exampleCounts = new Map<string, number>()
   for (const [key, entry] of Object.entries(dict.entries)) {
     exampleCounts.set(key, entry.examples.length)
   }
 
   const updatedEntries = new Set<string>()
-  const updateInterval = Math.max(1, Math.floor(sentences.length / 10))
 
   console.log('  Matching sentences to entries...')
   for (let i = 0; i < sentences.length; i++) {
     const sentence = sentences[i]
+    const morphemes = allMorphemes[i] ?? []
     stats.sentencesProcessed++
 
-    if (i > 0 && i % updateInterval === 0) {
-      process.stdout.write(`\r  Processed ${i.toLocaleString()}/${sentences.length.toLocaleString()}...`)
-    }
-
-    const matches = findMatchingEntries(sentence, index)
+    const matches = findMatchingEntries(sentence, morphemes, index)
     stats.matchesFound += matches.length
 
     for (const match of matches) {
@@ -519,10 +562,6 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
   console.log(`Mode: ${mode}`)
   console.log(`Max examples per word: ${maxExamples}`)
 
-  console.log('\nInitializing Sudachi tokenizer...')
-  await initSudachi()
-  console.log('Sudachi ready.')
-
   for (const lang of langs) {
     console.log(`\n=== Processing ${lang} ===`)
 
@@ -558,7 +597,7 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
     }
 
     console.log('\nImporting examples...')
-    const stats = importExamples(dict, sentences, maxExamples, mode === 'refresh' ? 'merge' : mode)
+    const stats = await importExamples(dict, sentences, maxExamples, mode === 'refresh' ? 'merge' : mode)
 
     console.log('\nResults:')
     console.log(`  Sentences processed: ${stats.sentencesProcessed.toLocaleString()}`)
