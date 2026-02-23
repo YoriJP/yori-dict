@@ -52,6 +52,7 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 - [Bun](https://bun.sh) v1.0+ (`curl -fsSL https://bun.sh/install | bash`)
 - ~500MB disk space
 - Git LFS (`git lfs install`)
+- Python 3 + sudachipy (only needed for `import:tatoeba`): `pip install sudachipy sudachidict-core`
 
 ### Install & Run
 
@@ -161,7 +162,7 @@ Returns `{"status": "ok"}` when the server is running.
 | Source | Data | License | Imported Via |
 |--------|------|---------|--------------|
 | [JMdict-simplified](https://github.com/scriptin/jmdict-simplified) | Base dictionary | CC-BY-SA-4.0 | `import:jmdict` |
-| [Tatoeba](https://tatoeba.org) via [ManyThings](https://manythings.org/anki/) and [raw exports](https://downloads.tatoeba.org/exports/per_language/) | Example sentences | CC-BY-2.0 | `import:tatoeba` |
+| [Tatoeba](https://tatoeba.org) via [ManyThings](https://manythings.org/anki/) and [raw exports](https://downloads.tatoeba.org/exports/per_language/) | Example sentences | CC-BY-2.0 | `import:tatoeba` (requires `sudachipy`) |
 | [Wiktionary](https://kaikki.org) | Additional definitions | CC-BY-SA-3.0 | `import:wiktionary` |
 | [Kaikki](https://kaikki.org) (zhwiktionary) | Chinese definitions | CC-BY-SA-3.0 | `import:kaikki` |
 | [KRDICT](https://krdict.korean.go.kr) (via [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic)) | Korean translations | CC-BY-SA-2.0-KR | `import:krdict` |
@@ -474,11 +475,32 @@ See `.github/workflows/railway-deployment.yml`
 ## Troubleshooting
 
 <details>
+<summary><b>import:tatoeba fails: "sudachipy not found"</b></summary>
+
+The Tatoeba importer uses [SudachiPy](https://github.com/WorksApplications/SudachiPy) for morphological analysis to correctly match example sentences to dictionary entries. Install it with:
+
+```bash
+pip install sudachipy sudachidict-core
+```
+</details>
+
+<details>
 <summary><b>Build failed: "No language files found"</b></summary>
 
 You need to import data first:
 ```bash
 bun run import:jmdict --lang en
+bun run build:db
+```
+</details>
+
+<details>
+<summary><b>Build failed: "SQLiteError: disk I/O error"</b></summary>
+
+Stale WAL sidecar files from a previous interrupted build. The `build:db` script now cleans these up automatically. If you hit this on an older checkout, run:
+
+```bash
+rm -f dict.sqlite dict.sqlite-wal dict.sqlite-shm
 bun run build:db
 ```
 </details>
@@ -578,3 +600,4 @@ bun run rebuild:all        # base + enrichment + build:db (full rebuild)
 - [Wiktionary](https://kaikki.org) - Wiktionary extracts
 - [KRDICT](https://krdict.korean.go.kr) / [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic) - Korean-Japanese dictionary (NIKL)
 - [wanakana](https://github.com/WaniKani/WanaKana) - Japanese text utilities
+- [SudachiPy](https://github.com/WorksApplications/SudachiPy) / [SudachiDict](https://github.com/WorksApplications/SudachiDict) - Japanese morphological analyzer (used for example sentence matching)
