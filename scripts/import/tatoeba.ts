@@ -77,7 +77,10 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
 
   const result: SudachiMorpheme[][] = []
 
-  // Read stdout line by line via async iterator
+  // Single persistent decoder with stream:true so multibyte characters
+  // (e.g. Japanese kanji) split across chunk boundaries are reassembled
+  // correctly rather than being replaced with U+FFFD.
+  const decoder = new TextDecoder('utf-8', { fatal: false })
   const reader = proc.stdout.getReader()
   let buf = ''
 
@@ -95,8 +98,14 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
           reader.read(),
           timeoutPromise,
         ])
-        if (chunk.done) break
-        buf += new TextDecoder().decode(chunk.value)
+        if (chunk.done) {
+          // Flush any remaining bytes held by the streaming decoder
+          buf += decoder.decode()
+          break
+        }
+        // stream:true keeps incomplete multibyte sequences buffered inside
+        // the decoder until the next chunk completes them
+        buf += decoder.decode(chunk.value, { stream: true })
       }
 
       const nl = buf.indexOf('\n')
