@@ -209,6 +209,11 @@ components:
           type: array
           items:
             type: string
+        frequency:
+          type: integer
+          description: >
+            Frequency rank from JPDB (1 = most common). Only present if
+            frequency data is available for this entry.
         conjugations:
           $ref: '#/components/schemas/Conjugations'
         examples:
