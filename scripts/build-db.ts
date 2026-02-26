@@ -42,7 +42,8 @@ function initDb(): Database {
     reading TEXT NOT NULL,
     part_of_speech TEXT NOT NULL,
     common INTEGER DEFAULT 0,
-    jlpt TEXT
+    jlpt TEXT,
+    frequency INTEGER
   )`)
   db.exec(`CREATE TABLE translations (
     word_id TEXT NOT NULL,
@@ -81,6 +82,7 @@ interface WordData {
   partOfSpeech: string[]
   common: boolean
   jlpt: number[]
+  frequency: number | null
 }
 
 interface TranslationData {
@@ -130,6 +132,12 @@ function collectData(
           existing.jlpt.push(jlptEntry.level)
         }
       }
+      // Merge frequency (keep lower rank = more common)
+      if (entry.frequency?.rank !== undefined) {
+        if (existing.frequency === null || entry.frequency.rank < existing.frequency) {
+          existing.frequency = entry.frequency.rank
+        }
+      }
     } else {
       wordsMap.set(key, {
         word: entry.word,
@@ -137,6 +145,7 @@ function collectData(
         partOfSpeech: entry.partOfSpeech.map((p) => p.value),
         common: entry.commonSources.length > 0,
         jlpt: entry.jlpt.map((j) => j.level),
+        frequency: entry.frequency?.rank ?? null,
       })
     }
 
@@ -191,8 +200,8 @@ function insertWords(db: Database, wordsMap: Map<string, WordData>): number {
   console.log(`\nInserting ${wordsMap.size.toLocaleString()} words...`)
 
   const insertWord = db.prepare(`
-    INSERT INTO words (id, word, reading, part_of_speech, common, jlpt)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO words (id, word, reading, part_of_speech, common, jlpt, frequency)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
 
   const BATCH_SIZE = 5000
@@ -206,7 +215,8 @@ function insertWords(db: Database, wordsMap: Map<string, WordData>): number {
         data.reading,
         JSON.stringify(data.partOfSpeech),
         data.common ? 1 : 0,
-        data.jlpt.length > 0 ? JSON.stringify(data.jlpt.sort((a, b) => b - a)) : null
+        data.jlpt.length > 0 ? JSON.stringify(data.jlpt.sort((a, b) => b - a)) : null,
+        data.frequency
       )
     }
   })
