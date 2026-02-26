@@ -40,6 +40,7 @@ export interface LookupResponse {
   romaji: string
   partOfSpeech: string[]
   definitions: string[]
+  frequency?: number
   conjugations?: Conjugations
   examples: Example[]
 }
@@ -56,6 +57,7 @@ export interface WordRow {
   part_of_speech: string // JSON string array
   common: number
   jlpt: string | null // JSON string array of JLPT levels, e.g. "[5, 4]"
+  frequency: number | null
 }
 
 export interface TranslationRow {

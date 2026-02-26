@@ -149,7 +149,10 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
     })),
   }
 
-  // Only include conjugations if available
+  // Only include optional fields if present
+  if (wordRow.frequency !== null) {
+    response.frequency = wordRow.frequency
+  }
   if (conjugations) {
     response.conjugations = conjugations
   }
