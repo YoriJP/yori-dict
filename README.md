@@ -13,6 +13,7 @@
 - 📝 **Example sentences** - 82k+ curated examples from Tatoeba
 - 🗺️ **Proper nouns** - 740k+ names, places, and companies via JMnedict
 - 🎯 **JLPT levels** - N5-N1 tagged for study progress
+- 📊 **Frequency ranks** - JPDB frequency data for 311k+ entries
 
 ---
 
@@ -31,6 +32,7 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
   "romaji": "taberu",
   "partOfSpeech": ["ichidan verb", "transitive verb"],
   "definitions": ["to eat", "to live on (e.g. a salary)"],
+  "frequency": 195,
   "conjugations": {
     "dictionary": "食べる",
     "polite": "たべます",
@@ -121,6 +123,7 @@ curl "localhost:3000/v1/lookup?word=たべる"
   "romaji": "string",         // Romanized reading
   "partOfSpeech": ["string"], // Array of POS tags
   "definitions": ["string"],  // Array of meanings
+  "frequency": 195,           // Optional - JPDB rank (1 = most common)
   "conjugations": {           // Optional - only for verbs/adjectives
     "dictionary": "string",
     "polite": "string",
@@ -173,6 +176,7 @@ Returns `{"status": "ok"}` when the server is running.
 | [KRDICT](https://krdict.korean.go.kr) (via [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic)) | Korean translations | CC-BY-SA-2.0-KR | `import:krdict` |
 | [Wadoku](https://github.com/WaDoku/WaDokuJT-Data) | German definitions | CC-BY-SA-3.0 | `import:wadoku` |
 | [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) | JLPT N5-N1 levels | Public Domain | `import:jlpt` |
+| [JPDB freq list](https://github.com/MarvNC/jpdb-freq-list) | Frequency ranks (~478k entries) | CC-BY-NC-SA-4.0 | `import:frequency` |
 
 ---
 
@@ -188,7 +192,7 @@ Returns `{"status": "ok"}` when the server is running.
 │   │              │    │              │    │              │     │
 │   │ JMdict JSON  │───▶│ data/*.json  │───▶│ dict.sqlite  │     │
 │   │ JMnedict     │    │              │    │              │     │
-│   │ Kaikki JSONL │    │ ~1GB+ JSON   │    │ ~679MB SQLite│     │
+│   │ Kaikki JSONL │    │ ~1GB+ JSON   │    │ ~682MB SQLite│     │
 │   │ Tatoeba TSV  │    │              │    │              │     │
 │   │ Wiktionary   │    │              │    │ ~1ms lookup  │     │
 │   │ Wadoku/JLPT  │    │              │    │              │     │
@@ -226,7 +230,8 @@ CREATE TABLE words (
   reading TEXT NOT NULL,        -- Hiragana
   part_of_speech TEXT NOT NULL, -- JSON array
   common INTEGER DEFAULT 0,     -- 1 = common word flag
-  jlpt TEXT                     -- JSON array [5,4,3,2,1]
+  jlpt TEXT,                    -- JSON array [5,4,3,2,1]
+  frequency INTEGER             -- JPDB rank (1 = most common, NULL if unknown)
 );
 
 -- Per-language translations
@@ -278,6 +283,7 @@ yori-dict/
 │   │   ├── krdict.ts     # Korean translations (KRDICT/NIKL)
 │   │   ├── jlpt.ts       # JLPT level importer
 │   │   ├── cedict.ts     # CC-CEDICT Chinese character enrichment
+│   │   ├── frequency.ts  # JPDB frequency rank importer
 │   │   ├── tatoeba.ts    # Example sentences
 │   │   ├── wadoku.ts     # German definitions
 │   │   └── wiktionary.ts # English definitions enrichment
@@ -320,6 +326,7 @@ yori-dict/
 | `bun run import:krdict` | Import Korean translations from KRDICT (NIKL) |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
 | `bun run import:cedict` | Import CC-CEDICT Chinese character forms (zh-cn, zh-tw) |
+| `bun run import:frequency` | Import JPDB frequency ranks (~311k entries matched) |
 | `bun run import:tatoeba` | Import example sentences (all languages) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
 | `bun run import:wiktionary` | Import Wiktionary definitions |
@@ -576,6 +583,7 @@ Imports are split into two tiers:
 - `bun run import:wadoku`     → adds German definitions to de.json
 - `bun run import:wiktionary` → adds English definitions to en.json
 - `bun run import:cedict`     → adds Chinese character forms to zh-cn.json, zh-tw.json
+- `bun run import:frequency`  → adds JPDB frequency ranks to en.json (311k entries)
 
 **Import modes:**
 
@@ -590,6 +598,7 @@ Imports are split into two tiers:
 | `import:wadoku` | `merge` | `merge`, `diff`, `refresh` |
 | `import:wiktionary` | `merge` | `merge`, `diff`, `refresh` |
 | `import:cedict` | `merge` | `merge`, `diff`, `refresh` |
+| `import:frequency` | `merge` | `merge`, `diff`, `refresh` |
 
 **Convenience scripts:**
 ```bash
@@ -614,5 +623,6 @@ bun run rebuild:all        # base + enrichment + build:db (full rebuild)
 - [Wiktionary](https://kaikki.org) - Wiktionary extracts
 - [CC-CEDICT](https://cc-cedict.org) / [MDBG](https://www.mdbg.net) - Chinese-English dictionary
 - [KRDICT](https://krdict.korean.go.kr) / [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic) - Korean-Japanese dictionary (NIKL)
+- [JPDB freq list](https://github.com/MarvNC/jpdb-freq-list) by MarvNC - Frequency data from jpdb.io
 - [wanakana](https://github.com/WaniKani/WanaKana) - Japanese text utilities
 - [SudachiPy](https://github.com/WorksApplications/SudachiPy) / [SudachiDict](https://github.com/WorksApplications/SudachiDict) - Japanese morphological analyzer (used for example sentence matching)
