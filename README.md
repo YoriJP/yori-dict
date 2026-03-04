@@ -173,6 +173,7 @@ Returns `{"status": "ok"}` when the server is running.
 | [Wiktionary](https://kaikki.org) | Additional definitions | CC-BY-SA-3.0 | `import:wiktionary` |
 | [Kaikki](https://kaikki.org) (zhwiktionary) | Chinese definitions | CC-BY-SA-3.0 | `import:kaikki` |
 | [CC-CEDICT](https://cc-cedict.org) | Chinese character forms for Sino-Japanese vocabulary | CC-BY-SA-4.0 | `import:cedict` |
+| ZH-JA Yomitan dictionaries (白水社/中日大辞典/小学館, user-provided) | Chinese definitions for Japanese vocabulary | Licensed (user-supplied) | `import:zhja` |
 | [KRDICT](https://krdict.korean.go.kr) (via [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic)) | Korean translations | CC-BY-SA-2.0-KR | `import:krdict` |
 | [Wadoku](https://github.com/WaDoku/WaDokuJT-Data) | German definitions | CC-BY-SA-3.0 | `import:wadoku` |
 | [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) | JLPT N5-N1 levels | Public Domain | `import:jlpt` |
@@ -283,6 +284,7 @@ yori-dict/
 │   │   ├── krdict.ts     # Korean translations (KRDICT/NIKL)
 │   │   ├── jlpt.ts       # JLPT level importer
 │   │   ├── cedict.ts     # CC-CEDICT Chinese character enrichment
+│   │   ├── zhja.ts       # ZH-JA Yomitan reverse-map (Chinese definitions)
 │   │   ├── frequency.ts  # JPDB frequency rank importer
 │   │   ├── tatoeba.ts    # Example sentences
 │   │   ├── wadoku.ts     # German definitions
@@ -326,6 +328,7 @@ yori-dict/
 | `bun run import:krdict` | Import Korean translations from KRDICT (NIKL) |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
 | `bun run import:cedict` | Import CC-CEDICT Chinese character forms (zh-cn, zh-tw) |
+| `bun run import:zhja` | Import ZH-JA Yomitan dicts (user-supplied ZIPs → zh-cn, zh-tw) |
 | `bun run import:frequency` | Import JPDB frequency ranks (~311k entries matched) |
 | `bun run import:tatoeba` | Import example sentences (all languages) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
@@ -583,7 +586,10 @@ Imports are split into two tiers:
 - `bun run import:wadoku`     → adds German definitions to de.json
 - `bun run import:wiktionary` → adds English definitions to en.json
 - `bun run import:cedict`     → adds Chinese character forms to zh-cn.json, zh-tw.json
+- `bun run import:zhja`      → adds Chinese definitions from ZH-JA Yomitan dicts (user-supplied)
 - `bun run import:frequency`  → adds JPDB frequency ranks to en.json (311k entries)
+
+> **Note:** `import:zhja` requires user-supplied ZIP files placed in `data/cache/` (licensed content, not auto-downloaded): `zhja-hakusuisha.zip`, `zhja-chuunichi.zip`, `zhja-shogakukan.zip`. The script is skipped automatically if no matching ZIPs are present.
 
 **Import modes:**
 
@@ -598,6 +604,7 @@ Imports are split into two tiers:
 | `import:wadoku` | `merge` | `merge`, `diff`, `refresh` |
 | `import:wiktionary` | `merge` | `merge`, `diff`, `refresh` |
 | `import:cedict` | `merge` | `merge`, `diff`, `refresh` |
+| `import:zhja` | `merge` | `merge`, `diff`, `refresh` |
 | `import:frequency` | `merge` | `merge`, `diff`, `refresh` |
 
 **Convenience scripts:**
