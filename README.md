@@ -100,7 +100,7 @@ Lookup a Japanese word by kanji or reading.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `word` | string | ✅ | Japanese word (kanji, hiragana, or katakana) |
-| `lang` | string | ❌ | Target language: `en`, `de`, `ko`, `zh-cn`, `zh-tw` (aliases `zh-CN`, `zh-TW` also accepted; default: `en`) |
+| `lang` | string | ❌ | Target language: `en`, `de`, `ko`, `zh-cn`, `zh-tw` (aliases `zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant` accepted; default: `en`) |
 
 **Examples:**
 
@@ -131,7 +131,7 @@ curl "localhost:3000/v1/lookup?word=たべる"
     "past": "string",
     "te": "string"
   },
-  "examples": [               // Optional - may be empty
+  "examples": [               // Always present - may be empty
     {"japanese": "string", "translation": "string"}
   ]
 }
@@ -191,13 +191,13 @@ Returns `{"status": "ok"}` when the server is running.
 │   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
 │   │   IMPORT     │    │   BUILD      │    │   SERVE      │     │
 │   │              │    │              │    │              │     │
-│   │ JMdict JSON  │───▶│ data/*.json  │───▶│ dict.sqlite  │     │
-│   │ JMnedict     │    │              │    │              │     │
-│   │ Kaikki JSONL │    │ ~1GB+ JSON   │    │ ~682MB SQLite│     │
-│   │ Tatoeba TSV  │    │              │    │              │     │
-│   │ Wiktionary   │    │              │    │ ~1ms lookup  │     │
-│   │ Wadoku/JLPT  │    │              │    │              │     │
-│   └──────────────┘    └──────────────┘    └──────────────┘     │
+│   │ JMdict JSON  │───▶│ data/core.json    │──▶│ dict.sqlite │  │
+│   │ JMnedict     │    │ data/lang/en.json │   │             │  │
+│   │ Kaikki JSONL │    │ data/lang/de.json │   │ ~682MB      │  │
+│   │ Tatoeba TSV  │    │ data/lang/ko.json │   │             │  │
+│   │ Wiktionary   │    │ data/lang/zh-*    │   │ ~1ms lookup │  │
+│   │ Wadoku/JLPT  │    │                   │   │             │  │
+│   └──────────────┘    │ ~300MB total JSON │   └─────────────┘  │
 │         ▲                    ▲                   ▲              │
 │         │                    │                   │              │
 │    ┌────┴────┐          ┌────┴────┐        ┌────┴────┐         │
@@ -208,6 +208,66 @@ Returns `{"status": "ok"}` when the server is running.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### JSON Data Layout
+
+The intermediate JSON is split into two tiers to eliminate duplication (~300MB total vs ~1GB with monolithic per-language files):
+
+```
+data/
+  core.json           ← language-agnostic: word, reading, POS, common, jlpt, frequency
+  lang/
+    en.json           ← English definitions + examples
+    de.json           ← German definitions + examples
+    ko.json           ← Korean definitions + examples
+    zh-cn.json        ← Chinese (Simplified) definitions + examples
+    zh-tw.json        ← Chinese (Traditional) definitions + examples
+  cache/              ← downloaded raw source data (gitignored)
+```
+
+**`data/core.json`** — one entry per word, shared across all languages:
+```jsonc
+{
+  "entries": {
+    "食べる:たべる": {
+      "word": "食べる",
+      "reading": "たべる",
+      "partOfSpeech": ["ichidan verb", "transitive verb"],
+      "common": true,
+      "jlpt": 5,          // highest JLPT level (5=N5 easiest, 1=N1 hardest), or null
+      "frequency": 195    // JPDB rank (lower = more common), or null
+    }
+  }
+}
+```
+
+**`data/lang/*.json`** — definitions and examples per language:
+```jsonc
+{
+  "lang": "en",
+  "entries": {
+    "食べる:たべる": {
+      "definitions": ["to eat", "to live on (e.g. a salary)"],
+      "examples": [{ "ja": "毎朝食べます", "text": "I eat every morning", "source": "tatoeba" }],
+      "_defSources": {      // pipeline-internal: which source added each definition
+        "to eat": ["jmdict"],
+        "to live on (e.g. a salary)": ["jmdict"]
+      }
+    }
+  }
+}
+```
+
+The `_defSources` field enables selective `--mode refresh` (re-import one source without touching others). Consumers can safely ignore it.
+
+### Schema Compatibility (v2 + legacy)
+
+`build-db` auto-detects input layout:
+
+- **v2 preferred:** `data/core.json` + `data/lang/*.json`
+- **legacy fallback:** `data/{lang}.json` (v1 monolithic files)
+
+This allows incremental migration: existing legacy data can still build successfully, while new import flow writes v2 files.
+
 ### Why Two-Stage Pipeline?
 
 | Stage | Benefit |
@@ -215,11 +275,11 @@ Returns `{"status": "ok"}` when the server is running.
 | **Import** | Download once, cache raw data, convert to unified JSON format |
 | **Build** | Fast SQLite generation, supports incremental updates, debuggable |
 
-The intermediate JSON format allows:
-- **Multi-source merging** - Combine JMdict + Wiktionary + manual entries
-- **Language-specific builds** - Build only languages you need
-- **Diff support** - Preview changes with `--mode diff` before applying
-- **Git LFS storage** - Track dictionary data in version control
+The split JSON format allows:
+- **Multi-source merging** — combine JMdict + Wiktionary + manual entries per language
+- **Source-selective refresh** — re-import one source with `--mode refresh`
+- **Diff support** — preview changes with `--mode diff` before applying
+- **Git LFS storage** — track dictionary data in version control
 
 ### Database Schema
 
@@ -229,18 +289,18 @@ CREATE TABLE words (
   id TEXT PRIMARY KEY,          -- "word:reading" format
   word TEXT NOT NULL,           -- Kanji form
   reading TEXT NOT NULL,        -- Hiragana
-  part_of_speech TEXT NOT NULL, -- JSON array
+  part_of_speech TEXT NOT NULL, -- JSON array of strings
   common INTEGER DEFAULT 0,     -- 1 = common word flag
-  jlpt TEXT,                    -- JSON array [5,4,3,2,1]
+  jlpt TEXT,                    -- JSON array, e.g. [5] for N5; null if unknown
   frequency INTEGER             -- JPDB rank (1 = most common, NULL if unknown)
 );
 
 -- Per-language translations
 CREATE TABLE translations (
   word_id TEXT NOT NULL,
-  lang TEXT NOT NULL,           -- "en", "de", etc.
-  definitions TEXT NOT NULL,    -- JSON array
-  sources TEXT NOT NULL,        -- ["jmdict", "wiktionary"]
+  lang TEXT NOT NULL,           -- "en", "de", "ko", "zh-cn", "zh-tw"
+  definitions TEXT NOT NULL,    -- JSON array of strings
+  sources TEXT NOT NULL,        -- JSON array of source names
   PRIMARY KEY (word_id, lang)
 );
 
@@ -251,7 +311,7 @@ CREATE TABLE examples (
   lang TEXT NOT NULL,
   japanese TEXT NOT NULL,
   translation TEXT NOT NULL,
-  source TEXT NOT NULL
+  source TEXT NOT NULL          -- e.g. "tatoeba"
 );
 ```
 
@@ -301,11 +361,13 @@ yori-dict/
 │   ├── import-kaikki.test.ts  # Kaikki parser tests
 │   └── build-db.test.ts       # DB build pipeline tests
 ├── data/
-│   ├── en.json           # English dictionary (Git LFS)
-│   ├── de.json           # German dictionary (Git LFS)
-│   ├── ko.json           # Korean dictionary (Git LFS)
-│   ├── zh-cn.json        # Chinese Simplified dictionary (Git LFS)
-│   ├── zh-tw.json        # Chinese Traditional dictionary (Git LFS)
+│   ├── core.json         # Language-agnostic word data (Git LFS)
+│   ├── lang/
+│   │   ├── en.json       # English definitions + examples (Git LFS)
+│   │   ├── de.json       # German definitions + examples (Git LFS)
+│   │   ├── ko.json       # Korean definitions + examples (Git LFS)
+│   │   ├── zh-cn.json    # Chinese Simplified definitions + examples (Git LFS)
+│   │   └── zh-tw.json    # Chinese Traditional definitions + examples (Git LFS)
 │   └── cache/            # Downloaded raw data (gitignored)
 ├── openapi.yaml          # OpenAPI 3.0 spec (source of truth for SDK codegen)
 ├── openapi-ts.config.ts  # SDK codegen config (@hey-api/openapi-ts)
@@ -383,7 +445,7 @@ if (data) {
 }
 ```
 
-All request parameters and response shapes are fully typed from the OpenAPI spec. The `lang` parameter accepts `'en' | 'de' | 'ko' | 'zh-CN' | 'zh-TW'` (and lowercase aliases).
+All request parameters and response shapes are fully typed from the OpenAPI spec. The `lang` parameter accepts canonical values (`en`, `de`, `ko`, `zh-cn`, `zh-tw`) and the documented aliases (`zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant`).
 
 ### Regenerating
 
@@ -507,7 +569,17 @@ pip install sudachipy sudachidict-core
 <details>
 <summary><b>Build failed: "No language files found"</b></summary>
 
-You need to import data first:
+You need to import data first. The build script reads from `data/core.json` and `data/lang/*.json`:
+```bash
+bun run import:base   # builds core.json + all lang files
+bun run build:db
+```
+</details>
+
+<details>
+<summary><b>Build failed: "core.json not found"</b></summary>
+
+Run the base importers first — they create `data/core.json`:
 ```bash
 bun run import:jmdict --lang en
 bun run build:db
@@ -545,7 +617,7 @@ sqlite3 dict.sqlite "SELECT * FROM words WHERE word = '食べる'"
 
 If missing, re-import:
 ```bash
-bun run import:jmdict --lang en --mode replace
+bun run import:jmdict --lang en --mode replace  # writes data/core.json + data/lang/en.json
 bun run build:db
 ```
 </details>
@@ -553,11 +625,31 @@ bun run build:db
 <details>
 <summary><b>Import modes explained</b></summary>
 
-All import scripts support these modes via `--mode <mode>`:
-- `merge` (default): Add new entries/definitions, merge with existing
-- `diff`: Preview changes without writing files
-- `refresh`: Strip all data from a source and re-import it
-- `replace`: Full replace — remove stale keys, then write fresh (base importers only)
+Importers compare entries by key: `word:reading`.
+Use `--mode <mode>` to choose how incoming source data is applied.
+
+| Mode | What it does | Removes old data? | Writes files? |
+|---|---|---|---|
+| `merge` | Add new keys; merge incoming fields into existing keys | No (keeps unrelated existing keys/data) | Yes |
+| `diff` | Run the same comparison as `merge` and print stats only | No | No |
+| `refresh` | Remove data from the same source first, then import that source again | Yes (source-scoped) | Yes |
+| `replace` | Treat incoming data as full snapshot: prune keys not in source, overwrite keys in source | Yes (snapshot-scoped) | Yes |
+
+How to read this in practice:
+
+- `merge`: safest default for incremental updates.
+- `diff`: preview before applying (`added/updated/unchanged`).
+- `refresh`: best when one source changed or was imported incorrectly.
+- `replace`: full rebuild behavior for that importer's dataset.
+
+Important notes:
+
+- Not every importer supports every mode. Use the mode table below for exact support.
+- `replace` is intentionally used mainly by base importers; enrichment importers usually use `merge/diff/refresh`.
+- `refresh` behavior depends on importer type:
+  - Definition importers: strip only definitions/examples attributed to that source (via `_defSources` and example `source`), then re-merge.
+  - Core enrichment importers (`jlpt`, `frequency`): reset the specific core field, then re-apply from source.
+  - Example importer (`tatoeba`): remove existing `tatoeba` examples, then re-import examples.
 
 Example:
 ```bash
@@ -572,22 +664,20 @@ bun run import:jmdict --lang en --mode merge  # Apply
 
 Imports are split into two tiers:
 
-**Base importers** — create dictionary entries from scratch (must run first):
-- `bun run import:jmdict --lang en,de`  → data/en.json, data/de.json
-- `bun run import:kaikki`               → data/zh-cn.json, data/zh-tw.json
-- `bun run import:krdict`               → data/ko.json
-- `bun run import:jmnedict`             → merges proper names into all language files
-
-> **Note:** `import:krdict` copies JLPT levels directly from JMdict entries, so `import:jlpt` is a no-op for `ko` — no need to run it separately.
+**Base importers** — create entries from scratch (must run first):
+- `bun run import:jmdict --lang en,de`  → `data/core.json` + `data/lang/en.json`, `data/lang/de.json`
+- `bun run import:kaikki`               → `data/lang/zh-cn.json`, `data/lang/zh-tw.json`
+- `bun run import:krdict`               → `data/lang/ko.json`
+- `bun run import:jmnedict`             → `data/core.json` + all `data/lang/*.json`
 
 **Enrichment importers** — add data to existing entries (require base imports):
-- `bun run import:jlpt`       → adds JLPT levels to all languages
-- `bun run import:tatoeba`    → adds example sentences to all languages
-- `bun run import:wadoku`     → adds German definitions to de.json
-- `bun run import:wiktionary` → adds English definitions to en.json
-- `bun run import:cedict`     → adds Chinese character forms to zh-cn.json, zh-tw.json
-- `bun run import:zhja`      → adds Chinese definitions from ZH-JA Yomitan dicts (user-supplied)
-- `bun run import:frequency`  → adds JPDB frequency ranks to en.json (311k entries)
+- `bun run import:jlpt`       → `data/core.json` (JLPT levels, all languages share core)
+- `bun run import:frequency`  → `data/core.json` (JPDB frequency ranks)
+- `bun run import:tatoeba`    → all `data/lang/*.json` (example sentences)
+- `bun run import:wadoku`     → `data/lang/de.json` (German definitions)
+- `bun run import:wiktionary` → `data/lang/en.json` (English definitions)
+- `bun run import:cedict`     → `data/lang/zh-cn.json`, `data/lang/zh-tw.json` (Chinese character forms)
+- `bun run import:zhja`       → `data/lang/zh-cn.json`, `data/lang/zh-tw.json` (user-supplied ZIPs)
 
 > **Note:** `import:zhja` requires user-supplied ZIP files placed in `data/cache/` (licensed content, not auto-downloaded): `zhja-hakusuisha.zip`, `zhja-chuunichi.zip`, `zhja-shogakukan.zip`. The script is skipped automatically if no matching ZIPs are present.
 
@@ -606,6 +696,17 @@ Imports are split into two tiers:
 | `import:cedict` | `merge` | `merge`, `diff`, `refresh` |
 | `import:zhja` | `merge` | `merge`, `diff`, `refresh` |
 | `import:frequency` | `merge` | `merge`, `diff`, `refresh` |
+
+**Duplicate-definition conflict policy (where supported):**
+
+Many definition importers support:
+
+- `--dup-policy merge` (default): keep existing + append incoming
+- `--dup-policy skip`: keep existing, skip conflicting incoming definitions
+- `--dup-policy replace`: replace only conflicting existing definitions, keep unrelated ones
+- `--dup-policy ask`: interactive prompt with conflict samples, then choose `skip/replace/merge`
+
+Use `--dup-samples <n>` to control how many conflict examples are shown in `ask` mode.
 
 **Convenience scripts:**
 ```bash
