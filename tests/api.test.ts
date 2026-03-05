@@ -340,7 +340,16 @@ describe('API contract — response shape', () => {
     expect(res.status).toBe(200)
 
     const body = await res.json()
-    const allowedKeys = new Set(['word', 'reading', 'romaji', 'partOfSpeech', 'definitions', 'examples', 'conjugations'])
+    const allowedKeys = new Set([
+      'word',
+      'reading',
+      'romaji',
+      'partOfSpeech',
+      'definitions',
+      'examples',
+      'conjugations',
+      'frequency',
+    ])
     for (const key of Object.keys(body)) {
       expect(allowedKeys.has(key)).toBe(true)
     }
