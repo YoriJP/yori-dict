@@ -23,6 +23,7 @@ import { createReadStream, createWriteStream, existsSync, renameSync, unlinkSync
 import { createInterface } from 'readline'
 import { createGunzip } from 'zlib'
 import { pipeline } from 'stream/promises'
+import * as OpenCC from 'opencc-js'
 import {
   type DictEntry,
   type Definition,
@@ -473,8 +474,6 @@ async function importKaikkiLanguage(
 
 async function bootstrapTraditionalChinese(mode: ImportMode): Promise<void> {
   console.log('\n=== Bootstrapping zh-tw from zh-cn ===')
-  console.log('This step currently copies zh-cn definitions as-is.')
-  console.log('You can add OpenCC conversion in a follow-up step if needed.')
 
   const zhCnPath = `${DATA_DIR}/zh-cn.json`
   const zhTwPath = `${DATA_DIR}/zh-tw.json`
@@ -486,9 +485,19 @@ async function bootstrapTraditionalChinese(mode: ImportMode): Promise<void> {
   const zhCnDict = await loadDict(zhCnPath, 'zh-cn')
   const zhTwDict = await loadDict(zhTwPath, 'zh-tw')
 
+  // Convert Simplified Chinese → Traditional Chinese (Taiwan variant)
+  const toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' })
+
   const clonedEntries: Record<string, DictEntry> = {}
   for (const [key, entry] of Object.entries(zhCnDict.entries)) {
-    clonedEntries[key] = structuredClone(entry)
+    const cloned = structuredClone(entry)
+    // Convert all kaikki definitions from simplified to traditional
+    cloned.definitions = cloned.definitions.map((def) =>
+      def.sources.includes('kaikki')
+        ? { ...def, text: toTraditional(def.text) }
+        : def
+    )
+    clonedEntries[key] = cloned
   }
 
   // refresh means re-copy everything from zh-cn, equivalent to replace here
