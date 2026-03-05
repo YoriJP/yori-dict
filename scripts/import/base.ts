@@ -29,6 +29,11 @@ export interface JlptEntry {
   sources: string[]
 }
 
+export interface FrequencyEntry {
+  rank: number
+  sources: string[]
+}
+
 export interface DictEntry {
   word: string
   reading: string
@@ -36,6 +41,7 @@ export interface DictEntry {
   common: boolean
   commonSources: string[]
   jlpt: JlptEntry[]
+  frequency?: FrequencyEntry
   definitions: Definition[]
   examples: Example[]
 }
@@ -229,6 +235,10 @@ export function refreshDictSource(
       .filter((j) => j.sources.length > 0)
     entry.commonSources = entry.commonSources.filter((s) => s !== sourceName)
     entry.common = entry.commonSources.length > 0
+    if (entry.frequency?.sources.includes(sourceName)) {
+      const remaining = entry.frequency.sources.filter((s) => s !== sourceName)
+      entry.frequency = remaining.length > 0 ? { rank: entry.frequency.rank, sources: remaining } : undefined
+    }
   }
 
   // Step 2: Remove entries that are now empty and not in source
@@ -320,6 +330,18 @@ function normalizeExampleSources(ex: RawExample): Example {
 /**
  * Merge two dictionary entries
  */
+export function mergeFrequency(
+  f1: FrequencyEntry | undefined,
+  f2: FrequencyEntry | undefined
+): FrequencyEntry | undefined {
+  if (!f1 && !f2) return undefined
+  if (!f1) return f2
+  if (!f2) return f1
+  // Keep the lower rank (higher frequency) and merge sources
+  const rank = Math.min(f1.rank, f2.rank)
+  return { rank, sources: mergeArrays(f1.sources, f2.sources) }
+}
+
 export function mergeEntries(entry1: DictEntry, entry2: DictEntry): DictEntry {
   return {
     word: entry1.word,
@@ -328,6 +350,7 @@ export function mergeEntries(entry1: DictEntry, entry2: DictEntry): DictEntry {
     common: entry1.common || entry2.common,
     commonSources: mergeArrays(entry1.commonSources, entry2.commonSources),
     jlpt: mergeJlptEntries(entry1.jlpt, entry2.jlpt),
+    frequency: mergeFrequency(entry1.frequency, entry2.frequency),
     definitions: mergeDefinitions(entry1.definitions, entry2.definitions),
     examples: mergeExamples(entry1.examples, entry2.examples),
   }
