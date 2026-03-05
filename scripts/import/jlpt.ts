@@ -1,8 +1,10 @@
 /**
- * JLPT Level Importer - Enriches dictionary entries with JLPT levels (N5-N1)
+ * JLPT Level Importer - Enriches core.json with JLPT levels (N5-N1)
  *
  * Data source: https://github.com/stephenmk/yomitan-jlpt-vocab
  * License: CC-BY-SA-4.0
+ *
+ * Writes: data/core.json (jlpt field only)
  *
  * Usage:
  *   bun run import:jlpt
@@ -12,16 +14,11 @@
  */
 
 import { mkdir } from 'fs/promises'
-import { existsSync, readdirSync } from 'fs'
+import { existsSync } from 'fs'
 import {
-  type DictEntry,
-  type DictFile,
-  type JlptEntry,
   makeKey,
-  loadDict,
-  saveDict,
-  mergeArrays,
-  mergeJlptEntries,
+  loadCore,
+  saveCore,
 } from './base'
 
 // ============================================================================
@@ -29,9 +26,9 @@ import {
 // ============================================================================
 
 const DATA_DIR = './data'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const CACHE_DIR = './data/cache'
 
-// Data source URLs
 const JLPT_BASE_URL = 'https://raw.githubusercontent.com/stephenmk/yomitan-jlpt-vocab/main/original_data'
 const JLPT_LEVELS = [5, 4, 3, 2, 1] as const
 type JlptLevel = (typeof JLPT_LEVELS)[number]
@@ -47,12 +44,6 @@ interface JlptCsvEntry {
   waller_definition: string
 }
 
-interface JlptVocab {
-  word: string
-  reading: string
-  level: JlptLevel
-}
-
 type ImportMode = 'merge' | 'diff' | 'refresh'
 
 // ============================================================================
@@ -62,14 +53,12 @@ type ImportMode = 'merge' | 'diff' | 'refresh'
 async function downloadJlptLevel(level: JlptLevel): Promise<JlptCsvEntry[]> {
   const cachePath = `${CACHE_DIR}/jlpt-n${level}.csv`
 
-  // Check cache
   if (existsSync(cachePath)) {
     console.log(`  Using cached: ${cachePath}`)
     const text = await Bun.file(cachePath).text()
     return parseJlptCsv(text)
   }
 
-  // Download
   const url = `${JLPT_BASE_URL}/n${level}.csv`
   console.log(`  Downloading: ${url}`)
 
@@ -83,7 +72,6 @@ async function downloadJlptLevel(level: JlptLevel): Promise<JlptCsvEntry[]> {
 
   const text = await response.text()
 
-  // Cache for future use
   await mkdir(CACHE_DIR, { recursive: true })
   await Bun.write(cachePath, text)
   console.log(`  Cached to: ${cachePath}`)
@@ -95,12 +83,10 @@ function parseJlptCsv(text: string): JlptCsvEntry[] {
   const lines = text.trim().split('\n')
   const entries: JlptCsvEntry[] = []
 
-  // Skip header row
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]
     if (!line.trim()) continue
 
-    // Parse CSV - handle quoted fields with commas
     const fields = parseCsvLine(line)
     if (fields.length >= 4) {
       entries.push({
@@ -124,10 +110,9 @@ function parseCsvLine(line: string): string[] {
     const char = line[i]
 
     if (char === '"') {
-      // RFC 4180: "" inside a quoted field is a literal "
       if (inQuotes && line[i + 1] === '"') {
         current += '"'
-        i++ // skip the second quote
+        i++
       } else {
         inQuotes = !inQuotes
       }
@@ -147,10 +132,11 @@ function parseCsvLine(line: string): string[] {
 // Build JLPT Vocabulary Map
 // ============================================================================
 
-async function buildJlptMap(levels: JlptLevel[]): Promise<Map<string, JlptLevel[]>> {
+async function buildJlptMap(levels: JlptLevel[]): Promise<Map<string, number>> {
   console.log('\n=== Downloading JLPT Data ===')
 
-  const jlptMap = new Map<string, JlptLevel[]>()
+  // Map key → highest JLPT level number
+  const jlptMap = new Map<string, number>()
 
   for (const level of levels) {
     console.log(`\nN${level}:`)
@@ -158,19 +144,14 @@ async function buildJlptMap(levels: JlptLevel[]): Promise<Map<string, JlptLevel[
     console.log(`  Loaded ${entries.length.toLocaleString()} entries`)
 
     for (const entry of entries) {
-      // Use kanji if available, otherwise use kana as the word
       const word = entry.kanji || entry.kana
       const reading = entry.kana
       const key = makeKey(word, reading)
 
       const existing = jlptMap.get(key)
-      if (existing) {
-        if (!existing.includes(level)) {
-          existing.push(level)
-          existing.sort((a, b) => b - a) // Sort descending (N5 first)
-        }
-      } else {
-        jlptMap.set(key, [level])
+      // Keep the highest (easiest) level number
+      if (existing === undefined || level > existing) {
+        jlptMap.set(key, level)
       }
     }
   }
@@ -180,7 +161,7 @@ async function buildJlptMap(levels: JlptLevel[]): Promise<Map<string, JlptLevel[
 }
 
 // ============================================================================
-// Enrich Dictionary with JLPT Levels
+// Enrich Core with JLPT Levels
 // ============================================================================
 
 interface EnrichStats {
@@ -190,9 +171,9 @@ interface EnrichStats {
   notFound: number
 }
 
-function enrichDictWithJlpt(
-  dict: DictFile,
-  jlptMap: Map<string, JlptLevel[]>,
+function enrichCoreWithJlpt(
+  coreEntries: Record<string, { jlpt: number | null }>,
+  jlptMap: Map<string, number>,
   mode: ImportMode
 ): EnrichStats {
   const stats: EnrichStats = {
@@ -202,33 +183,25 @@ function enrichDictWithJlpt(
     notFound: 0,
   }
 
-  for (const [key, entry] of Object.entries(dict.entries)) {
-    const levels = jlptMap.get(key)
+  for (const [key, entry] of Object.entries(coreEntries)) {
+    const level = jlptMap.get(key)
 
-    if (levels) {
+    if (level !== undefined) {
       stats.matched++
 
-      // Check if entry already has these levels
-      const existingLevelSet = new Set(entry.jlpt.map((j) => j.level))
-      const newLevels = levels.filter((l) => !existingLevelSet.has(l))
-
-      if (newLevels.length === 0) {
+      if (entry.jlpt === level) {
         stats.alreadyHad++
       } else {
         stats.updated++
         if (mode !== 'diff') {
-          entry.jlpt = mergeJlptEntries(
-            entry.jlpt,
-            levels.map((l) => ({ level: l, sources: ['jlpt'] }))
-          )
+          entry.jlpt = level
         }
       }
     }
   }
 
-  // Count how many JLPT words weren't in the dictionary
   for (const key of jlptMap.keys()) {
-    if (!dict.entries[key]) {
+    if (!coreEntries[key]) {
       stats.notFound++
     }
   }
@@ -245,59 +218,44 @@ async function importJlpt(levels: JlptLevel[], mode: ImportMode): Promise<void> 
   console.log(`Levels: N${levels.join(', N')}`)
   console.log(`Mode: ${mode}`)
 
-  // Build JLPT vocabulary map
   const jlptMap = await buildJlptMap(levels)
 
-  // Find all language files
-  const langFiles = readdirSync(DATA_DIR).filter(
-    (f) => f.endsWith('.json') && !f.includes('/')
-  )
-
-  if (langFiles.length === 0) {
-    console.error('\nNo language files found in data/')
+  if (!existsSync(CORE_PATH)) {
+    console.error('\ncore.json not found in data/')
     console.error('This is an enrichment importer — run base importers first:')
     console.error('  bun run import:jmdict --lang en')
     console.error('  (or: bun run rebuild:all for a full rebuild)')
     process.exit(1)
   }
 
-  const languages = langFiles.map((f) => f.replace('.json', ''))
-  console.log(`\nFound language files: ${languages.join(', ')}`)
+  console.log(`\n=== Processing core.json ===`)
+  const core = await loadCore(CORE_PATH)
+  console.log(`Entries: ${Object.keys(core.entries).length.toLocaleString()}`)
 
-  // Process each language file
-  for (const lang of languages) {
-    console.log(`\n=== Processing ${lang} ===`)
-
-    const dictPath = `${DATA_DIR}/${lang}.json`
-    const dict = await loadDict(dictPath, lang)
-
-    console.log(`Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
-
-    if (mode === 'refresh') {
-      // Strip only jlpt-sourced entries before re-applying
-      console.log('  Resetting JLPT levels...')
-      for (const entry of Object.values(dict.entries)) {
-        entry.jlpt = entry.jlpt.filter((j) => !j.sources.includes('jlpt'))
-      }
+  if (mode === 'refresh') {
+    // Clear all jlpt values before re-applying
+    console.log('  Resetting JLPT levels...')
+    for (const entry of Object.values(core.entries)) {
+      entry.jlpt = null
     }
+  }
 
-    const stats = enrichDictWithJlpt(dict, jlptMap, mode === 'refresh' ? 'merge' : mode)
+  const stats = enrichCoreWithJlpt(core.entries, jlptMap, mode === 'refresh' ? 'merge' : mode)
 
-    console.log('\nResults:')
-    console.log(`  Matched: ${stats.matched.toLocaleString()}`)
-    console.log(`  Already had JLPT: ${stats.alreadyHad.toLocaleString()}`)
-    console.log(`  Updated: ${stats.updated.toLocaleString()}`)
-    console.log(`  JLPT words not in dict: ${stats.notFound.toLocaleString()}`)
+  console.log('\nResults:')
+  console.log(`  Matched: ${stats.matched.toLocaleString()}`)
+  console.log(`  Already had JLPT: ${stats.alreadyHad.toLocaleString()}`)
+  console.log(`  Updated: ${stats.updated.toLocaleString()}`)
+  console.log(`  JLPT words not in core: ${stats.notFound.toLocaleString()}`)
 
-    if (mode === 'refresh') {
-      await saveDict(dictPath, dict)
-      console.log(`\nSaved to: ${dictPath}`)
-    } else if (mode !== 'diff' && stats.updated > 0) {
-      await saveDict(dictPath, dict)
-      console.log(`\nSaved to: ${dictPath}`)
-    } else if (mode === 'diff') {
-      console.log('\n(Diff mode - no changes made)')
-    }
+  if (mode === 'refresh') {
+    await saveCore(CORE_PATH, core)
+    console.log(`\nSaved to: ${CORE_PATH}`)
+  } else if (mode !== 'diff' && stats.updated > 0) {
+    await saveCore(CORE_PATH, core)
+    console.log(`\nSaved to: ${CORE_PATH}`)
+  } else if (mode === 'diff') {
+    console.log('\n(Diff mode - no changes made)')
   }
 }
 
@@ -309,7 +267,7 @@ function printHelp(): void {
   console.log(`
 JLPT Level Importer
 
-Enriches dictionary entries with JLPT levels (N5-N1).
+Enriches core.json entries with JLPT levels (N5-N1).
 Data source: https://github.com/stephenmk/yomitan-jlpt-vocab
 
 Usage:

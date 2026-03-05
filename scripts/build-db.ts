@@ -1,10 +1,11 @@
 /**
- * Build SQLite from JSON - Builds dict.sqlite from per-language JSON files
+ * Build SQLite from JSON - Builds dict.sqlite from core.json + per-language JSON files
  *
  * Usage: bun run build:db
  *
  * Reads:
- * - data/{lang}.json - Per-language dictionary files
+ * - data/core.json        - Language-agnostic: word, reading, POS, common, jlpt, frequency
+ * - data/lang/*.json      - Per-language: definitions + examples
  *
  * Outputs:
  * - dict.sqlite
@@ -12,9 +13,18 @@
 
 import { Database } from 'bun:sqlite'
 import { existsSync, unlinkSync, readdirSync } from 'fs'
-import { loadDict, type DictFile } from './import/base'
+import {
+  loadCore,
+  loadLang,
+  loadDict,
+  type CoreFile,
+  type LangFile,
+  type DictFile,
+} from './import/base'
 
 const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const DB_PATH = process.env.DATABASE_PATH || './dict.sqlite'
 const LFS_POINTER_HEADER = 'version https://git-lfs.github.com/spec/v1'
 
@@ -101,38 +111,119 @@ interface ExampleData {
 }
 
 // ============================================================================
-// Pass 1: Collect Data from JSON Files
+// Pass 1: Collect Words from core.json
 // ============================================================================
 
-function collectData(
+function collectCoreData(core: CoreFile, wordsMap: Map<string, WordData>): void {
+  console.log(`Collecting core... (${Object.keys(core.entries).length.toLocaleString()} entries)`)
+
+  let count = 0
+  for (const [key, entry] of Object.entries(core.entries)) {
+    // Build jlpt array from single jlpt value
+    const jlptArr: number[] = entry.jlpt !== null ? [entry.jlpt] : []
+
+    wordsMap.set(key, {
+      word: entry.word,
+      reading: entry.reading,
+      partOfSpeech: entry.partOfSpeech,
+      common: entry.common,
+      jlpt: jlptArr,
+      frequency: entry.frequency,
+    })
+
+    count++
+    if (count % 100000 === 0) {
+      process.stdout.write(`\r  Collected ${count.toLocaleString()}...`)
+    }
+  }
+  console.log(`\r  Collected ${count.toLocaleString()} core entries`)
+}
+
+// ============================================================================
+// Pass 2: Collect Translations + Examples from lang/*.json
+// ============================================================================
+
+function collectLangData(
+  lang: LangFile,
+  wordsMap: Map<string, WordData>,
+  translations: TranslationData[],
+  examples: ExampleData[]
+): void {
+  const langCode = lang.lang
+  console.log(`Collecting ${langCode}... (${Object.keys(lang.entries).length.toLocaleString()} entries)`)
+
+  let count = 0
+  for (const [key, entry] of Object.entries(lang.entries)) {
+    // Skip if word not in core (orphaned lang entry)
+    if (!wordsMap.has(key)) continue
+
+    // Collect translation
+    if (entry.definitions.length > 0) {
+      // Collect all sources from _defSources (union)
+      const sourcesSet = new Set<string>()
+      for (const sources of Object.values(entry._defSources)) {
+        for (const s of sources) sourcesSet.add(s)
+      }
+
+      translations.push({
+        wordId: key,
+        lang: langCode,
+        definitions: entry.definitions,
+        sources: Array.from(sourcesSet),
+      })
+    }
+
+    // Collect examples
+    const seenExamples = new Set<string>()
+    for (const example of entry.examples) {
+      const exKey = `${example.ja}\u0000${example.text}\u0000${example.source}`
+      if (seenExamples.has(exKey)) continue
+      seenExamples.add(exKey)
+      examples.push({
+        wordId: key,
+        lang: langCode,
+        japanese: example.ja,
+        translation: example.text,
+        source: example.source || 'unknown',
+      })
+    }
+
+    count++
+    if (count % 50000 === 0) {
+      process.stdout.write(`\r  Collected ${count.toLocaleString()}...`)
+    }
+  }
+  console.log(`\r  Collected ${count.toLocaleString()} entries`)
+}
+
+// ============================================================================
+// Legacy Mode: Collect from data/{lang}.json (v1 schema)
+// ============================================================================
+
+function collectLegacyDictData(
   dict: DictFile,
   wordsMap: Map<string, WordData>,
   translations: TranslationData[],
   examples: ExampleData[]
 ): void {
   const lang = dict.lang
-  console.log(`Collecting ${lang}... (${Object.keys(dict.entries).length.toLocaleString()} entries)`)
+  console.log(`Collecting legacy ${lang}... (${Object.keys(dict.entries).length.toLocaleString()} entries)`)
 
   let count = 0
   for (const [key, entry] of Object.entries(dict.entries)) {
-    // Update words map (merge data from all languages)
     const existing = wordsMap.get(key)
     if (existing) {
-      // Merge POS
       for (const posEntry of entry.partOfSpeech) {
         if (!existing.partOfSpeech.includes(posEntry.value)) {
           existing.partOfSpeech.push(posEntry.value)
         }
       }
-      // Merge common flag
-      existing.common = existing.common || entry.commonSources.length > 0
-      // Merge JLPT levels
+      existing.common = existing.common || entry.common || entry.commonSources.length > 0
       for (const jlptEntry of entry.jlpt) {
         if (!existing.jlpt.includes(jlptEntry.level)) {
           existing.jlpt.push(jlptEntry.level)
         }
       }
-      // Merge frequency (keep lower rank = more common)
       if (entry.frequency?.rank !== undefined) {
         if (existing.frequency === null || entry.frequency.rank < existing.frequency) {
           existing.frequency = entry.frequency.rank
@@ -143,37 +234,39 @@ function collectData(
         word: entry.word,
         reading: entry.reading,
         partOfSpeech: entry.partOfSpeech.map((p) => p.value),
-        common: entry.commonSources.length > 0,
+        common: entry.common || entry.commonSources.length > 0,
         jlpt: entry.jlpt.map((j) => j.level),
         frequency: entry.frequency?.rank ?? null,
       })
     }
 
-    // Collect translation
     if (entry.definitions.length > 0) {
-      const seen = new Set<string>()
       const defs: string[] = []
+      const seenDefs = new Set<string>()
+      const sourcesSet = new Set<string>()
       for (const def of entry.definitions) {
-        if (!seen.has(def.text)) { seen.add(def.text); defs.push(def.text) }
+        if (!seenDefs.has(def.text)) {
+          seenDefs.add(def.text)
+          defs.push(def.text)
+        }
+        for (const source of def.sources) sourcesSet.add(source)
       }
-      const sources = [...new Set(entry.definitions.flatMap((d) => d.sources))]
 
       translations.push({
         wordId: key,
         lang,
         definitions: defs,
-        sources,
+        sources: Array.from(sourcesSet),
       })
     }
 
-    // Collect examples (deduplicate by ja+text)
     const seenExamples = new Set<string>()
     for (const example of entry.examples) {
-      const exKey = `${example.ja}\u0000${example.text}`
-      if (seenExamples.has(exKey)) continue
-      seenExamples.add(exKey)
       const sources = example.sources.length > 0 ? example.sources : ['unknown']
       for (const source of sources) {
+        const exKey = `${example.ja}\u0000${example.text}\u0000${source}`
+        if (seenExamples.has(exKey)) continue
+        seenExamples.add(exKey)
         examples.push({
           wordId: key,
           lang,
@@ -193,7 +286,7 @@ function collectData(
 }
 
 // ============================================================================
-// Pass 2: Insert Words
+// Pass 3: Insert Words
 // ============================================================================
 
 function insertWords(db: Database, wordsMap: Map<string, WordData>): number {
@@ -233,7 +326,7 @@ function insertWords(db: Database, wordsMap: Map<string, WordData>): number {
 }
 
 // ============================================================================
-// Pass 3: Insert Translations and Examples
+// Pass 4: Insert Translations and Examples
 // ============================================================================
 
 function insertTranslations(db: Database, translations: TranslationData[]): number {
@@ -308,18 +401,34 @@ async function assertMaterializedJson(filePath: string): Promise<void> {
 async function main(): Promise<void> {
   console.log('=== Build SQLite from JSON ===\n')
 
-  // Find all language files
-  const langFiles = readdirSync(DATA_DIR).filter(
-    (f) => f.endsWith('.json') && !f.includes('/')
-  )
+  const newLangFiles = existsSync(LANG_DIR)
+    ? readdirSync(LANG_DIR).filter((f) => f.endsWith('.json') && !f.includes('/'))
+    : []
 
-  if (langFiles.length === 0) {
-    console.error('No language files found in data/')
-    console.error('Run "bun run import:jmdict --lang en" first.')
+  const legacyLangFiles = existsSync(DATA_DIR)
+    ? readdirSync(DATA_DIR).filter((f) => {
+      if (!f.endsWith('.json')) return false
+      if (f.includes('/')) return false
+      if (f === 'core.json') return false
+      return true
+    })
+    : []
+
+  const useNewSchema = existsSync(CORE_PATH) && newLangFiles.length > 0
+  const useLegacySchema = !useNewSchema && legacyLangFiles.length > 0
+
+  if (!useNewSchema && !useLegacySchema) {
+    console.error('No dictionary JSON files found.')
+    console.error('Expected either:')
+    console.error('  - new schema: data/core.json + data/lang/*.json')
+    console.error('  - legacy schema: data/{lang}.json')
+    console.error('Run "bun run import:base" first.')
     process.exit(1)
   }
 
-  const languages = langFiles.map((f) => f.replace('.json', ''))
+  const languages = useNewSchema
+    ? newLangFiles.map((f) => f.replace('.json', ''))
+    : legacyLangFiles.map((f) => f.replace('.json', ''))
   console.log(`Found languages: ${languages.join(', ')}`)
 
   // Initialize database
@@ -330,25 +439,47 @@ async function main(): Promise<void> {
   const allTranslations: TranslationData[] = []
   const allExamples: ExampleData[] = []
 
-  // Pass 1: Load all JSON files and collect data
-  console.log('\n--- Pass 1: Collecting data from JSON files ---\n')
-  for (const lang of languages) {
-    const filePath = `${DATA_DIR}/${lang}.json`
-    console.log(`Loading ${filePath}...`)
-    await assertMaterializedJson(filePath)
+  if (useNewSchema) {
+    // Pass 1: Load core.json
+    console.log('\n--- Pass 1: Loading core.json ---\n')
+    await assertMaterializedJson(CORE_PATH)
+    const core = await loadCore(CORE_PATH)
+    console.log(`  Version: ${core.version}, Updated: ${core.updatedAt}`)
+    collectCoreData(core, wordsMap)
 
-    const dict: DictFile = await loadDict(filePath, lang)
-    console.log(`  Version: ${dict.version}, Updated: ${dict.updatedAt}`)
+    // Pass 2: Load lang files and collect translations + examples
+    console.log('\n--- Pass 2: Collecting data from lang files ---\n')
+    for (const lang of languages) {
+      const filePath = `${LANG_DIR}/${lang}.json`
+      console.log(`Loading ${filePath}...`)
+      await assertMaterializedJson(filePath)
 
-    collectData(dict, wordsMap, allTranslations, allExamples)
+      const langFile = await loadLang(filePath, lang)
+      console.log(`  Version: ${langFile.version}, Updated: ${langFile.updatedAt}`)
+
+      collectLangData(langFile, wordsMap, allTranslations, allExamples)
+    }
+  } else {
+    // Legacy fallback for data/{lang}.json
+    console.log('\n--- Legacy Mode: Collecting from data/{lang}.json ---\n')
+    for (const lang of languages) {
+      const filePath = `${DATA_DIR}/${lang}.json`
+      console.log(`Loading ${filePath}...`)
+      await assertMaterializedJson(filePath)
+
+      const dict = await loadDict(filePath, lang)
+      console.log(`  Version: ${dict.version}, Updated: ${dict.updatedAt}`)
+
+      collectLegacyDictData(dict, wordsMap, allTranslations, allExamples)
+    }
   }
 
-  // Pass 2: Insert words first (required for foreign key constraints)
-  console.log('\n--- Pass 2: Inserting words ---')
+  // Pass 3: Insert words
+  console.log('\n--- Pass 3: Inserting words ---')
   const wordCount = insertWords(db, wordsMap)
 
-  // Pass 3: Insert translations and examples
-  console.log('\n--- Pass 3: Inserting translations and examples ---')
+  // Pass 4: Insert translations and examples
+  console.log('\n--- Pass 4: Inserting translations and examples ---')
   insertTranslations(db, allTranslations)
   insertExamples(db, allExamples)
 

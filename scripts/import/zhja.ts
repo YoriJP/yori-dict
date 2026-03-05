@@ -14,6 +14,8 @@
  *
  *   Same pattern as scripts/import/krdict.ts.
  *
+ * Writes: data/lang/zh-cn.json, data/lang/zh-tw.json
+ *
  * Usage:
  *   bun run import:zhja
  *   bun run import:zhja --mode diff
@@ -23,12 +25,15 @@
 import { existsSync } from 'fs'
 import * as OpenCC from 'opencc-js'
 import {
-  type DictEntry,
+  type DuplicateConflictPolicyInput,
   type ImportMode,
-  loadDict,
-  saveDict,
-  mergeDictEntries,
-  refreshDictSource,
+  loadCore,
+  loadLang,
+  saveLang,
+  mergeLangEntries,
+  refreshLangSource,
+  analyzeLangDefinitionConflicts,
+  resolveDuplicateConflictPolicy,
   printStats,
 } from './base'
 
@@ -37,7 +42,9 @@ import {
 // ============================================================================
 
 const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
 const CACHE_DIR = './data/cache'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const SOURCE_NAME = 'zhja'
 
 // Fixed ZIP names — user places them here manually (licensed content)
@@ -111,7 +118,6 @@ function extractJaCandidates(chineseTerm: string, defText: string): string[] {
   // Candidate 2: longest pure katakana run ≥ 2 chars
   const katakanaRuns = bodyText.match(/[\u30A0-\u30FF\uFF65-\uFF9F]{2,}/g)
   if (katakanaRuns) {
-    // Sort by length descending, take the longest
     const longest = katakanaRuns.sort((a, b) => b.length - a.length)[0]
     if (longest) candidates.push(longest)
   }
@@ -169,7 +175,7 @@ async function loadTermBanks(zipPath: string): Promise<YomitanEntry[]> {
 }
 
 // ============================================================================
-// Build JMdict lookup indexes
+// Build JMdict lookup indexes from core.json
 // ============================================================================
 
 interface JaIndex {
@@ -179,19 +185,18 @@ interface JaIndex {
 }
 
 async function buildJaIndex(): Promise<JaIndex> {
-  const enPath = `${DATA_DIR}/en.json`
-  if (!existsSync(enPath)) {
-    throw new Error('en.json not found — run import:jmdict first')
+  if (!existsSync(CORE_PATH)) {
+    throw new Error('core.json not found — run import:jmdict first')
   }
 
-  const en = await loadDict(enPath, 'en')
+  const core = await loadCore(CORE_PATH)
   const idx: JaIndex = {
     byKanjiAndReading: new Map(),
     byKanji: new Map(),
     byReading: new Map(),
   }
 
-  for (const [key, entry] of Object.entries(en.entries)) {
+  for (const [key, entry] of Object.entries(core.entries)) {
     const w = entry.word
     const r = entry.reading
 
@@ -218,7 +223,6 @@ function findJaKeys(candidate: string, idx: JaIndex): string[] {
   if (isPureCjk(candidate)) {
     return idx.byKanji.get(candidate) ?? []
   }
-
   // Katakana or hiragana — match by reading
   return idx.byReading.get(candidate) ?? []
 }
@@ -230,12 +234,14 @@ function findJaKeys(candidate: string, idx: JaIndex): string[] {
 async function importZhja(
   zipPaths: string[],
   mode: ImportMode,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number
 ): Promise<void> {
   console.log(`\n=== Importing ZH-JA dictionaries ===`)
   console.log(`Mode: ${mode}`)
   console.log(`ZIPs: ${zipPaths.join(', ')}`)
 
-  console.log('\nBuilding JMdict index...')
+  console.log('\nBuilding JMdict index from core.json...')
   const jaIdx = await buildJaIndex()
   console.log(
     `  Indexed ${jaIdx.byKanji.size.toLocaleString()} kanji forms, ` +
@@ -294,78 +300,78 @@ async function importZhja(
   console.log(`Total matches: ${totalMatched.toLocaleString()}`)
   console.log(`Unique JMdict keys: ${zhForKey.size.toLocaleString()}`)
 
-  // Load en.json for word/reading metadata
-  const en = await loadDict(`${DATA_DIR}/en.json`, 'en')
+  // Load existing zh-cn and zh-tw lang files
+  const zhCnPath = `${LANG_DIR}/zh-cn.json`
+  const zhTwPath = `${LANG_DIR}/zh-tw.json`
+  const zhCnLang = await loadLang(zhCnPath, 'zh-cn')
+  const zhTwLang = await loadLang(zhTwPath, 'zh-tw')
 
-  // Load existing zh-cn and zh-tw dicts (needed for kaikki guard and merge)
-  const zhCnPath = `${DATA_DIR}/zh-cn.json`
-  const zhTwPath = `${DATA_DIR}/zh-tw.json`
-  const zhCnDict = await loadDict(zhCnPath, 'zh-cn')
-  const zhTwDict = await loadDict(zhTwPath, 'zh-tw')
-
-  console.log(`Existing zh-cn.json entries: ${Object.keys(zhCnDict.entries).length.toLocaleString()}`)
-  console.log(`Existing zh-tw.json entries: ${Object.keys(zhTwDict.entries).length.toLocaleString()}`)
+  console.log(`Existing zh-cn.json entries: ${Object.keys(zhCnLang.entries).length.toLocaleString()}`)
+  console.log(`Existing zh-tw.json entries: ${Object.keys(zhTwLang.entries).length.toLocaleString()}`)
 
   // Set up OpenCC converter: Simplified → Traditional (Taiwan)
-  const toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' })
+  const toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' }) as (s: string) => string
 
   // Build source entry sets for zh-cn and zh-tw
-  const zhCnSourceEntries: Record<string, DictEntry> = {}
-  const zhTwSourceEntries: Record<string, DictEntry> = {}
+  const zhCnSourceEntries: Record<string, { definitions: string[] }> = {}
+  const zhTwSourceEntries: Record<string, { definitions: string[] }> = {}
 
   let skippedKaikki = 0
 
   for (const [key, zhTerms] of zhForKey) {
-    const enEntry = en.entries[key]
-    if (!enEntry) continue
-
     // Guard: skip entries that already have kaikki-sourced Chinese definitions
     // (kaikki provides higher-quality native definitions; don't dilute them)
-    const existingCnEntry = zhCnDict.entries[key]
-    if (existingCnEntry?.definitions.some((d) => d.sources.includes('kaikki'))) {
-      skippedKaikki++
-      continue
+    const existingCnEntry = zhCnLang.entries[key]
+    if (existingCnEntry) {
+      const hasKaikkiDef = existingCnEntry.definitions.some(def =>
+        (existingCnEntry._defSources[def] ?? []).includes('kaikki')
+      )
+      if (hasKaikkiDef && mode !== 'refresh') {
+        skippedKaikki++
+        continue
+      }
     }
 
-    const cnDefinitions = [...zhTerms].map((text) => ({ text, sources: [SOURCE_NAME] }))
-    const twDefinitions = [...zhTerms].map((text) => ({
-      text: toTraditional(text),
-      sources: [SOURCE_NAME],
-    }))
+    const cnDefs = [...zhTerms]
+    const twDefs = cnDefs.map(toTraditional)
 
-    const base = {
-      word: enEntry.word,
-      reading: enEntry.reading,
-      partOfSpeech: enEntry.partOfSpeech,
-      common: enEntry.common,
-      commonSources: enEntry.commonSources,
-      jlpt: enEntry.jlpt,
-      examples: [],
-    }
-
-    zhCnSourceEntries[key] = { ...base, definitions: cnDefinitions }
-    zhTwSourceEntries[key] = { ...base, definitions: twDefinitions }
+    zhCnSourceEntries[key] = { definitions: cnDefs }
+    zhTwSourceEntries[key] = { definitions: twDefs }
   }
 
   console.log(`\nBuilt ${Object.keys(zhCnSourceEntries).length.toLocaleString()} source entries`)
   console.log(`  (skipped ${skippedKaikki.toLocaleString()} entries already covered by kaikki)`)
 
   if (mode === 'refresh') {
-    const cnStats = refreshDictSource(zhCnDict.entries, zhCnSourceEntries, SOURCE_NAME)
-    const twStats = refreshDictSource(zhTwDict.entries, zhTwSourceEntries, SOURCE_NAME)
+    refreshLangSource(zhCnLang.entries, SOURCE_NAME)
+    refreshLangSource(zhTwLang.entries, SOURCE_NAME)
+  }
+
+  const cnConflictPolicy = await resolveDuplicateConflictPolicy(
+    'zhja/zh-cn',
+    duplicatePolicyInput,
+    analyzeLangDefinitionConflicts(zhCnLang.entries, zhCnSourceEntries, duplicateSamples)
+  )
+  const twConflictPolicy = await resolveDuplicateConflictPolicy(
+    'zhja/zh-tw',
+    duplicatePolicyInput,
+    analyzeLangDefinitionConflicts(zhTwLang.entries, zhTwSourceEntries, duplicateSamples)
+  )
+
+  if (mode === 'refresh') {
+    const cnStats = mergeLangEntries(zhCnLang.entries, zhCnSourceEntries, SOURCE_NAME, 'merge', cnConflictPolicy)
+    const twStats = mergeLangEntries(zhTwLang.entries, zhTwSourceEntries, SOURCE_NAME, 'merge', twConflictPolicy)
 
     console.log('\n=== zh-cn Statistics ===')
     console.log(`  New entries: ${cnStats.added.toLocaleString()}`)
     console.log(`  Updated entries: ${cnStats.updated.toLocaleString()}`)
-    console.log(`  Removed entries: ${cnStats.removed.toLocaleString()}`)
 
     console.log('\n=== zh-tw Statistics ===')
     console.log(`  New entries: ${twStats.added.toLocaleString()}`)
     console.log(`  Updated entries: ${twStats.updated.toLocaleString()}`)
-    console.log(`  Removed entries: ${twStats.removed.toLocaleString()}`)
   } else {
-    const cnStats = mergeDictEntries(zhCnDict.entries, zhCnSourceEntries, mode)
-    const twStats = mergeDictEntries(zhTwDict.entries, zhTwSourceEntries, mode)
+    const cnStats = mergeLangEntries(zhCnLang.entries, zhCnSourceEntries, SOURCE_NAME, mode, cnConflictPolicy)
+    const twStats = mergeLangEntries(zhTwLang.entries, zhTwSourceEntries, SOURCE_NAME, mode, twConflictPolicy)
 
     console.log('\n=== zh-cn Statistics ===')
     printStats(cnStats, mode)
@@ -374,8 +380,8 @@ async function importZhja(
   }
 
   if (mode !== 'diff') {
-    await saveDict(zhCnPath, zhCnDict)
-    await saveDict(zhTwPath, zhTwDict)
+    await saveLang(zhCnPath, zhCnLang)
+    await saveLang(zhTwPath, zhTwLang)
     console.log(`\nSaved to: ${zhCnPath}, ${zhTwPath}`)
   }
 }
@@ -401,6 +407,8 @@ Usage:
 
 Options:
   --mode <mode>   merge | diff | refresh (default: merge)
+  --dup-policy    merge | skip | replace | ask (default: merge)
+  --dup-samples   How many conflict samples to show in ask mode (default: 5)
 
 Examples:
   bun run import:zhja
@@ -412,6 +420,8 @@ Examples:
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   let mode: ImportMode = 'merge'
+  let duplicatePolicy: DuplicateConflictPolicyInput = 'merge'
+  let duplicateSamples = 5
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -422,6 +432,21 @@ async function main(): Promise<void> {
         mode = next as ImportMode
       } else {
         console.error(`Invalid mode: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-policy' && next) {
+      if (['merge', 'skip', 'replace', 'ask'].includes(next)) {
+        duplicatePolicy = next as DuplicateConflictPolicyInput
+      } else {
+        console.error(`Invalid --dup-policy: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-samples' && next) {
+      duplicateSamples = parseInt(next, 10)
+      if (Number.isNaN(duplicateSamples) || duplicateSamples < 1) {
+        console.error(`Invalid --dup-samples: ${next}`)
         process.exit(1)
       }
       i++
@@ -444,8 +469,9 @@ async function main(): Promise<void> {
   }
 
   console.log(`Found ${availableZips.length} ZIP(s): ${availableZips.map((z) => z.split('/').pop()).join(', ')}`)
+  console.log(`Duplicate policy: ${duplicatePolicy}`)
 
-  await importZhja(availableZips, mode)
+  await importZhja(availableZips, mode, duplicatePolicy, duplicateSamples)
 
   console.log('\n=== Import Complete ===')
   console.log('Run "bun run build:db" to rebuild the database.')

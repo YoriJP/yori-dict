@@ -1,11 +1,9 @@
 /**
  * JMnedict Importer - Import proper names from jmdict-simplified
  *
- * Adds ~740k Japanese proper name entries (surnames, given names, place names,
- * company names, etc.) to all language dictionaries.
- *
- * Source: https://github.com/scriptin/jmdict-simplified
- * License: CC BY-SA 3.0
+ * Writes:
+ *   - data/core.json          (POS for proper names)
+ *   - data/lang/{lang}.json   (name definitions in all languages)
  *
  * Usage:
  *   bun run import:jmnedict
@@ -16,16 +14,22 @@
 import { mkdir } from 'fs/promises'
 import { existsSync, unlinkSync } from 'fs'
 import {
-  type DictEntry,
-  type DictFile,
+  type CoreEntry,
+  type LangEntry,
+  type LangFile,
+  type DuplicateConflictPolicyInput,
   type ImportMode,
   makeKey,
-  loadDict,
-  saveDict,
-  mergeDictEntries,
-  refreshDictSource,
+  loadCore,
+  saveCore,
+  loadLang,
+  saveLang,
+  mergeCoreEntries,
+  mergeLangEntries,
+  refreshLangSource,
+  analyzeLangDefinitionConflicts,
+  resolveDuplicateConflictPolicy,
   printStats,
-  createEmptyDict,
 } from './base'
 
 // ============================================================================
@@ -33,10 +37,11 @@ import {
 // ============================================================================
 
 const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const CACHE_DIR = './data/cache'
 const CACHE_PATH = `${CACHE_DIR}/jmnedict-all.json`
 
-// All languages we maintain dictionaries for
 const ALL_LANGS = ['en', 'de', 'ko', 'zh-cn', 'zh-tw']
 
 // ============================================================================
@@ -82,7 +87,6 @@ interface JMnedictFile {
 // Name type → human-readable part of speech
 // ============================================================================
 
-// Maps JMnedict type tags to readable partOfSpeech values
 const NAME_TYPE_MAP: Record<string, string> = {
   surname:      'surname',
   fem:          'female given name',
@@ -178,7 +182,12 @@ async function downloadJMnedict(): Promise<JMnedictFile> {
 // Conversion
 // ============================================================================
 
-function convertJMnedictEntry(word: JMnedictWord, tags: Record<string, string>): DictEntry | null {
+interface ConvertedEntry {
+  coreEntry: CoreEntry
+  definitions: string[]  // English romanized names
+}
+
+function convertJMnedictEntry(word: JMnedictWord): ConvertedEntry | null {
   const kanjiText = word.kanji[0]?.text
   const kanaText = word.kana[0]?.text
   if (!kanaText) return null
@@ -186,7 +195,6 @@ function convertJMnedictEntry(word: JMnedictWord, tags: Record<string, string>):
   const headword = kanjiText || kanaText
   const reading = kanaText
 
-  // Collect all name type tags across all translations
   const posSet = new Set<string>()
   for (const t of word.translation) {
     for (const tag of t.type) {
@@ -196,8 +204,7 @@ function convertJMnedictEntry(word: JMnedictWord, tags: Record<string, string>):
   }
   if (posSet.size === 0) posSet.add('proper noun')
 
-  // English gloss (translation text)
-  const definitions: { text: string; sources: string[] }[] = []
+  const definitions: string[] = []
   const seenDefs = new Set<string>()
   for (const t of word.translation) {
     for (const tr of t.translation) {
@@ -205,93 +212,186 @@ function convertJMnedictEntry(word: JMnedictWord, tags: Record<string, string>):
       const normalized = tr.text.toLowerCase().trim()
       if (seenDefs.has(normalized)) continue
       seenDefs.add(normalized)
-      definitions.push({ text: tr.text, sources: ['jmnedict'] })
+      definitions.push(tr.text)
     }
   }
 
   return {
-    word: headword,
-    reading,
-    partOfSpeech: Array.from(posSet).map((value) => ({ value, sources: ['jmnedict'] })),
-    common: false,
-    commonSources: [],
-    jlpt: [],
+    coreEntry: {
+      word: headword,
+      reading,
+      partOfSpeech: Array.from(posSet),
+      common: false,
+      jlpt: null,
+      frequency: null,
+    },
     definitions,
-    examples: [],
   }
 }
 
-function buildSourceEntries(jmnedict: JMnedictFile): Record<string, DictEntry> {
-  const entries: Record<string, DictEntry> = {}
+function buildSourceData(jmnedict: JMnedictFile): {
+  coreEntries: Record<string, CoreEntry>
+  langEntries: Record<string, { definitions: string[] }>
+} {
+  const coreEntries: Record<string, CoreEntry> = {}
+  const langEntries: Record<string, { definitions: string[] }> = {}
 
   for (const word of jmnedict.words) {
-    const entry = convertJMnedictEntry(word, jmnedict.tags)
-    if (!entry) continue
+    const converted = convertJMnedictEntry(word)
+    if (!converted) continue
 
-    const key = makeKey(entry.word, entry.reading)
+    const key = makeKey(converted.coreEntry.word, converted.coreEntry.reading)
 
-    if (entries[key]) {
-      // Merge definitions and POS from duplicate keys
-      const existing = entries[key]
-      for (const def of entry.definitions) {
-        const exists = existing.definitions.some(
-          (d) => d.text.toLowerCase() === def.text.toLowerCase()
-        )
-        if (!exists) existing.definitions.push(def)
-      }
-      for (const posEntry of entry.partOfSpeech) {
-        if (!existing.partOfSpeech.find((p) => p.value === posEntry.value)) {
-          existing.partOfSpeech.push(posEntry)
+    if (coreEntries[key]) {
+      const existing = coreEntries[key]
+      const posSet = new Set([...existing.partOfSpeech, ...converted.coreEntry.partOfSpeech])
+      existing.partOfSpeech = Array.from(posSet)
+    } else {
+      coreEntries[key] = converted.coreEntry
+    }
+
+    if (langEntries[key]) {
+      for (const def of converted.definitions) {
+        const normalized = def.toLowerCase().trim()
+        if (!langEntries[key].definitions.some((d) => d.toLowerCase().trim() === normalized)) {
+          langEntries[key].definitions.push(def)
         }
       }
     } else {
-      entries[key] = entry
+      langEntries[key] = { definitions: converted.definitions }
     }
   }
 
-  return entries
+  return { coreEntries, langEntries }
+}
+
+function collectSourceKeysFromLangEntries(
+  entries: Record<string, LangEntry>,
+  sourceName: string
+): Set<string> {
+  const keys = new Set<string>()
+
+  for (const [key, entry] of Object.entries(entries)) {
+    const hasSourceDef = entry.definitions.some((def) => {
+      const sources = entry._defSources[def] ?? []
+      return sources.includes(sourceName)
+    })
+    if (hasSourceDef) keys.add(key)
+  }
+
+  return keys
+}
+
+function stripJmnedictFromCore(
+  coreEntries: Record<string, CoreEntry>,
+  keysToStrip: Set<string>
+): number {
+  const namePos = new Set(Object.values(NAME_TYPE_MAP))
+  namePos.add('proper noun')
+
+  let strippedEntries = 0
+
+  for (const key of keysToStrip) {
+    const entry = coreEntries[key]
+    if (!entry) continue
+    const beforeLength = entry.partOfSpeech.length
+    entry.partOfSpeech = entry.partOfSpeech.filter((pos) => !namePos.has(pos))
+    if (entry.partOfSpeech.length !== beforeLength) {
+      strippedEntries++
+    }
+  }
+
+  return strippedEntries
 }
 
 // ============================================================================
 // Import
 // ============================================================================
 
-async function importJMnedict(langs: string[], mode: ImportMode): Promise<void> {
+async function importJMnedict(
+  langs: string[],
+  mode: ImportMode,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number
+): Promise<void> {
   console.log('=== [Base] JMnedict Importer ===')
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
+
+  await mkdir(DATA_DIR, { recursive: true })
+  await mkdir(LANG_DIR, { recursive: true })
 
   const jmnedict = await downloadJMnedict()
   console.log(`\nLoaded ${jmnedict.words.length.toLocaleString()} JMnedict entries`)
 
   console.log('Converting entries...')
-  const sourceEntries = buildSourceEntries(jmnedict)
-  console.log(`  Converted to ${Object.keys(sourceEntries).length.toLocaleString()} unique entries`)
+  const { coreEntries, langEntries } = buildSourceData(jmnedict)
+  console.log(`  Converted to ${Object.keys(coreEntries).length.toLocaleString()} unique entries`)
 
+  // Preload lang files so refresh can target existing jmnedict keys only.
+  const loadedLangFiles: Array<{ lang: string; langPath: string; langFile: LangFile }> = []
+  const jmnedictKeysToRefresh = new Set<string>()
   for (const lang of langs) {
-    const dictPath = `${DATA_DIR}/${lang}.json`
-    if (!existsSync(dictPath)) {
-      console.log(`\n[${lang}] Dictionary not found: ${dictPath} — skipping`)
-      continue
-    }
-
-    console.log(`\n=== Importing into ${lang} ===`)
-    await mkdir(DATA_DIR, { recursive: true })
-    const dict = await loadDict(dictPath, lang)
-    console.log(`  Existing entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
+    const langPath = `${LANG_DIR}/${lang}.json`
+    const langFile = await loadLang(langPath, lang)
+    loadedLangFiles.push({ lang, langPath, langFile })
 
     if (mode === 'refresh') {
-      const stats = refreshDictSource(dict.entries, sourceEntries, 'jmnedict')
-      console.log(`  New: ${stats.added.toLocaleString()}, Updated: ${stats.updated.toLocaleString()}, Removed: ${stats.removed.toLocaleString()}`)
-    } else {
-      const stats = mergeDictEntries(dict.entries, sourceEntries, mode)
-      printStats(stats, mode)
+      const keys = collectSourceKeysFromLangEntries(langFile.entries, 'jmnedict')
+      for (const key of keys) jmnedictKeysToRefresh.add(key)
+    }
+  }
+
+  // --- Update core.json ---
+  console.log('\n--- Updating core.json ---')
+  const core = await loadCore(CORE_PATH)
+  console.log(`  Existing entries: ${Object.keys(core.entries).length.toLocaleString()}`)
+
+  let coreStats: { added: number; updated: number; unchanged: number }
+  if (mode === 'refresh') {
+    const stripped = stripJmnedictFromCore(core.entries, jmnedictKeysToRefresh)
+    console.log(
+      `  Stripped jmnedict POS from ${stripped.toLocaleString()} existing entries `
+      + `(across ${jmnedictKeysToRefresh.size.toLocaleString()} jmnedict keys)`
+    )
+    coreStats = mergeCoreEntries(core.entries, coreEntries, 'merge')
+  } else {
+    coreStats = mergeCoreEntries(core.entries, coreEntries, mode)
+  }
+
+  if (mode !== 'diff') {
+    await saveCore(CORE_PATH, core)
+    console.log(`  Core saved: ${Object.keys(core.entries).length.toLocaleString()} entries`)
+  } else {
+    console.log(`  Core diff: +${coreStats.added} ~${coreStats.updated} =${coreStats.unchanged}`)
+  }
+
+  // --- Update lang files ---
+  for (const { lang, langPath, langFile } of loadedLangFiles) {
+    console.log(`\n=== Updating lang/${lang}.json (${Object.keys(langFile.entries).length.toLocaleString()} existing) ===`)
+
+    if (mode === 'refresh') {
+      refreshLangSource(langFile.entries, 'jmnedict')
     }
 
+    const langStats = mergeLangEntries(
+      langFile.entries,
+      langEntries,
+      'jmnedict',
+      mode === 'refresh' ? 'merge' : mode,
+      await resolveDuplicateConflictPolicy(
+        `jmnedict/${lang}`,
+        duplicatePolicyInput,
+        analyzeLangDefinitionConflicts(langFile.entries, langEntries, duplicateSamples)
+      )
+    )
+
     if (mode !== 'diff') {
-      await saveDict(dictPath, dict)
-      console.log(`  Saved: ${dictPath} (${Object.keys(dict.entries).length.toLocaleString()} total entries)`)
+      await saveLang(langPath, langFile)
+      console.log(`  Saved: ${langPath} (${Object.keys(langFile.entries).length.toLocaleString()} total)`)
     }
+
+    printStats(langStats as { added: number; updated: number; unchanged: number }, mode)
   }
 }
 
@@ -310,13 +410,16 @@ Usage:
   bun run import:jmnedict [options]
 
 Options:
-  --lang    Comma-separated language codes (default: all available)
+  --lang    Comma-separated language codes (default: all with existing lang files)
             Supported: en, de, ko, zh-cn, zh-tw
-  --mode    Import mode (default: replace)
+  --mode    Import mode (default: merge)
             replace - Full snapshot sync: remove stale entries, overwrite all
             merge   - Add new entries, merge definitions for existing
             diff    - Preview changes, no modifications
             refresh - Strip and re-import only jmnedict data
+  --dup-policy   How to handle conflicting incoming definitions
+                 merge | skip | replace | ask (default: merge)
+  --dup-samples  How many conflict samples to show in ask mode (default: 5)
 
 Examples:
   bun run import:jmnedict
@@ -333,8 +436,11 @@ async function main(): Promise<void> {
     return
   }
 
-  let langs: string[] = ALL_LANGS.filter((lang) => existsSync(`${DATA_DIR}/${lang}.json`))
+  // Default: all langs with existing lang files
+  let langs: string[] = ALL_LANGS.filter((lang) => existsSync(`${LANG_DIR}/${lang}.json`))
   let mode: ImportMode = 'merge'
+  let duplicatePolicy: DuplicateConflictPolicyInput = 'merge'
+  let duplicateSamples = 5
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -350,6 +456,21 @@ async function main(): Promise<void> {
         process.exit(1)
       }
       i++
+    } else if (arg === '--dup-policy' && next) {
+      if (['merge', 'skip', 'replace', 'ask'].includes(next)) {
+        duplicatePolicy = next as DuplicateConflictPolicyInput
+      } else {
+        console.error(`Invalid --dup-policy: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-samples' && next) {
+      duplicateSamples = parseInt(next, 10)
+      if (Number.isNaN(duplicateSamples) || duplicateSamples < 1) {
+        console.error(`Invalid --dup-samples: ${next}`)
+        process.exit(1)
+      }
+      i++
     }
   }
 
@@ -358,7 +479,8 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  await importJMnedict(langs, mode)
+  console.log(`Duplicate policy: ${duplicatePolicy}`)
+  await importJMnedict(langs, mode, duplicatePolicy, duplicateSamples)
   console.log('\n=== Import Complete ===')
 }
 

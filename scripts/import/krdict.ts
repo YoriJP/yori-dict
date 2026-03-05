@@ -6,12 +6,7 @@
  *   https://github.com/Lyroxide/yomitan-ko-dic/releases
  *   License: CC BY-SA 2.0 KR (NIKL / 국립국어원)
  *
- * Strategy:
- *   KRDICT is a Korean-pivot dictionary: Korean headwords with Japanese
- *   equivalents. We reverse-map by extracting the Japanese words from each
- *   entry, matching them to existing JMdict entries (by kanji + reading),
- *   and recording the Korean headword as the Korean "definition" for that
- *   Japanese entry.
+ * Writes: data/lang/ko.json
  *
  * Usage:
  *   bun run import:krdict
@@ -22,16 +17,18 @@
 import { existsSync } from 'fs'
 import { mkdir } from 'fs/promises'
 import {
-  type DictEntry,
+  type DuplicateConflictPolicyInput,
   type ImportMode,
   makeKey,
-  loadDict,
-  saveDict,
-  mergeDictEntries,
-  refreshDictSource,
+  loadCore,
+  loadLang,
+  saveLang,
+  mergeLangEntries,
+  refreshLangSource,
+  analyzeLangDefinitionConflicts,
+  resolveDuplicateConflictPolicy,
   printStats,
   downloadWithProgress,
-  mergeArrays,
 } from './base'
 
 // ============================================================================
@@ -39,6 +36,8 @@ import {
 // ============================================================================
 
 const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const CACHE_DIR = './data/cache/krdict-ja'
 const DEFAULT_ZIP_PATH = `${CACHE_DIR}/KO-JA.KRDICT.No.Examples.zip`
 const DOWNLOAD_URL =
@@ -50,7 +49,6 @@ const LANG = 'ko'
 // Yomitan term bank types
 // ============================================================================
 
-// Yomitan format 3: [term, reading, definitionTags, rules, score, definitions, sequence, termTags]
 type YomitanEntry = [string, string, string, string, number, YomitanDef[], number, string]
 
 type YomitanDef =
@@ -66,10 +64,6 @@ type YomitanNode =
 // Parsing helpers
 // ============================================================================
 
-/**
- * Walk structured-content and collect all Japanese-language text nodes.
- * Returns raw strings like 'じっか【実家】' or 'くすんでいる【黒ずんでいる】'
- */
 function collectJaNodes(node: YomitanNode): string[] {
   const results: string[] = []
   function walk(n: YomitanNode): void {
@@ -91,16 +85,8 @@ interface JaWord {
   kanji: string | null
 }
 
-/**
- * Parse Japanese equivalent strings into { reading, kanji } pairs.
- * Input examples:
- *   'じっか【実家】'              → [{ reading: 'じっか', kanji: '実家' }]
- *   'とも【友】。ともだち【友達】' → [{ reading: 'とも', kanji: '友' }, ...]
- *   'くすんでいる'                → [{ reading: 'くすんでいる', kanji: null }]
- */
 function parseJaWords(text: string): JaWord[] {
   const words: JaWord[] = []
-  // Split on sentence-ending delimiters between entries
   const parts = text.split(/[。／]/)
 
   for (const part of parts) {
@@ -110,38 +96,24 @@ function parseJaWords(text: string): JaWord[] {
     const match = trimmed.match(/^([^【（(]+)【([^】]+)】/)
     if (match) {
       const reading = match[1].trim()
-      // 【】 may contain multiple kanji forms separated by ・
       for (const kanji of match[2].split('・')) {
         const k = kanji.trim()
         if (k) words.push({ reading, kanji: k })
       }
     } else if (/^[\u3040-\u30FF\uFF65-\uFF9F]+$/.test(trimmed)) {
-      // Pure kana — only include if it looks like a word (short enough)
       if (trimmed.length <= 20) words.push({ reading: trimmed, kanji: null })
     }
-    // Otherwise it's a definition sentence — skip
   }
 
   return words
 }
 
-/**
- * Returns true if the headword is pure CJK (hanja duplicate entry).
- * KRDICT duplicates every entry — one with hangul, one with hanja.
- * We only want the hangul version.
- */
 function isHanjaDuplicate(term: string): boolean {
   return /^[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]+$/.test(term)
 }
 
-/**
- * Filter Korean terms: remove hanja-mixed variants, keep pure hangul (or
- * hangul + spaces/punctuation). Also strips trailing hanja particles like
- * 親庭집 → skip (mixed hanja+hangul with leading hanja).
- */
 function isCleanKorean(term: string): boolean {
   if (isHanjaDuplicate(term)) return false
-  // Skip mixed-script terms where a hanja character appears (e.g. 親庭집)
   if (/[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]/.test(term)) return false
   return true
 }
@@ -151,19 +123,13 @@ function isCleanKorean(term: string): boolean {
 // ============================================================================
 
 async function loadTermBanks(zipPath: string): Promise<YomitanEntry[]> {
-  // Bun has native ZIP support via BunFile
   const file = Bun.file(zipPath)
   if (!(await file.exists())) {
     throw new Error(`ZIP not found: ${zipPath}`)
   }
 
-  // Use the unzipped files if they exist alongside the zip
-  const dir = zipPath.replace(/\.zip$/, '_extracted')
-  const zipDir = zipPath.replace(/[^/]+\.zip$/, '')
-
-  // Try reading term_bank_*.json directly from same directory as zip
-  // (already extracted by a previous step)
   const allEntries: YomitanEntry[] = []
+  const zipDir = zipPath.replace(/[^/]+\.zip$/, '')
 
   for (let i = 1; ; i++) {
     const bankPath = `${zipDir}term_bank_${i}.json`
@@ -184,29 +150,28 @@ async function loadTermBanks(zipPath: string): Promise<YomitanEntry[]> {
 }
 
 // ============================================================================
-// Build JMdict lookup indexes
+// Build JMdict lookup indexes from core.json
 // ============================================================================
 
 interface JaIndex {
-  byKanjiAndReading: Map<string, string[]> // 'kanji:reading' → [keys]
-  byKanji: Map<string, string[]>           // kanji → [keys]
-  byReading: Map<string, string[]>         // reading → [keys]
+  byKanjiAndReading: Map<string, string[]>
+  byKanji: Map<string, string[]>
+  byReading: Map<string, string[]>
 }
 
 async function buildJaIndex(): Promise<JaIndex> {
-  const enPath = `${DATA_DIR}/en.json`
-  if (!existsSync(enPath)) {
-    throw new Error('en.json not found — run import:jmdict first')
+  if (!existsSync(CORE_PATH)) {
+    throw new Error('core.json not found — run import:jmdict first')
   }
 
-  const en = await loadDict(enPath, 'en')
+  const core = await loadCore(CORE_PATH)
   const idx: JaIndex = {
     byKanjiAndReading: new Map(),
     byKanji: new Map(),
     byReading: new Map(),
   }
 
-  for (const [key, entry] of Object.entries(en.entries)) {
+  for (const [key, entry] of Object.entries(core.entries)) {
     const w = entry.word
     const r = entry.reading
 
@@ -224,21 +189,12 @@ async function buildJaIndex(): Promise<JaIndex> {
   return idx
 }
 
-/**
- * Find matching JMdict keys for a parsed Japanese word.
- * Priority: kanji+reading exact > kanji only > reading only (kana words).
- */
 function findJaKeys(word: JaWord, idx: JaIndex): string[] {
   if (word.kanji) {
-    // Try exact kanji+reading match first
     const exact = idx.byKanjiAndReading.get(`${word.kanji}:${word.reading}`)
     if (exact && exact.length > 0) return exact
-
-    // Fall back to kanji-only (covers reading variants)
     return idx.byKanji.get(word.kanji) ?? []
   }
-
-  // Pure kana word — match by reading
   return idx.byReading.get(word.reading) ?? []
 }
 
@@ -249,11 +205,13 @@ function findJaKeys(word: JaWord, idx: JaIndex): string[] {
 async function importKrdict(
   zipPath: string,
   mode: ImportMode,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number
 ): Promise<void> {
   console.log(`\n=== Importing ${LANG} from KRDICT (${zipPath}) ===`)
   console.log(`Mode: ${mode}`)
 
-  console.log('\nBuilding JMdict index...')
+  console.log('\nBuilding JMdict index from core.json...')
   const jaIdx = await buildJaIndex()
   console.log(
     `  Indexed ${jaIdx.byKanji.size.toLocaleString()} kanji forms, ` +
@@ -264,7 +222,6 @@ async function importKrdict(
   const entries = await loadTermBanks(zipPath)
   console.log(`  Loaded ${entries.length.toLocaleString()} entries`)
 
-  // Map: jmdict key → Set of Korean headwords
   const koForKey = new Map<string, Set<string>>()
 
   let processed = 0
@@ -276,7 +233,6 @@ async function importKrdict(
     const [koTerm, , , , , defs] = entry
     processed++
 
-    // Skip hanja duplicates and mixed-script terms
     if (!isCleanKorean(koTerm)) { skipped++; continue }
 
     const def = defs[0]
@@ -307,66 +263,45 @@ async function importKrdict(
   console.log(`  JA word refs matched: ${jaMatched.toLocaleString()}`)
   console.log(`  Unique JMdict keys with KO: ${koForKey.size.toLocaleString()}`)
 
-  // Build source entries for the ko dict
-  const sourceEntries: Record<string, DictEntry> = {}
-
-  // We need word/reading for each key — load en.json for that
-  const en = await loadDict(`${DATA_DIR}/en.json`, 'en')
+  // Build source entries for ko lang file
+  const sourceEntries: Record<string, { definitions: string[] }> = {}
+  const core = await loadCore(CORE_PATH)
 
   for (const [key, koTerms] of koForKey) {
-    const enEntry = en.entries[key]
-    if (!enEntry) continue
-
-    const definitions = [...koTerms].map((text) => ({ text, sources: [SOURCE_NAME] }))
-
-    sourceEntries[key] = {
-      word: enEntry.word,
-      reading: enEntry.reading,
-      partOfSpeech: enEntry.partOfSpeech,   // attributed to 'jmdict' — correct ownership
-      common: enEntry.common,
-      commonSources: enEntry.commonSources, // attributed to 'jmdict' — preserve actual commonness
-      jlpt: enEntry.jlpt,                   // attributed to 'jmdict' — correct ownership
-      definitions,
-      examples: [],
-    }
+    if (!core.entries[key]) continue
+    sourceEntries[key] = { definitions: [...koTerms] }
   }
 
   console.log(`\nBuilt ${Object.keys(sourceEntries).length.toLocaleString()} source entries`)
 
-  // Merge into ko.json
-  const dictPath = `${DATA_DIR}/${LANG}.json`
-  const dict = await loadDict(dictPath, LANG)
-  console.log(`Existing ko.json entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
+  const langPath = `${LANG_DIR}/${LANG}.json`
+  const langFile = await loadLang(langPath, LANG)
+  console.log(`Existing ko.json entries: ${Object.keys(langFile.entries).length.toLocaleString()}`)
 
   if (mode === 'refresh') {
-    const stats = refreshDictSource(dict.entries, sourceEntries, SOURCE_NAME)
+    refreshLangSource(langFile.entries, SOURCE_NAME)
+  }
 
-    // refreshDictSource only deletes entries that are fully empty after stripping
-    // krdict data. But ko entries retain jmdict-attributed POS/JLPT, so isEmpty()
-    // stays false even for stale entries KRDICT no longer covers. Prune them here:
-    // an entry with no krdict definitions and not in the new source set is stale.
-    const sourceKeys = new Set(Object.keys(sourceEntries))
-    for (const key of Object.keys(dict.entries)) {
-      const entry = dict.entries[key]
-      const hasKrDefs = entry.definitions.some((d) => d.sources.includes(SOURCE_NAME))
-      if (!hasKrDefs && !sourceKeys.has(key)) {
-        delete dict.entries[key]
-        stats.removed++
-      }
-    }
+  const conflictPolicy = await resolveDuplicateConflictPolicy(
+    SOURCE_NAME,
+    duplicatePolicyInput,
+    analyzeLangDefinitionConflicts(langFile.entries, sourceEntries, duplicateSamples)
+  )
+
+  if (mode === 'refresh') {
+    const stats = mergeLangEntries(langFile.entries, sourceEntries, SOURCE_NAME, 'merge', conflictPolicy)
 
     console.log('\n=== Import Statistics ===')
     console.log(`  New entries: ${stats.added.toLocaleString()}`)
     console.log(`  Updated entries: ${stats.updated.toLocaleString()}`)
-    console.log(`  Removed entries: ${stats.removed.toLocaleString()}`)
   } else {
-    const stats = mergeDictEntries(dict.entries, sourceEntries, mode)
-    printStats(stats, mode)
+    const stats = mergeLangEntries(langFile.entries, sourceEntries, SOURCE_NAME, mode, conflictPolicy)
+    printStats(stats as { added: number; updated: number; unchanged: number }, mode)
   }
 
   if (mode !== 'diff') {
-    await saveDict(dictPath, dict)
-    console.log(`Saved to: ${dictPath}`)
+    await saveLang(langPath, langFile)
+    console.log(`Saved to: ${langPath}`)
   }
 }
 
@@ -386,7 +321,9 @@ Usage:
 
 Options:
   --mode <mode>   merge | diff | replace | refresh (default: replace)
-  --zip <path>    Path to extracted KO-JA.KRDICT.*.zip directory
+  --dup-policy    merge | skip | replace | ask (default: merge)
+  --dup-samples   How many conflict samples to show in ask mode (default: 5)
+  --zip <path>    Path to KO-JA.KRDICT.*.zip
                   (default: ${DEFAULT_ZIP_PATH})
   --download      Re-download the ZIP even if cached
 
@@ -403,6 +340,8 @@ async function main(): Promise<void> {
   let mode: ImportMode = 'replace'
   let zipPath = DEFAULT_ZIP_PATH
   let forceDownload = false
+  let duplicatePolicy: DuplicateConflictPolicyInput = 'merge'
+  let duplicateSamples = 5
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -419,6 +358,21 @@ async function main(): Promise<void> {
     } else if (arg === '--zip' && next) {
       zipPath = next
       i++
+    } else if (arg === '--dup-policy' && next) {
+      if (['merge', 'skip', 'replace', 'ask'].includes(next)) {
+        duplicatePolicy = next as DuplicateConflictPolicyInput
+      } else {
+        console.error(`Invalid --dup-policy: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-samples' && next) {
+      duplicateSamples = parseInt(next, 10)
+      if (Number.isNaN(duplicateSamples) || duplicateSamples < 1) {
+        console.error(`Invalid --dup-samples: ${next}`)
+        process.exit(1)
+      }
+      i++
     } else if (arg === '--download') {
       forceDownload = true
     } else if (arg === '--help' || arg === '-h') {
@@ -428,15 +382,14 @@ async function main(): Promise<void> {
   }
 
   await mkdir(CACHE_DIR, { recursive: true })
+  await mkdir(LANG_DIR, { recursive: true })
 
-  // Download ZIP if needed
   if (forceDownload || !existsSync(zipPath)) {
     console.log('Downloading KRDICT Korean-Japanese Yomitan dictionary...')
     await downloadWithProgress(DOWNLOAD_URL, zipPath)
     console.log('Download complete.')
   }
 
-  // Check if term banks are already extracted
   const zipDir = zipPath.replace(/[^/]+\.zip$/, '')
   if (!existsSync(`${zipDir}term_bank_1.json`)) {
     console.log(`\nExtracting ${zipPath}...`)
@@ -445,7 +398,8 @@ async function main(): Promise<void> {
     console.log('Extracted.')
   }
 
-  await importKrdict(zipPath, mode)
+  console.log(`Duplicate policy: ${duplicatePolicy}`)
+  await importKrdict(zipPath, mode, duplicatePolicy, duplicateSamples)
 
   console.log('\n=== Import Complete ===')
   console.log('Run "bun run build:db" to rebuild the database.')

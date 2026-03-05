@@ -1,8 +1,10 @@
 /**
- * Wiktionary Importer - Enriches dictionary with Wiktionary definitions
+ * Wiktionary Importer - Enriches lang/en.json with Wiktionary definitions
  *
  * Data source: https://kaikki.org/dictionary/Japanese/
  * License: CC-BY-SA 3.0 (Wiktionary) / MIT (wiktextract)
+ *
+ * Writes: data/lang/en.json
  *
  * Usage:
  *   bun run import:wiktionary
@@ -14,13 +16,15 @@ import { mkdir } from 'fs/promises'
 import { existsSync, createReadStream } from 'fs'
 import { createInterface } from 'readline'
 import {
-  type DictEntry,
-  type DictFile,
-  type Definition,
+  type DuplicateConflictPolicyInput,
+  type LangFile,
   makeKey,
-  loadDict,
-  saveDict,
-  mergeDefinitions,
+  loadLang,
+  saveLang,
+  mergeLangEntries,
+  refreshLangSource,
+  analyzeLangDefinitionConflicts,
+  resolveDuplicateConflictPolicy,
   downloadWithProgress,
 } from './base'
 
@@ -28,31 +32,16 @@ import {
 // Configuration
 // ============================================================================
 
-const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
 const CACHE_DIR = './data/cache'
 
-// Wiktionary data URL (Japanese JSONL from kaikki.org)
 const WIKTIONARY_URL = 'https://kaikki.org/dictionary/Japanese/kaikki.org-dictionary-Japanese.jsonl'
 
 type ImportMode = 'merge' | 'diff' | 'refresh'
 
-// POS types to include (skip romanizations, soft redirects, etc.)
 const INCLUDED_POS = new Set([
-  'noun',
-  'verb',
-  'adj',  // adjective
-  'adv',  // adverb
-  'intj', // interjection
-  'pron', // pronoun
-  'conj', // conjunction
-  'particle',
-  'counter',
-  'prefix',
-  'suffix',
-  'affix',
-  'phrase',
-  'proverb',
-  'num',  // numeral
+  'noun', 'verb', 'adj', 'adv', 'intj', 'pron', 'conj',
+  'particle', 'counter', 'prefix', 'suffix', 'affix', 'phrase', 'proverb', 'num',
 ])
 
 // ============================================================================
@@ -77,7 +66,6 @@ interface ParsedWiktEntry {
   word: string
   reading: string
   definitions: string[]
-  pos: string
 }
 
 // ============================================================================
@@ -97,99 +85,60 @@ async function downloadWiktionary(): Promise<string> {
 // Parsing Functions
 // ============================================================================
 
-/**
- * Extract reading from Wiktionary entry
- */
 function extractReading(entry: WiktEntry): string | null {
-  // Try to get reading from forms
   if (entry.forms) {
     for (const form of entry.forms) {
-      // Look for hiragana reading in ruby annotations
       if (form.ruby && form.ruby.length > 0) {
         const reading = form.ruby.map(([_, r]) => r).join('')
-        if (reading && /[\u3040-\u309F]/.test(reading)) {
-          return reading
-        }
+        if (reading && /[\u3040-\u309F]/.test(reading)) return reading
       }
-
-      // Look for romanization tag
-      if (form.tags?.includes('romanization')) {
-        continue // Skip romanizations
-      }
-
-      // Check if form is hiragana
-      if (form.form && /^[\u3040-\u309F]+$/.test(form.form)) {
-        return form.form
-      }
+      if (form.tags?.includes('romanization')) continue
+      if (form.form && /^[\u3040-\u309F]+$/.test(form.form)) return form.form
     }
   }
 
-  // Try sounds for katakana reading
   if (entry.sounds) {
     for (const sound of entry.sounds) {
       if (sound.other && /^[\u30A0-\u30FF]+$/.test(sound.other)) {
-        // Convert katakana to hiragana
-        return katakanaToHiragana(sound.other)
+        return sound.other.replace(/[\u30A1-\u30F6]/g, (c) =>
+          String.fromCharCode(c.charCodeAt(0) - 0x60))
       }
     }
   }
 
-  // If word is already hiragana, use it as reading
-  if (/^[\u3040-\u309F]+$/.test(entry.word)) {
-    return entry.word
-  }
-
-  // If word is katakana, convert to hiragana
+  if (/^[\u3040-\u309F]+$/.test(entry.word)) return entry.word
   if (/^[\u30A0-\u30FF]+$/.test(entry.word)) {
-    return katakanaToHiragana(entry.word)
+    return entry.word.replace(/[\u30A1-\u30F6]/g, (c) =>
+      String.fromCharCode(c.charCodeAt(0) - 0x60))
   }
 
   return null
 }
 
-/**
- * Convert katakana to hiragana
- */
-function katakanaToHiragana(text: string): string {
-  return text.replace(/[\u30A1-\u30F6]/g, (char) => {
-    return String.fromCharCode(char.charCodeAt(0) - 0x60)
-  })
-}
-
-/**
- * Extract definitions from Wiktionary senses
- */
 function extractDefinitions(entry: WiktEntry): string[] {
   const definitions: string[] = []
 
   if (!entry.senses) return definitions
 
   for (const sense of entry.senses) {
-    // Skip alt-of, form-of, romanization senses
     if (sense.tags) {
       const skipTags = ['alt-of', 'form-of', 'romanization', 'Rōmaji']
-      if (sense.tags.some((t) => skipTags.includes(t))) {
-        continue
-      }
+      if (sense.tags.some((t) => skipTags.includes(t))) continue
     }
 
-    // Get glosses
     const glosses = sense.glosses || sense.raw_glosses || []
     for (const gloss of glosses) {
-      // Clean up gloss
       let cleaned = gloss
-        .replace(/\s*\([^)]*\)\s*/g, ' ') // Remove parentheticals
-        .replace(/\s*\[[^\]]*\]\s*/g, ' ') // Remove brackets
-        .replace(/\s+/g, ' ') // Normalize whitespace
+        .replace(/\s*\([^)]*\)\s*/g, ' ')
+        .replace(/\s*\[[^\]]*\]\s*/g, ' ')
+        .replace(/\s+/g, ' ')
         .trim()
 
-      // Skip if too short or looks like a reference
       if (cleaned.length < 3) continue
       if (cleaned.startsWith('synonym of')) continue
       if (cleaned.startsWith('alternative')) continue
       if (cleaned.startsWith('Rōmaji')) continue
 
-      // Capitalize first letter
       cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
 
       if (!definitions.includes(cleaned)) {
@@ -201,54 +150,17 @@ function extractDefinitions(entry: WiktEntry): string[] {
   return definitions
 }
 
-/**
- * Map Wiktionary POS to our POS format
- */
-function mapPos(wiktPos: string): string {
-  const posMap: Record<string, string> = {
-    noun: 'noun',
-    verb: 'verb',
-    adj: 'adjective',
-    adv: 'adverb',
-    intj: 'interjection',
-    pron: 'pronoun',
-    conj: 'conjunction',
-    particle: 'particle',
-    counter: 'counter',
-    prefix: 'prefix',
-    suffix: 'suffix',
-    affix: 'affix',
-    phrase: 'expression',
-    proverb: 'expression',
-    num: 'numeral',
-  }
-  return posMap[wiktPos] || wiktPos
-}
-
-/**
- * Parse a single Wiktionary entry
- */
 function parseWiktEntry(entry: WiktEntry): ParsedWiktEntry | null {
-  // Skip non-Japanese entries
   if (entry.lang_code !== 'ja') return null
-
-  // Skip certain POS types
   if (!INCLUDED_POS.has(entry.pos)) return null
 
-  // Extract reading
   const reading = extractReading(entry)
   if (!reading) return null
 
-  // Extract definitions
   const definitions = extractDefinitions(entry)
   if (definitions.length === 0) return null
 
-  return {
-    word: entry.word,
-    reading,
-    definitions,
-    pos: mapPos(entry.pos),
-  }
+  return { word: entry.word, reading, definitions }
 }
 
 // ============================================================================
@@ -257,16 +169,12 @@ function parseWiktEntry(entry: WiktEntry): ParsedWiktEntry | null {
 
 async function* streamWiktionary(filePath: string): AsyncGenerator<WiktEntry> {
   const fileStream = createReadStream(filePath, { encoding: 'utf-8' })
-  const rl = createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  })
+  const rl = createInterface({ input: fileStream, crlfDelay: Infinity })
 
   for await (const line of rl) {
     if (!line.trim()) continue
     try {
-      const entry = JSON.parse(line) as WiktEntry
-      yield entry
+      yield JSON.parse(line) as WiktEntry
     } catch {
       // Skip malformed lines
     }
@@ -282,47 +190,41 @@ interface ImportStats {
   wiktEntriesParsed: number
   matched: number
   newDefinitions: number
-  entriesUpdated: number
+  sourceEntries: number
 }
 
 async function importWiktionary(
-  dict: DictFile,
+  lang: LangFile,
   filePath: string,
-  mode: ImportMode,
   maxDefsPerEntry: number
-): Promise<ImportStats> {
+): Promise<{ sourceEntries: Record<string, { definitions: string[] }>; stats: ImportStats }> {
+  const sourceEntries: Record<string, { definitions: string[] }> = {}
   const stats: ImportStats = {
     wiktEntriesProcessed: 0,
     wiktEntriesParsed: 0,
     matched: 0,
     newDefinitions: 0,
-    entriesUpdated: 0,
+    sourceEntries: 0,
   }
 
-  // Build lookup map for dictionary entries
+  // Build lookup map (word → keys, reading → keys)
   const wordMap = new Map<string, string[]>()
-
-  for (const [key, entry] of Object.entries(dict.entries)) {
-    // Index by word
-    const wordKeys = wordMap.get(entry.word) || []
+  for (const [key, entry] of Object.entries(lang.entries)) {
+    // Parse word/reading from key
+    const [word, reading] = key.split(':')
+    const wordKeys = wordMap.get(word) || []
     wordKeys.push(key)
-    wordMap.set(entry.word, wordKeys)
+    wordMap.set(word, wordKeys)
 
-    // Also index by reading if different
-    if (entry.reading !== entry.word) {
-      const readingKeys = wordMap.get(entry.reading) || []
+    if (reading !== word) {
+      const readingKeys = wordMap.get(reading) || []
       readingKeys.push(key)
-      wordMap.set(entry.reading, readingKeys)
+      wordMap.set(reading, readingKeys)
     }
   }
 
   console.log(`  Dictionary has ${wordMap.size.toLocaleString()} unique words/readings`)
 
-  // Track which entries have been updated
-  const updatedEntries = new Set<string>()
-
-  // Process Wiktionary entries
-  console.log('  Processing Wiktionary entries...')
   const updateInterval = 10000
 
   for await (const wiktEntry of streamWiktionary(filePath)) {
@@ -335,61 +237,49 @@ async function importWiktionary(
       )
     }
 
-    // Parse entry
     const parsed = parseWiktEntry(wiktEntry)
     if (!parsed) continue
-
     stats.wiktEntriesParsed++
 
-    // Try to find matching dictionary entry
+    // Find matching entry
     const key = makeKey(parsed.word, parsed.reading)
-    let entry = dict.entries[key]
+    let entryKey = lang.entries[key] ? key : undefined
 
-    // If no exact match, try by word only
-    if (!entry) {
+    if (!entryKey) {
       const candidates = wordMap.get(parsed.word)
       if (candidates && candidates.length === 1) {
-        entry = dict.entries[candidates[0]]
+        entryKey = candidates[0]
       }
     }
 
-    if (!entry) continue
+    if (!entryKey) continue
 
     stats.matched++
-    const entryKey = makeKey(entry.word, entry.reading)
+    const entry = lang.entries[entryKey]
+    if (!entry) continue
 
-    // Check current definition count
     const currentDefs = entry.definitions.length
     if (currentDefs >= maxDefsPerEntry) continue
 
-    // Check for new definitions
-    const existingTexts = new Set(entry.definitions.map((d) => d.text.toLowerCase()))
-    const newDefs: Definition[] = []
-
+    const target = sourceEntries[entryKey] ?? { definitions: [] }
     for (const defText of parsed.definitions) {
-      if (currentDefs + newDefs.length >= maxDefsPerEntry) break
-      if (!existingTexts.has(defText.toLowerCase())) {
-        newDefs.push({
-          text: defText,
-          sources: ['wiktionary'],
-        })
+      if (currentDefs + target.definitions.length >= maxDefsPerEntry) break
+      const normalized = defText.toLowerCase().trim()
+      const alreadyPresentInExisting = entry.definitions.some((d) => d.toLowerCase().trim() === normalized)
+      const alreadyPresentInSource = target.definitions.some((d) => d.toLowerCase().trim() === normalized)
+      if (!alreadyPresentInExisting && !alreadyPresentInSource) {
+        target.definitions.push(defText)
         stats.newDefinitions++
       }
     }
-
-    if (newDefs.length > 0) {
-      updatedEntries.add(entryKey)
-
-      if (mode !== 'diff') {
-        entry.definitions = mergeDefinitions(entry.definitions, newDefs)
-      }
+    if (target.definitions.length > 0) {
+      sourceEntries[entryKey] = target
     }
   }
 
-  console.log('') // Clear progress line
-
-  stats.entriesUpdated = updatedEntries.size
-  return stats
+  console.log('')
+  stats.sourceEntries = Object.keys(sourceEntries).length
+  return { sourceEntries, stats }
 }
 
 // ============================================================================
@@ -398,61 +288,56 @@ async function importWiktionary(
 
 async function runImport(
   mode: ImportMode,
-  maxDefsPerEntry: number
+  maxDefsPerEntry: number,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number
 ): Promise<void> {
   console.log('=== [Enrichment] Wiktionary Importer ===')
   console.log(`Mode: ${mode}`)
   console.log(`Max definitions per entry: ${maxDefsPerEntry}`)
 
-  // Check if English dictionary exists
-  const dictPath = `${DATA_DIR}/en.json`
-  if (!existsSync(dictPath)) {
-    console.error(`\nEnglish dictionary not found: ${dictPath}`)
+  const langPath = `${LANG_DIR}/en.json`
+  if (!existsSync(langPath)) {
+    console.error(`\nEnglish lang file not found: ${langPath}`)
     console.error('This is an enrichment importer — run base importers first:')
     console.error('  bun run import:jmdict --lang en')
-    console.error('  (or: bun run rebuild:all for a full rebuild)')
     process.exit(1)
   }
 
-  // Download Wiktionary data
   console.log('\nDownloading Wiktionary data...')
   const filePath = await downloadWiktionary()
 
-  // Load English dictionary
-  console.log('\nLoading English dictionary...')
-  const dict = await loadDict(dictPath, 'en')
-  console.log(`  Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
+  console.log('\nLoading English lang file...')
+  const lang = await loadLang(langPath, 'en')
+  console.log(`  Entries: ${Object.keys(lang.entries).length.toLocaleString()}`)
 
   if (mode === 'refresh') {
-    // Strip all existing wiktionary definitions before re-importing
     console.log('\nStripping existing wiktionary definitions...')
-    let stripped = 0
-    for (const entry of Object.values(dict.entries)) {
-      const before = entry.definitions.length
-      entry.definitions = entry.definitions.filter((d) => !d.sources.includes('wiktionary'))
-      stripped += before - entry.definitions.length
-    }
-    console.log(`  Stripped ${stripped.toLocaleString()} wiktionary definitions`)
+    refreshLangSource(lang.entries, 'wiktionary')
+    console.log('  Done.')
   }
 
-  // Import Wiktionary definitions
-  console.log('\nImporting Wiktionary definitions...')
-  const stats = await importWiktionary(dict, filePath, mode === 'refresh' ? 'merge' : mode, maxDefsPerEntry)
+  console.log('\nBuilding Wiktionary source entries...')
+  const { sourceEntries, stats } = await importWiktionary(lang, filePath, maxDefsPerEntry)
+  const effectiveMode = mode === 'refresh' ? 'merge' : mode
+  const conflictPolicy = await resolveDuplicateConflictPolicy(
+    'wiktionary/en',
+    duplicatePolicyInput,
+    analyzeLangDefinitionConflicts(lang.entries, sourceEntries, duplicateSamples)
+  )
+  const mergeStats = mergeLangEntries(lang.entries, sourceEntries, 'wiktionary', effectiveMode, conflictPolicy)
 
-  // Print stats
   console.log('\nResults:')
   console.log(`  Wiktionary entries processed: ${stats.wiktEntriesProcessed.toLocaleString()}`)
   console.log(`  Wiktionary entries parsed: ${stats.wiktEntriesParsed.toLocaleString()}`)
   console.log(`  Matched to dict: ${stats.matched.toLocaleString()}`)
   console.log(`  New definitions: ${stats.newDefinitions.toLocaleString()}`)
-  console.log(`  Entries updated: ${stats.entriesUpdated.toLocaleString()}`)
+  console.log(`  Source entries to merge: ${stats.sourceEntries.toLocaleString()}`)
+  console.log(`  Merged - new: ${mergeStats.added.toLocaleString()}, updated: ${mergeStats.updated.toLocaleString()}, unchanged: ${mergeStats.unchanged.toLocaleString()}`)
 
-  if (mode === 'refresh') {
-    await saveDict(dictPath, dict)
-    console.log(`\nSaved to: ${dictPath}`)
-  } else if (mode !== 'diff' && stats.entriesUpdated > 0) {
-    await saveDict(dictPath, dict)
-    console.log(`\nSaved to: ${dictPath}`)
+  if (mode !== 'diff' && (mergeStats.added > 0 || mergeStats.updated > 0 || mode === 'refresh')) {
+    await saveLang(langPath, lang)
+    console.log(`\nSaved to: ${langPath}`)
   } else if (mode === 'diff') {
     console.log('\n(Diff mode - no changes made)')
   }
@@ -466,7 +351,7 @@ function printHelp(): void {
   console.log(`
 Wiktionary Importer
 
-Enriches English dictionary with additional definitions from Wiktionary.
+Enriches English lang file with additional definitions from Wiktionary.
 Data source: https://kaikki.org/dictionary/Japanese/
 
 Usage:
@@ -478,6 +363,8 @@ Options:
             diff    - Preview changes, no modifications
             refresh - Strip and re-import only wiktionary data
   --limit   Maximum definitions per entry (default: 10)
+  --dup-policy   merge | skip | replace | ask (default: merge)
+  --dup-samples  How many conflict samples to show in ask mode (default: 5)
 
 Examples:
   bun run import:wiktionary
@@ -491,6 +378,8 @@ async function main(): Promise<void> {
 
   let mode: ImportMode = 'merge'
   let maxDefsPerEntry = 10
+  let duplicatePolicy: DuplicateConflictPolicyInput = 'merge'
+  let duplicateSamples = 5
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -501,7 +390,6 @@ async function main(): Promise<void> {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)
-        console.error('Supported modes: merge, diff, refresh')
         process.exit(1)
       }
       i++
@@ -512,14 +400,29 @@ async function main(): Promise<void> {
         process.exit(1)
       }
       i++
+    } else if (arg === '--dup-policy' && next) {
+      if (['merge', 'skip', 'replace', 'ask'].includes(next)) {
+        duplicatePolicy = next as DuplicateConflictPolicyInput
+      } else {
+        console.error(`Invalid --dup-policy: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-samples' && next) {
+      duplicateSamples = parseInt(next, 10)
+      if (isNaN(duplicateSamples) || duplicateSamples < 1) {
+        console.error(`Invalid --dup-samples: ${next}`)
+        process.exit(1)
+      }
+      i++
     } else if (arg === '--help' || arg === '-h') {
       printHelp()
       return
     }
   }
 
-  await runImport(mode, maxDefsPerEntry)
-
+  console.log(`Duplicate policy: ${duplicatePolicy}`)
+  await runImport(mode, maxDefsPerEntry, duplicatePolicy, duplicateSamples)
   console.log('\n=== Import Complete ===')
 }
 

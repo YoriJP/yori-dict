@@ -1,6 +1,11 @@
 /**
  * JMdict Importer - Import from jmdict-simplified
  *
+ * Writes:
+ *   - data/core.json      (word, reading, POS, common)
+ *   - data/lang/en.json   (EN definitions)
+ *   - data/lang/de.json   (DE definitions)
+ *
  * Usage:
  *   bun run import:jmdict --lang en
  *   bun run import:jmdict --lang en,de
@@ -12,17 +17,21 @@
 import { mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import {
-  type DictEntry,
-  type DictFile,
+  type CoreEntry,
+  type DuplicateConflictPolicyInput,
   type ImportMode,
   makeKey,
-  loadDict,
-  saveDict,
-  mergeDictEntries,
-  refreshDictSource,
+  loadCore,
+  saveCore,
+  createEmptyCore,
+  loadLang,
+  saveLang,
+  createEmptyLang,
+  mergeCoreEntries,
+  mergeLangEntries,
+  analyzeLangDefinitionConflicts,
+  resolveDuplicateConflictPolicy,
   printStats,
-  createEmptyDict,
-  mergeArrays,
 } from './base'
 
 // ============================================================================
@@ -30,6 +39,8 @@ import {
 // ============================================================================
 
 const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const CACHE_DIR = './data/cache'
 
 // Language mapping from JMdict codes to our codes
@@ -155,7 +166,6 @@ async function getDownloadUrl(lang: string): Promise<string | null> {
 }
 
 async function downloadAndExtract(url: string, cachePath: string): Promise<JMdictFile | null> {
-  // Check cache
   if (existsSync(cachePath)) {
     console.log(`Using cached: ${cachePath}`)
     return Bun.file(cachePath).json()
@@ -172,18 +182,15 @@ async function downloadAndExtract(url: string, cachePath: string): Promise<JMdic
     return null
   }
 
-  // Save ZIP temporarily
   await mkdir(CACHE_DIR, { recursive: true })
   const zipPath = `${CACHE_DIR}/temp.zip`
   const buffer = await response.arrayBuffer()
   await Bun.write(zipPath, buffer)
 
-  // Extract using unzip
   const proc = Bun.spawn(['unzip', '-p', zipPath], { stdout: 'pipe' })
   const text = await new Response(proc.stdout).text()
   const exitCode = await proc.exited
 
-  // Clean up ZIP regardless of outcome
   const { unlinkSync } = await import('fs')
   unlinkSync(zipPath)
 
@@ -201,13 +208,18 @@ async function downloadAndExtract(url: string, cachePath: string): Promise<JMdic
 // Conversion Functions
 // ============================================================================
 
-function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
+interface ConvertedEntry {
+  coreEntry: CoreEntry
+  definitions: string[]
+}
+
+function convertJMdictEntry(entry: JMdictEntry, lang: string): ConvertedEntry {
   const word = entry.kanji?.[0]?.text || entry.kana[0].text
   const reading = entry.kana[0].text
   const isCommon = entry.kanji?.[0]?.common || entry.kana[0]?.common || false
   const targetGlossLang = REVERSE_LANG_MAP[lang]
 
-  // Collect POS tags
+  // Collect POS tags (unique strings)
   const posSet = new Set<string>()
   for (const sense of entry.sense) {
     for (const pos of sense.partOfSpeech) {
@@ -215,133 +227,176 @@ function convertJMdictEntry(entry: JMdictEntry, lang: string): DictEntry {
     }
   }
 
-  // Collect definitions for this language, deduplicating by normalized text
-  const definitions: { text: string; sources: string[] }[] = []
+  // Collect definitions for this language
+  const definitions: string[] = []
   const seenDefs = new Set<string>()
   const includeUntaggedGloss = lang === 'en'
   for (const sense of entry.sense) {
     for (const gloss of sense.gloss) {
-      // Untagged glosses in JMdict are effectively English defaults.
       if (!gloss.lang && !includeUntaggedGloss) continue
       if (gloss.lang && gloss.lang !== targetGlossLang) continue
       const normalized = gloss.text.toLowerCase().trim()
       if (seenDefs.has(normalized)) continue
       seenDefs.add(normalized)
-      definitions.push({
-        text: gloss.text,
-        sources: ['jmdict'],
-      })
+      definitions.push(gloss.text)
     }
   }
 
   return {
-    word,
-    reading,
-    partOfSpeech: Array.from(posSet).map((value) => ({ value, sources: ['jmdict'] })),
-    common: isCommon,
-    commonSources: isCommon ? ['jmdict'] : [],
-    jlpt: [],
+    coreEntry: {
+      word,
+      reading,
+      partOfSpeech: Array.from(posSet),
+      common: isCommon,
+      jlpt: null,
+      frequency: null,
+    },
     definitions,
-    examples: [],
   }
 }
 
-function convertJMdictToDict(jmdict: JMdictFile, lang: string): Record<string, DictEntry> {
-  const entries: Record<string, DictEntry> = {}
+function convertJMdictToNewFormat(
+  jmdict: JMdictFile,
+  lang: string
+): { coreEntries: Record<string, CoreEntry>; langEntries: Record<string, { definitions: string[] }> } {
+  const coreEntries: Record<string, CoreEntry> = {}
+  const langEntries: Record<string, { definitions: string[] }> = {}
 
   for (const jmEntry of jmdict.words) {
-    const entry = convertJMdictEntry(jmEntry, lang)
-    const key = makeKey(entry.word, entry.reading)
+    const { coreEntry, definitions } = convertJMdictEntry(jmEntry, lang)
+    const key = makeKey(coreEntry.word, coreEntry.reading)
 
-    // Handle duplicate keys (same word+reading)
-    if (entries[key]) {
-      // Merge definitions
-      const existing = entries[key]
-      for (const def of entry.definitions) {
-        const exists = existing.definitions.some(
-          (d) => d.text.toLowerCase() === def.text.toLowerCase()
-        )
-        if (!exists) {
+    // Merge into coreEntries (handle duplicate keys)
+    if (coreEntries[key]) {
+      const existing = coreEntries[key]
+      const posSet = new Set([...existing.partOfSpeech, ...coreEntry.partOfSpeech])
+      existing.partOfSpeech = Array.from(posSet)
+      existing.common = existing.common || coreEntry.common
+    } else {
+      coreEntries[key] = coreEntry
+    }
+
+    // Merge into langEntries (handle duplicate keys)
+    if (langEntries[key]) {
+      const existing = langEntries[key]
+      for (const def of definitions) {
+        const normalized = def.toLowerCase().trim()
+        if (!existing.definitions.some((d) => d.toLowerCase().trim() === normalized)) {
           existing.definitions.push(def)
         }
       }
-      // Merge POS
-      for (const posEntry of entry.partOfSpeech) {
-        const ep = existing.partOfSpeech.find((p) => p.value === posEntry.value)
-        if (ep) {
-          ep.sources = mergeArrays(ep.sources, posEntry.sources)
-        } else {
-          existing.partOfSpeech.push(posEntry)
-        }
-      }
-      // Preserve common if any duplicate marks it common
-      existing.common = existing.common || entry.common
-      existing.commonSources = mergeArrays(existing.commonSources, entry.commonSources)
     } else {
-      entries[key] = entry
+      langEntries[key] = { definitions }
     }
   }
 
-  return entries
+  return { coreEntries, langEntries }
 }
 
 // ============================================================================
 // Main Import Function
 // ============================================================================
 
-async function importJMdict(lang: string, mode: ImportMode): Promise<void> {
-  console.log(`\n=== Importing JMdict (${lang}) ===`)
-  console.log(`Mode: ${mode}`)
-
-  // Get download URL
-  const url = await getDownloadUrl(lang)
-  if (!url) {
-    console.error(`Failed to get download URL for ${lang}`)
-    return
-  }
-
-  // Download and extract
-  const jmdictLang = REVERSE_LANG_MAP[lang]
-  const cachePath = `${CACHE_DIR}/jmdict-${jmdictLang}.json`
-  const jmdict = await downloadAndExtract(url, cachePath)
-
-  if (!jmdict) {
-    console.error(`Failed to download JMdict for ${lang}`)
-    return
-  }
-
-  console.log(`\nProcessing ${jmdict.words.length.toLocaleString()} JMdict entries...`)
-
-  // Convert to our format
-  const sourceEntries = convertJMdictToDict(jmdict, lang)
-  console.log(`  Converted to ${Object.keys(sourceEntries).toLocaleString()} unique entries`)
-
-  // Load existing dictionary or create new
+async function importJMdict(
+  langs: string[],
+  mode: ImportMode,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number
+): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true })
-  const dictPath = `${DATA_DIR}/${lang}.json`
-  const dict = await loadDict(dictPath, lang)
+  await mkdir(LANG_DIR, { recursive: true })
 
-  const existingCount = Object.keys(dict.entries).length
-  console.log(`  Existing entries: ${existingCount.toLocaleString()}`)
+  const aggregatedCoreEntries: Record<string, CoreEntry> = {}
+  const preparedLangImports: Array<{
+    lang: string
+    langEntries: Record<string, { definitions: string[] }>
+  }> = []
 
-  // Merge
-  let stats: { added: number; updated: number; unchanged: number } | { added: number; updated: number; removed: number }
-  if (mode === 'refresh') {
-    stats = refreshDictSource(dict.entries, sourceEntries, 'jmdict')
-    console.log('\n=== Import Statistics ===')
-    console.log(`  New entries: ${stats.added.toLocaleString()}`)
-    console.log(`  Updated entries: ${stats.updated.toLocaleString()}`)
-    console.log(`  Removed entries: ${'removed' in stats ? stats.removed.toLocaleString() : 0}`)
-  } else {
-    stats = mergeDictEntries(dict.entries, sourceEntries, mode)
-    printStats(stats as { added: number; updated: number; unchanged: number }, mode)
+  for (const lang of langs) {
+    console.log(`\n=== Importing JMdict (${lang}) ===`)
+    console.log(`Mode: ${mode}`)
+
+    const url = await getDownloadUrl(lang)
+    if (!url) {
+      console.error(`Failed to get download URL for ${lang}`)
+      continue
+    }
+
+    const jmdictLang = REVERSE_LANG_MAP[lang]
+    const cachePath = `${CACHE_DIR}/jmdict-${jmdictLang}.json`
+    const jmdict = await downloadAndExtract(url, cachePath)
+
+    if (!jmdict) {
+      console.error(`Failed to download JMdict for ${lang}`)
+      continue
+    }
+
+    console.log(`\nProcessing ${jmdict.words.length.toLocaleString()} JMdict entries...`)
+    const { coreEntries, langEntries } = convertJMdictToNewFormat(jmdict, lang)
+    console.log(`  Converted to ${Object.keys(coreEntries).length.toLocaleString()} unique entries`)
+    mergeCoreEntries(aggregatedCoreEntries, coreEntries, 'merge')
+    preparedLangImports.push({ lang, langEntries })
   }
 
-  // Save if not diff mode
+  if (preparedLangImports.length === 0) {
+    console.warn('\nNo JMdict language imports succeeded. Nothing to do.')
+    return
+  }
+
+  // --- Write core.json once using the union of all imported languages ---
+  const core = mode === 'replace' ? createEmptyCore() : await loadCore(CORE_PATH)
+  const existingCount = Object.keys(core.entries).length
+  console.log(`\nCore: ${existingCount.toLocaleString()} existing entries`)
+  console.log(`Core source snapshot: ${Object.keys(aggregatedCoreEntries).length.toLocaleString()} aggregated entries`)
+
+  // Refresh for core should rebuild from latest JMdict snapshot.
+  const coreStats = mergeCoreEntries(
+    core.entries,
+    aggregatedCoreEntries,
+    mode === 'refresh' ? 'replace' : mode
+  )
   if (mode !== 'diff') {
-    await saveDict(dictPath, dict)
-    console.log(`\nSaved to: ${dictPath}`)
-    console.log(`Total entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
+    await saveCore(CORE_PATH, core)
+    console.log(`Core saved: ${Object.keys(core.entries).length.toLocaleString()} entries`)
+  } else {
+    console.log(`Core diff: +${coreStats.added} ~${coreStats.updated} =${coreStats.unchanged}`)
+  }
+
+  for (const { lang, langEntries } of preparedLangImports) {
+    // --- Write lang/{lang}.json ---
+    const langPath = `${LANG_DIR}/${lang}.json`
+    const langFile = mode === 'replace' ? createEmptyLang(lang) : await loadLang(langPath, lang)
+    const existingLangCount = Object.keys(langFile.entries).length
+    console.log(`\nLang/${lang}: ${existingLangCount.toLocaleString()} existing entries`)
+
+    if (mode === 'refresh') {
+      // Strip jmdict definitions, then re-add
+      const { refreshLangSource } = await import('./base')
+      refreshLangSource(langFile.entries, 'jmdict')
+    }
+
+    const langStats = mergeLangEntries(
+      langFile.entries,
+      langEntries,
+      'jmdict',
+      mode === 'refresh' ? 'merge' : mode,
+      await resolveDuplicateConflictPolicy(
+        `jmdict/${lang}`,
+        duplicatePolicyInput,
+        analyzeLangDefinitionConflicts(langFile.entries, langEntries, duplicateSamples)
+      )
+    )
+
+    if (mode !== 'diff') {
+      await saveLang(langPath, langFile)
+      console.log(`Lang/${lang} saved: ${Object.keys(langFile.entries).length.toLocaleString()} entries`)
+    }
+
+    console.log('\n=== Import Statistics ===')
+    console.log(`  New entries: ${langStats.added.toLocaleString()}`)
+    console.log(`  Updated entries: ${langStats.updated.toLocaleString()}`)
+    console.log(`  Unchanged entries: ${langStats.unchanged.toLocaleString()}`)
+    if (mode === 'diff') console.log('\n  (Diff mode - no changes made)')
   }
 }
 
@@ -352,9 +407,10 @@ async function importJMdict(lang: string, mode: ImportMode): Promise<void> {
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
 
-  // Parse arguments
   let langs: string[] = ['en']
   let mode: ImportMode = 'merge'
+  let duplicatePolicy: DuplicateConflictPolicyInput = 'merge'
+  let duplicateSamples = 5
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--lang' && args[i + 1]) {
@@ -362,6 +418,22 @@ async function main(): Promise<void> {
       i++
     } else if (args[i] === '--mode' && args[i + 1]) {
       mode = args[i + 1] as ImportMode
+      i++
+    } else if (args[i] === '--dup-policy' && args[i + 1]) {
+      const next = args[i + 1]
+      if (['merge', 'skip', 'replace', 'ask'].includes(next)) {
+        duplicatePolicy = next as DuplicateConflictPolicyInput
+      } else {
+        console.error(`Invalid --dup-policy: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (args[i] === '--dup-samples' && args[i + 1]) {
+      duplicateSamples = parseInt(args[i + 1], 10)
+      if (Number.isNaN(duplicateSamples) || duplicateSamples < 1) {
+        console.error(`Invalid --dup-samples: ${args[i + 1]}`)
+        process.exit(1)
+      }
       i++
     } else if (args[i] === '--help' || args[i] === '-h') {
       console.log(`
@@ -376,26 +448,27 @@ Options:
   --mode    Import mode (default: merge)
             merge   - Add new entries, merge definitions
             diff    - Preview changes, no modifications
-            replace - Replace all JMdict entries (dangerous!)
+            replace - Replace all JMdict entries (rebuilds core + lang)
             refresh - Strip and re-import only JMdict data
+  --dup-policy   How to handle conflicting incoming definitions
+                 merge | skip | replace | ask (default: merge)
+  --dup-samples  How many conflict samples to show in ask mode (default: 5)
 
 Examples:
   bun run import:jmdict --lang en
   bun run import:jmdict --lang en,de
   bun run import:jmdict --lang en --mode diff
+  bun run import:jmdict --lang en --dup-policy ask
 `)
       return
     }
   }
 
-  // Validate mode
   if (!['merge', 'diff', 'replace', 'refresh'].includes(mode)) {
     console.error(`Invalid mode: ${mode}`)
-    console.error('Supported modes: merge, diff, replace, refresh')
     process.exit(1)
   }
 
-  // Validate languages
   for (const lang of langs) {
     if (!REVERSE_LANG_MAP[lang]) {
       console.error(`Unsupported language: ${lang}`)
@@ -407,11 +480,9 @@ Examples:
   console.log('=== [Base] JMdict Importer ===')
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
+  console.log(`Duplicate policy: ${duplicatePolicy}`)
 
-  // Import each language
-  for (const lang of langs) {
-    await importJMdict(lang, mode)
-  }
+  await importJMdict(langs, mode, duplicatePolicy, duplicateSamples)
 
   console.log('\n=== Import Complete ===')
 }
