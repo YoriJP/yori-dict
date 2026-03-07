@@ -4,7 +4,7 @@
  * Default workflow:
  *   - Use `data/lang/en.json` as the master key list
  *   - For each target language file, find entries with missing definitions
- *   - Ask Gemini to generate concise dictionary definitions
+ *   - Ask Gemini SDK to generate concise dictionary definitions
  *   - Save generated definitions with source `ai`
  *
  * Usage:
@@ -13,6 +13,7 @@
  *   bun run import:gemini --dry-run
  */
 
+import { GoogleGenAI } from '@google/genai'
 import { mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import {
@@ -52,20 +53,9 @@ interface PromptItem {
   sourceDefinitions: string[]
 }
 
-interface GeminiCandidatePart {
-  text?: string
-}
-
-interface GeminiResponse {
-  candidates?: Array<{
-    content?: { parts?: GeminiCandidatePart[] }
-  }>
-}
-
 const DATA_DIR = './data'
 const LANG_DIR = `${DATA_DIR}/lang`
 const ALL_LANGS: TargetLang[] = ['en', 'de', 'ko', 'zh-cn', 'zh-tw']
-const RETRYABLE_HTTP = new Set([408, 409, 425, 429, 500, 502, 503, 504])
 
 const LANG_NAME: Record<TargetLang, string> = {
   en: 'English',
@@ -211,7 +201,7 @@ function printHelp(): void {
   console.log(`
 Gemini Importer
 
-Backfills missing definitions in language files using Gemini API.
+Backfills missing definitions in language files using the Gemini SDK.
 
 Environment:
   GEMINI_API_KEY or GOOGLE_API_KEY must be set (unless --dry-run)
@@ -222,7 +212,7 @@ Usage:
 Options:
   --langs <list>        Comma-separated targets (default: en,de,ko,zh-cn,zh-tw)
   --seed-lang <lang>    Master key/definition source language (default: en, use "none" to disable)
-  --model <name>        Gemini model (default: gemini-2.0-flash)
+  --model <name>        Gemini model for SDK calls (default: gemini-2.0-flash)
   --batch-size <n>      Entries per API call (default: 20)
   --max-defs <n>        Max generated definitions per entry (default: 3)
   --save-every <n>      Save every N batches (default: 10)
@@ -370,46 +360,25 @@ function buildPrompt(
 }
 
 async function callGemini(
-  apiKey: string,
+  client: GoogleGenAI,
   model: string,
   prompt: string,
   temperature: number,
   retries: number
 ): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
   let lastError: Error | null = null
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature,
-            responseMimeType: 'application/json',
-          },
-        }),
+      const response = await client.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          temperature,
+          responseMimeType: 'application/json',
+        },
       })
-
-      if (!response.ok) {
-        const body = await response.text()
-        const err = new Error(`Gemini API ${response.status}: ${body.slice(0, 300)}`)
-        if (RETRYABLE_HTTP.has(response.status) && attempt < retries) {
-          const backoff = Math.min(15000, 500 * 2 ** (attempt - 1))
-          await sleep(backoff)
-          continue
-        }
-        throw err
-      }
-
-      const json = await response.json() as GeminiResponse
-      const parts = json.candidates?.[0]?.content?.parts ?? []
-      const text = parts
-        .map((part) => part.text ?? '')
-        .join('\n')
-        .trim()
+      const text = response.text?.trim()
 
       if (!text) {
         throw new Error('Gemini returned no text content')
@@ -468,7 +437,7 @@ async function processLanguage(
   opts: CliOptions,
   masterKeys: string[],
   seedFile: LangFile | null,
-  apiKey: string | null
+  client: GoogleGenAI | null
 ): Promise<void> {
   const langPath = `${LANG_DIR}/${lang}.json`
   const target = await loadLang(langPath, lang)
@@ -492,14 +461,15 @@ async function processLanguage(
     return
   }
 
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY/GOOGLE_API_KEY is required')
+  if (!client) {
+    throw new Error('Gemini SDK client is not initialized')
   }
 
   let batches = 0
   let failedBatches = 0
   let updatedEntries = 0
   let addedDefinitions = 0
+  let hasUnsavedChanges = false
 
   for (let i = 0; i < missingKeys.length; i += opts.batchSize) {
     const batchKeys = missingKeys.slice(i, i + opts.batchSize)
@@ -514,7 +484,7 @@ async function processLanguage(
     )
 
     try {
-      const raw = await callGemini(apiKey, opts.model, prompt, opts.temperature, opts.retries)
+      const raw = await callGemini(client, opts.model, prompt, opts.temperature, opts.retries)
       const result = parseGeminiResult(raw, allowedIds, opts.maxDefs)
 
       for (const key of batchKeys) {
@@ -532,6 +502,7 @@ async function processLanguage(
         if (delta > 0) {
           updatedEntries++
           addedDefinitions += delta
+          hasUnsavedChanges = true
         }
       }
     } catch (error) {
@@ -544,18 +515,25 @@ async function processLanguage(
       await sleep(opts.minDelayMs)
     }
 
-    if (batches % opts.saveEvery === 0) {
+    if (hasUnsavedChanges && batches % opts.saveEvery === 0) {
       await saveLang(langPath, target)
+      hasUnsavedChanges = false
     }
   }
 
   console.log('')
-  await saveLang(langPath, target)
+  if (hasUnsavedChanges) {
+    await saveLang(langPath, target)
+  }
 
   console.log(`Batches: ${batches.toLocaleString()} (failed: ${failedBatches.toLocaleString()})`)
   console.log(`Updated entries: ${updatedEntries.toLocaleString()}`)
   console.log(`Added definitions: ${addedDefinitions.toLocaleString()}`)
-  console.log(`Saved: ${langPath}`)
+  if (updatedEntries > 0) {
+    console.log(`Saved: ${langPath}`)
+  } else {
+    console.log('No file changes written.')
+  }
 }
 
 async function loadSeedFile(seedLang: SeedLang): Promise<LangFile | null> {
@@ -571,6 +549,9 @@ async function loadSeedFile(seedLang: SeedLang): Promise<LangFile | null> {
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null
+  const client = !opts.dryRun
+    ? new GoogleGenAI(apiKey ? { apiKey } : {})
+    : null
 
   console.log('=== [AI] Gemini Definition Backfill ===')
   console.log(`Languages: ${opts.langs.join(', ')}`)
@@ -604,7 +585,7 @@ async function main(): Promise<void> {
   console.log(`Master key count: ${masterKeys.length.toLocaleString()}`)
 
   for (const lang of opts.langs) {
-    await processLanguage(lang, opts, masterKeys, seedFile, apiKey)
+    await processLanguage(lang, opts, masterKeys, seedFile, client)
   }
 
   console.log('\n=== Done ===')
