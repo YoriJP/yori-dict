@@ -20,6 +20,7 @@
     "import:tatoeba": "bun run scripts/import/tatoeba.ts",
     "import:wadoku": "bun run scripts/import/wadoku.ts",
     "import:wiktionary": "bun run scripts/import/wiktionary.ts",
+    "import:gemini": "bun run scripts/import/gemini.ts",
     "import:base": "mkdir -p data/lang && bun run import:jmdict --lang en,de --mode replace && bun run import:kaikki --mode replace && bun run import:krdict --mode replace && bun run import:jmnedict --mode merge",
     "import:zhja": "bun run scripts/import/zhja.ts",
     "import:enrichment": "bun run import:jlpt && bun run import:tatoeba && bun run import:wadoku && bun run import:wiktionary && bun run import:cedict && bun run import:frequency && bun run import:zhja",
@@ -32,6 +33,7 @@
     "sdk:generate": "openapi-ts"
   },
   "dependencies": {
+    "@google/genai": "^1.44.0",
     "@scalar/hono-api-reference": "^0.9.44",
     "hono": "^4.6.0",
     "opencc-js": "^1.0.5",
