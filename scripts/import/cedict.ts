@@ -1,13 +1,9 @@
 /**
  * CC-CEDICT Importer - Enriches Chinese (zh-cn/zh-tw) definitions
  *
- * For Sino-Japanese vocabulary and proper nouns that share characters with
- * Chinese words, CC-CEDICT provides the authoritative Chinese character form
- * (simplified for zh-cn, traditional for zh-tw).
- *
- * This is especially valuable for the ~740k JMnedict proper name entries that
- * only have English romanized definitions (e.g. 東京 → "Tokyo"). CC-CEDICT
- * replaces those with proper Chinese script: 东京 (zh-cn) or 東京 (zh-tw).
+ * For Sino-Japanese vocabulary that shares characters with Chinese words,
+ * CC-CEDICT provides the authoritative Chinese character form (simplified
+ * for zh-cn, traditional for zh-tw).
  *
  * Source: https://cc-cedict.org / https://www.mdbg.net/chinese/dictionary?page=cedict
  * License: CC BY-SA 4.0
@@ -323,14 +319,14 @@ function printHelp(): void {
   console.log(`
 CC-CEDICT Importer
 
-Enriches Chinese (zh-cn/zh-tw) definitions for Sino-Japanese vocabulary and
-proper nouns by matching Japanese word forms to CC-CEDICT entries.
+Enriches Chinese (zh-cn/zh-tw) definitions for Sino-Japanese vocabulary by
+matching Japanese word forms to CC-CEDICT entries.
 
 For zh-cn: adds simplified Chinese character form (e.g. 东京)
 For zh-tw: adds traditional Chinese character form (e.g. 東京)
 
 Only enriches entries that currently have no Chinese-script definitions
-(e.g. jmnedict proper names that only have English romanizations).
+(e.g. entries that only have English glosses today).
 
 Usage:
   bun run import:cedict [options]
