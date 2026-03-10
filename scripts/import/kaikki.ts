@@ -25,6 +25,7 @@ import * as OpenCC from 'opencc-js'
 import {
   type DuplicateConflictPolicyInput,
   type ImportMode,
+  type CoreEntry,
   makeKey,
   loadCore,
   loadLang,
@@ -64,6 +65,24 @@ const INCLUDED_POS = new Set([
 
 const SKIP_SENSE_TAGS = new Set(['alt-of', 'form-of', 'romanization', 'Rōmaji'])
 const DEFAULT_MAX_DEFINITIONS = 8
+const META_DEFINITION_PATTERNS = [
+  /的[舊旧]字體形式$/,
+  /的[舊旧]字体形式$/,
+  /的異體字$/,
+  /的异体字$/,
+  /的繁體字$/,
+  /的繁体字$/,
+  /的簡體字$/,
+  /的简体字$/,
+  /的古字$/,
+  /的俗字$/,
+  /的別字$/,
+  /的别字$/,
+  /的另一種寫法$/,
+  /的另一种写法$/,
+  /的另一寫法$/,
+  /的另一写法$/,
+]
 
 // ============================================================================
 // Types
@@ -145,6 +164,7 @@ export function extractDefinitions(entry: WiktEntry): string[] {
     for (const gloss of glosses) {
       const cleaned = gloss.replace(/\s+/g, ' ').trim()
       if (!cleaned) continue
+      if (isFilteredKaikkiDefinition(cleaned)) continue
 
       const normalized = cleaned.toLowerCase()
       if (seen.has(normalized)) continue
@@ -155,6 +175,13 @@ export function extractDefinitions(entry: WiktEntry): string[] {
   }
 
   return definitions
+}
+
+export function isFilteredKaikkiDefinition(definition: string): boolean {
+  const cleaned = definition.replace(/\s+/g, ' ').trim()
+  if (!cleaned) return true
+
+  return META_DEFINITION_PATTERNS.some((pattern) => pattern.test(cleaned))
 }
 
 export function mapPos(pos: string): string {
@@ -249,44 +276,97 @@ async function resolveSourcePath(lang: KaikkiSourceLang, fileOverride?: string):
 // Key normalization against core.json
 // ============================================================================
 
-async function buildCoreIndex(): Promise<{ coreKeys: Set<string>; coreByWord: Map<string, string[]> }> {
+export interface CoreIndex {
+  coreKeys: Set<string>
+  coreEntries: Record<string, CoreEntry>
+  coreByWord: Map<string, string[]>
+  coreByReading: Map<string, string[]>
+}
+
+export async function buildCoreIndex(): Promise<CoreIndex> {
   if (!existsSync(CORE_PATH)) {
-    return { coreKeys: new Set(), coreByWord: new Map() }
+    return {
+      coreKeys: new Set(),
+      coreEntries: {},
+      coreByWord: new Map(),
+      coreByReading: new Map(),
+    }
   }
 
   const core = await loadCore(CORE_PATH)
   const coreKeys = new Set(Object.keys(core.entries))
   const coreByWord = new Map<string, string[]>()
+  const coreByReading = new Map<string, string[]>()
 
   for (const key of coreKeys) {
-    const word = key.split(':')[0]
+    const [word, reading] = key.split(':')
     const existing = coreByWord.get(word) ?? []
     existing.push(key)
     coreByWord.set(word, existing)
+
+    const readingExisting = coreByReading.get(reading) ?? []
+    readingExisting.push(key)
+    coreByReading.set(reading, readingExisting)
   }
 
-  return { coreKeys, coreByWord }
+  return { coreKeys, coreEntries: core.entries, coreByWord, coreByReading }
 }
 
-function normalizeSourceKeys(
+function chooseBestCandidate(candidates: string[], coreEntries: Record<string, CoreEntry>): string | null {
+  if (candidates.length === 0) return null
+  if (candidates.length === 1) return candidates[0]
+
+  const commonCandidates = candidates.filter((key) => coreEntries[key]?.common)
+  if (commonCandidates.length === 1) return commonCandidates[0]
+  if (commonCandidates.length > 1) candidates = commonCandidates
+
+  const ranked = candidates
+    .map((key) => ({ key, frequency: coreEntries[key]?.frequency ?? Number.MAX_SAFE_INTEGER }))
+    .sort((a, b) => a.frequency - b.frequency)
+
+  if (ranked.length === 1) return ranked[0].key
+  if (ranked[0].frequency < ranked[1].frequency) return ranked[0].key
+  return null
+}
+
+export function resolveCanonicalKey(word: string, reading: string, index: CoreIndex): string | null {
+  const exact = makeKey(word, reading)
+  if (index.coreKeys.has(exact)) return exact
+
+  const wordCandidates = index.coreByWord.get(word) ?? []
+  if (wordCandidates.length === 1) return wordCandidates[0]
+
+  const readingMatches = wordCandidates.filter((key) => key.split(':')[1] === reading)
+  if (readingMatches.length === 1) return readingMatches[0]
+  if (readingMatches.length > 1) {
+    const bestReadingMatch = chooseBestCandidate(readingMatches, index.coreEntries)
+    if (bestReadingMatch) return bestReadingMatch
+  }
+
+  const bestWordMatch = chooseBestCandidate(wordCandidates, index.coreEntries)
+  if (bestWordMatch) return bestWordMatch
+
+  // As a last resort, allow reading-only matches when there is exactly one candidate.
+  const readingCandidates = index.coreByReading.get(reading) ?? []
+  if (readingCandidates.length === 1) return readingCandidates[0]
+
+  return null
+}
+
+export function normalizeSourceKeys(
   sourceEntries: Record<string, { definitions: string[] }>,
-  coreKeys: Set<string>,
-  coreByWord: Map<string, string[]>
+  index: CoreIndex
 ): { rekeyed: number; merged: number; ambiguous: number } {
   let rekeyed = 0
   let merged = 0
   let ambiguous = 0
 
-  const toProcess = Object.keys(sourceEntries).filter((k) => !coreKeys.has(k))
+  const toProcess = Object.keys(sourceEntries).filter((k) => !index.coreKeys.has(k))
 
   for (const srcKey of toProcess) {
-    const word = srcKey.split(':')[0]
-    const candidates = coreByWord.get(word)
-
-    if (!candidates || candidates.length === 0) continue
-    if (candidates.length > 1) { ambiguous++; continue }
-
-    const canonicalKey = candidates[0]
+    const [word, reading] = srcKey.split(':')
+    const canonicalKey = resolveCanonicalKey(word, reading, index)
+    if (!canonicalKey) { ambiguous++; continue }
     const srcEntry = sourceEntries[srcKey]
     const existing = sourceEntries[canonicalKey]
 
@@ -370,9 +450,9 @@ async function importKaikkiLanguage(
   console.log('')
 
   // Normalize keys against core.json
-  const { coreKeys, coreByWord } = await buildCoreIndex()
-  if (coreKeys.size > 0) {
-    const normStats = normalizeSourceKeys(sourceEntries, coreKeys, coreByWord)
+  const coreIndex = await buildCoreIndex()
+  if (coreIndex.coreKeys.size > 0) {
+    const normStats = normalizeSourceKeys(sourceEntries, coreIndex)
     console.log(
       `  Key normalization: ${normStats.rekeyed} rekeyed, ` +
       `${normStats.merged} merged, ${normStats.ambiguous} ambiguous (skipped)`
@@ -445,7 +525,11 @@ async function bootstrapTraditionalChinese(
     }
   }
 
-  const effectiveMode = mode === 'refresh' ? 'replace' : mode
+  if (mode === 'refresh') {
+    refreshLangSource(zhTwLang.entries, 'kaikki')
+  }
+
+  const effectiveMode = mode === 'refresh' ? 'merge' : mode
   const conflictPolicy = await resolveDuplicateConflictPolicy(
     'kaikki/zh-tw-bootstrap',
     duplicatePolicyInput,
