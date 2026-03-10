@@ -166,12 +166,30 @@ function hasChinese(text: string): boolean {
   return /[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]/.test(text)
 }
 
-/**
- * Returns true if the entry's definitions are all English/romanized
- * (i.e. no Chinese characters present). These are the entries we want to enrich.
- */
-function hasOnlyEnglishDefs(entry: LangEntry): boolean {
-  return entry.definitions.every(d => !hasChinese(d))
+function getChineseDefinitions(entry: LangEntry): string[] {
+  return entry.definitions.filter((definition) => hasChinese(definition))
+}
+
+function hasPreferredChineseSource(entry: LangEntry): boolean {
+  return entry.definitions.some((definition) => {
+    const sources = entry._defSources[definition] ?? []
+    return sources.includes('kaikki') || sources.includes('zhja')
+  })
+}
+
+function isShortChineseDefinition(definition: string): boolean {
+  return definition.trim().length <= 4
+}
+
+function shouldBackfillChinese(entry: LangEntry, mode: ImportMode): boolean {
+  if (mode === 'refresh') return true
+  if (hasPreferredChineseSource(entry)) return false
+
+  const chineseDefinitions = getChineseDefinitions(entry)
+  if (chineseDefinitions.length === 0) return true
+  if (chineseDefinitions.length === 1 && isShortChineseDefinition(chineseDefinitions[0])) return true
+
+  return entry.definitions.every((definition) => !hasChinese(definition))
 }
 
 // ============================================================================
@@ -217,15 +235,7 @@ function buildCedictSourceEntries(
 
     if (formsToAdd.size === 0) { stats.skipped++; continue }
 
-    // Skip if we already have Chinese definitions from kaikki (higher quality source)
-    // unless we're in refresh mode
-    const hasKaikkiDef = entry.definitions.some(def =>
-      (entry._defSources[def] ?? []).includes('kaikki') && hasChinese(def)
-    )
-    if (hasKaikkiDef && mode !== 'refresh') { stats.skipped++; continue }
-
-    // Only enrich entries whose current definitions are English-only
-    if (!hasOnlyEnglishDefs(entry) && mode !== 'refresh') { stats.skipped++; continue }
+    if (!shouldBackfillChinese(entry, mode)) { stats.skipped++; continue }
 
     const target = sourceEntries[key] ?? { definitions: [] }
     for (const form of formsToAdd) {
