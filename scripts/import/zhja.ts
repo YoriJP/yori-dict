@@ -46,6 +46,7 @@ const LANG_DIR = './data/lang'
 const CACHE_DIR = './data/cache'
 const CORE_PATH = `${DATA_DIR}/core.json`
 const SOURCE_NAME = 'zhja'
+const MAX_DEFINITIONS_PER_KEY = 4
 
 // Fixed ZIP names — user places them here manually (licensed content)
 const KNOWN_ZIPS = [
@@ -69,6 +70,17 @@ type YomitanNode =
   | string
   | YomitanNode[]
   | { tag: string; content?: YomitanNode; lang?: string; [key: string]: unknown }
+
+export interface JaCandidate {
+  value: string
+  confidence: number
+}
+
+export interface ZhjaDefinitionCandidate {
+  term: string
+  hits: number
+  maxConfidence: number
+}
 
 // ============================================================================
 // Parsing helpers
@@ -102,14 +114,14 @@ function isPureCjk(s: string): boolean {
  *   3. First kana-containing token after stripping the "WORD PINYIN\n" header
  *      and POS prefix (名詞/動詞/形容詞).
  *
- * Returns an array of candidate strings (may be empty).
+ * Returns ordered candidates with descending confidence.
  */
-function extractJaCandidates(chineseTerm: string, defText: string): string[] {
-  const candidates: string[] = []
+export function extractJaCandidates(chineseTerm: string, defText: string): JaCandidate[] {
+  const candidates: JaCandidate[] = []
 
   // Candidate 1: Chinese term itself (Sino-Japanese)
   if (isPureCjk(chineseTerm)) {
-    candidates.push(chineseTerm)
+    candidates.push({ value: chineseTerm, confidence: 3 })
   }
 
   // Strip the "WORD PINYIN\n" first line that 白水社/中日大辞典 entries start with
@@ -119,7 +131,7 @@ function extractJaCandidates(chineseTerm: string, defText: string): string[] {
   const katakanaRuns = bodyText.match(/[\u30A0-\u30FF\uFF65-\uFF9F]{2,}/g)
   if (katakanaRuns) {
     const longest = katakanaRuns.sort((a, b) => b.length - a.length)[0]
-    if (longest) candidates.push(longest)
+    if (longest) candidates.push({ value: longest, confidence: 2 })
   }
 
   // Candidate 3: first kana-containing token after stripping POS labels
@@ -130,12 +142,75 @@ function extractJaCandidates(chineseTerm: string, defText: string): string[] {
   const tokens = stripped.split(/[\s　、。・（）()「」『』【】\n]+/)
   for (const token of tokens) {
     if (/[\u3040-\u30FF]/.test(token) && token.length >= 2) {
-      candidates.push(token.replace(/[（(][^)）]*[)）]/g, '').trim())
+      candidates.push({ value: token.replace(/[（(][^)）]*[)）]/g, '').trim(), confidence: 1 })
       break
     }
   }
 
-  return candidates.filter((c) => c.length > 0)
+  const deduped: JaCandidate[] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const normalized = candidate.value.trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    deduped.push({ ...candidate, value: normalized })
+  }
+
+  return deduped
+}
+
+export function normalizeZhjaTerm(
+  zhTerm: string,
+  toSimplified: (text: string) => string
+): string | null {
+  const compact = zhTerm.replace(/\s+/g, '').trim()
+  if (!compact) return null
+
+  const simplified = toSimplified(compact)
+  if (!isPureCjk(simplified)) return null
+  if (simplified.length > 8) return null
+  return simplified
+}
+
+function zhjaLengthScore(term: string, japaneseWord: string): number {
+  if (term === japaneseWord) return 4
+  if (term.length === 1) return japaneseWord.length === 1 ? 2 : -2
+  if (term.length <= 4) return 2
+  if (term.length <= 6) return 1
+  return -1
+}
+
+export function selectZhjaDefinitions(
+  candidates: ZhjaDefinitionCandidate[],
+  japaneseWord: string,
+  maxDefinitions = MAX_DEFINITIONS_PER_KEY
+): string[] {
+  if (candidates.length === 0) return []
+
+  let ranked = [...candidates].sort((a, b) => {
+    if (a.hits !== b.hits) return b.hits - a.hits
+    if (a.maxConfidence !== b.maxConfidence) return b.maxConfidence - a.maxConfidence
+
+    const aExact = a.term === japaneseWord ? 1 : 0
+    const bExact = b.term === japaneseWord ? 1 : 0
+    if (aExact !== bExact) return bExact - aExact
+
+    const aLengthScore = zhjaLengthScore(a.term, japaneseWord)
+    const bLengthScore = zhjaLengthScore(b.term, japaneseWord)
+    if (aLengthScore !== bLengthScore) return bLengthScore - aLengthScore
+
+    if (a.term.length !== b.term.length) return a.term.length - b.term.length
+    return a.term.localeCompare(b.term, 'zh')
+  })
+
+  const preferred = ranked.filter((candidate) =>
+    candidate.hits > 1 ||
+    candidate.maxConfidence >= 3 ||
+    candidate.term === japaneseWord
+  )
+  if (preferred.length > 0) ranked = preferred
+
+  return ranked.slice(0, maxDefinitions).map((candidate) => candidate.term)
 }
 
 // ============================================================================
@@ -248,8 +323,8 @@ async function importZhja(
     `${jaIdx.byReading.size.toLocaleString()} readings`
   )
 
-  // Map: jmdict key → Set of Chinese headwords
-  const zhForKey = new Map<string, Set<string>>()
+  // Map: jmdict key → simplified Chinese term → stats
+  const zhForKey = new Map<string, Map<string, { hits: number; maxConfidence: number }>>()
 
   let totalEntries = 0
   let totalMatched = 0
@@ -260,6 +335,8 @@ async function importZhja(
     console.log(`  Loaded ${entries.length.toLocaleString()} entries`)
 
     let matched = 0
+
+    const toSimplified = OpenCC.Converter({ from: 'tw', to: 'cn' }) as (s: string) => string
 
     for (const entry of entries) {
       const [zhTerm, , , , , defs] = entry
@@ -276,15 +353,22 @@ async function importZhja(
         continue
       }
 
+      const normalizedZhTerm = normalizeZhjaTerm(zhTerm, toSimplified)
+      if (!normalizedZhTerm) continue
+
       const candidates = extractJaCandidates(zhTerm, defText)
 
       for (const candidate of candidates) {
-        const keys = findJaKeys(candidate, jaIdx)
+        const keys = findJaKeys(candidate.value, jaIdx)
         if (keys.length === 0) continue
 
         for (const key of keys) {
-          if (!zhForKey.has(key)) zhForKey.set(key, new Set())
-          zhForKey.get(key)!.add(zhTerm)
+          if (!zhForKey.has(key)) zhForKey.set(key, new Map())
+          const perKey = zhForKey.get(key)!
+          const stats = perKey.get(normalizedZhTerm) ?? { hits: 0, maxConfidence: 0 }
+          stats.hits++
+          stats.maxConfidence = Math.max(stats.maxConfidence, candidate.confidence)
+          perKey.set(normalizedZhTerm, stats)
         }
         matched++
         break // Only use first matching candidate per entry
@@ -309,7 +393,8 @@ async function importZhja(
   console.log(`Existing zh-cn.json entries: ${Object.keys(zhCnLang.entries).length.toLocaleString()}`)
   console.log(`Existing zh-tw.json entries: ${Object.keys(zhTwLang.entries).length.toLocaleString()}`)
 
-  // Set up OpenCC converter: Simplified → Traditional (Taiwan)
+  // Set up OpenCC converters
+  const toSimplified = OpenCC.Converter({ from: 'tw', to: 'cn' }) as (s: string) => string
   const toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' }) as (s: string) => string
 
   // Build source entry sets for zh-cn and zh-tw
@@ -326,14 +411,20 @@ async function importZhja(
       const hasKaikkiDef = existingCnEntry.definitions.some(def =>
         (existingCnEntry._defSources[def] ?? []).includes('kaikki')
       )
-      if (hasKaikkiDef && mode !== 'refresh') {
+      if (hasKaikkiDef) {
         skippedKaikki++
         continue
       }
     }
 
-    const cnDefs = [...zhTerms]
-    const twDefs = cnDefs.map(toTraditional)
+    const [word] = key.split(':')
+    const cnDefs = selectZhjaDefinitions(
+      [...zhTerms.entries()].map(([term, stats]) => ({ term, ...stats })),
+      toSimplified(word)
+    )
+    if (cnDefs.length === 0) continue
+
+    const twDefs = [...new Set(cnDefs.map(toTraditional))]
 
     zhCnSourceEntries[key] = { definitions: cnDefs }
     zhTwSourceEntries[key] = { definitions: twDefs }
