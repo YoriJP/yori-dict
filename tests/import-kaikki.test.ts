@@ -3,8 +3,10 @@ import {
   mapPos,
   extractReading,
   extractDefinitions,
+  isFilteredKaikkiDefinition,
   parseEntry,
   katakanaToHiragana,
+  resolveCanonicalKey,
   type WiktEntry,
 } from '../scripts/import/kaikki'
 
@@ -125,6 +127,31 @@ describe('extractDefinitions', () => {
     const entry: WiktEntry = { word: '猫', pos: 'noun', lang_code: 'ja' }
     expect(extractDefinitions(entry)).toEqual([])
   })
+
+  test('filters old-form and meta glosses', () => {
+    const entry: WiktEntry = {
+      word: '發音', pos: 'noun', lang_code: 'ja',
+      senses: [
+        { glosses: ['発音的舊字體形式'] },
+        { glosses: ['useful modern gloss'] },
+      ],
+    }
+    expect(extractDefinitions(entry)).toEqual(['useful modern gloss'])
+  })
+})
+
+describe('isFilteredKaikkiDefinition', () => {
+  test('matches old-form / variant meta glosses', () => {
+    expect(isFilteredKaikkiDefinition('電脳的舊字體形式')).toBe(true)
+    expect(isFilteredKaikkiDefinition('発音的舊字體形式')).toBe(true)
+    expect(isFilteredKaikkiDefinition('猫的異體字')).toBe(true)
+    expect(isFilteredKaikkiDefinition('國的简体字')).toBe(true)
+  })
+
+  test('keeps ordinary learner-facing glosses', () => {
+    expect(isFilteredKaikkiDefinition('以漢語書寫的文章')).toBe(false)
+    expect(isFilteredKaikkiDefinition('法律學的用語')).toBe(false)
+  })
 })
 
 // ============================================================================
@@ -186,6 +213,17 @@ describe('parseEntry', () => {
     expect(parseEntry(raw)).toBeNull()
   })
 
+  test('returns null when all definitions are filtered meta glosses', () => {
+    const raw: WiktEntry = {
+      word: '發音',
+      pos: 'noun',
+      lang_code: 'ja',
+      forms: [{ form: 'はつおん' }],
+      senses: [{ glosses: ['発音的舊字體形式'] }],
+    }
+    expect(parseEntry(raw)).toBeNull()
+  })
+
   test('maps POS in the result', () => {
     const raw: WiktEntry = {
       word: '猫', pos: 'adj', lang_code: 'ja',
@@ -193,5 +231,55 @@ describe('parseEntry', () => {
       senses: [{ glosses: ['cute'] }],
     }
     expect(parseEntry(raw)!.pos).toBe('adjective')
+  })
+})
+
+describe('resolveCanonicalKey', () => {
+  test('uses exact key when present', () => {
+    const key = resolveCanonicalKey('文化', 'ぶんか', {
+      coreKeys: new Set(['文化:ぶんか']),
+      coreEntries: {
+        '文化:ぶんか': {
+          word: '文化',
+          reading: 'ぶんか',
+          partOfSpeech: ['noun'],
+          common: true,
+          jlpt: null,
+          frequency: 100,
+        },
+      },
+      coreByWord: new Map([['文化', ['文化:ぶんか']]]),
+      coreByReading: new Map([['ぶんか', ['文化:ぶんか']]]),
+    })
+
+    expect(key).toBe('文化:ぶんか')
+  })
+
+  test('uses reading to disambiguate same-word candidates', () => {
+    const key = resolveCanonicalKey('上手', 'じょうず', {
+      coreKeys: new Set(['上手:じょうず', '上手:うわて']),
+      coreEntries: {
+        '上手:じょうず': {
+          word: '上手',
+          reading: 'じょうず',
+          partOfSpeech: ['na-adjective'],
+          common: true,
+          jlpt: null,
+          frequency: 120,
+        },
+        '上手:うわて': {
+          word: '上手',
+          reading: 'うわて',
+          partOfSpeech: ['noun'],
+          common: false,
+          jlpt: null,
+          frequency: 5000,
+        },
+      },
+      coreByWord: new Map([['上手', ['上手:じょうず', '上手:うわて']]]),
+      coreByReading: new Map([['じょうず', ['上手:じょうず']], ['うわて', ['上手:うわて']]]),
+    })
+
+    expect(key).toBe('上手:じょうず')
   })
 })
