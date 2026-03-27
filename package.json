@@ -27,6 +27,8 @@
     "import:zhja": "bun run scripts/import/zhja.ts",
     "import:enrichment": "bun run import:jlpt && bun run import:tatoeba && bun run import:wadoku && bun run import:wiktionary && bun run import:jmdict-examples && bun run import:jitendex && bun run import:kowiktionary-ko && bun run import:cedict && bun run import:frequency && bun run import:zhja",
     "rebuild:all": "bun run import:base && bun run import:enrichment && bun run build:db",
+    "sync:zh-cn-from-tw": "bun run scripts/sync-zh-cn-from-tw.ts",
+    "audit:kanji-vocab-gaps": "bun run scripts/audit/audit-kanji-vocab-gaps.ts",
     "verify:dict": "bun run scripts/verify-dict.ts",
     "cleanup:dict": "bun run scripts/cleanup-dict.ts",
     "add": "bun run scripts/add.ts",
