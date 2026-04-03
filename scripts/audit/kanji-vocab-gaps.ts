@@ -245,7 +245,7 @@ Kanji Vocabulary Gap Audit
 Audits kanji-bearing vocabulary coverage across existing language files.
 
 Usage:
-  bun run audit:kanji-vocab [options]
+  bun run audit:kanji-vocab-gaps [options]
 
 Options:
   --limit <n>      Number of top entries to keep per issue bucket (default: ${DEFAULT_LIMIT})
