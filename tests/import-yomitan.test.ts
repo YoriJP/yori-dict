@@ -10,6 +10,14 @@ describe('extractDefinitionTexts', () => {
 
     expect(extractDefinitionTexts(defs, 5)).toEqual(['to study', 'to learn'])
   })
+
+  test('handles array-based definitions from recent Jitendex redirects', () => {
+    const defs: YomitanDef[] = [
+      ['Ｎ響', ['redirected from Ｎ響']],
+    ]
+
+    expect(extractDefinitionTexts(defs, 5)).toEqual(['Ｎ響 redirected from Ｎ響'])
+  })
 })
 
 describe('extractExamplePairs', () => {

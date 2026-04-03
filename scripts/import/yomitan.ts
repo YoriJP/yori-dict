@@ -3,9 +3,15 @@ import { sanitizeDefinitionText } from './base'
 
 export type YomitanEntry = [string, string, string, string, number, YomitanDef[], number, string]
 
+interface YomitanStructuredContentDef {
+  type: 'structured-content'
+  content: YomitanNode
+}
+
 export type YomitanDef =
   | string
-  | { type: 'structured-content'; content: YomitanNode }
+  | YomitanNode
+  | YomitanStructuredContentDef
 
 export type YomitanNode =
   | string
@@ -19,6 +25,7 @@ function normalizeWhitespace(text: string): string {
 }
 
 export function collectText(node: YomitanNode): string {
+  if (node == null) return ''
   if (typeof node === 'string') return node
   if (Array.isArray(node)) return node.map(collectText).join(' ')
   if (node.content !== undefined) return collectText(node.content as YomitanNode)
@@ -26,6 +33,7 @@ export function collectText(node: YomitanNode): string {
 }
 
 function collectLangTexts(node: YomitanNode, lang: string, results: string[]): void {
+  if (node == null) return
   if (typeof node === 'string') return
   if (Array.isArray(node)) {
     for (const child of node) collectLangTexts(child, lang, results)
@@ -45,6 +53,17 @@ function collectLangTexts(node: YomitanNode, lang: string, results: string[]): v
   }
 }
 
+function isStructuredContentDef(def: YomitanDef): def is YomitanStructuredContentDef {
+  return typeof def === 'object' && def !== null && !Array.isArray(def)
+    && 'type' in def && def.type === 'structured-content'
+  }
+
+function unwrapDefinitionNode(def: YomitanDef): YomitanNode {
+  if (typeof def === 'string') return def
+  if (isStructuredContentDef(def)) return def.content
+  return def
+}
+
 function dedupeCaseInsensitive(values: string[]): string[] {
   const seen = new Set<string>()
   const deduped: string[] = []
@@ -61,7 +80,7 @@ export function extractDefinitionTexts(defs: YomitanDef[], maxDefinitions = 8): 
   const collected: string[] = []
 
   for (const def of defs) {
-    const rawText = typeof def === 'string' ? def : collectText(def.content)
+    const rawText = collectText(unwrapDefinitionNode(def))
     const cleaned = normalizeWhitespace(rawText)
       .replace(/\s*[\u2022\u30fb]\s*/g, '; ')
       .replace(/\s*;\s*/g, '; ')
@@ -92,11 +111,12 @@ export function extractExamplePairs(
 
   for (const def of defs) {
     if (typeof def === 'string') continue
+    const node = unwrapDefinitionNode(def)
 
     const jaTexts: string[] = []
     const enTexts: string[] = []
-    collectLangTexts(def.content, 'ja', jaTexts)
-    collectLangTexts(def.content, 'en', enTexts)
+    collectLangTexts(node, 'ja', jaTexts)
+    collectLangTexts(node, 'en', enTexts)
 
     const cleanedJa = dedupeCaseInsensitive(
       jaTexts.map(normalizeWhitespace).filter((text) => isUsefulExampleText(text, word, reading))
