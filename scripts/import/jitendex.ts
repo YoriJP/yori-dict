@@ -44,15 +44,43 @@ interface GitHubRelease {
   assets: Array<{ name: string; browser_download_url: string }>
 }
 
+function buildWordKeyIndex(
+  langEntries: Record<string, { definitions: string[] }>
+): Map<string, string[]> {
+  const index = new Map<string, string[]>()
+
+  for (const key of Object.keys(langEntries)) {
+    const separator = key.indexOf(':')
+    const word = separator === -1 ? key : key.slice(0, separator)
+    const keys = index.get(word)
+    if (keys) {
+      keys.push(key)
+    } else {
+      index.set(word, [key])
+    }
+  }
+
+  return index
+}
+
 export function resolveJitendexKey(
   word: string,
   reading: string,
   langEntries: Record<string, { definitions: string[] }>
 ): string | null {
+  return resolveJitendexKeyWithIndex(word, reading, langEntries, buildWordKeyIndex(langEntries))
+}
+
+function resolveJitendexKeyWithIndex(
+  word: string,
+  reading: string,
+  langEntries: Record<string, { definitions: string[] }>,
+  wordKeyIndex: Map<string, string[]>
+): string | null {
   const exact = makeKey(word, reading)
   if (langEntries[exact]) return exact
 
-  const candidates = Object.keys(langEntries).filter((key) => key.startsWith(`${word}:`))
+  const candidates = wordKeyIndex.get(word) ?? []
   if (candidates.length === 1) return candidates[0]
 
   return null
@@ -90,26 +118,30 @@ async function buildSourceEntries(
 ): Promise<Record<string, { definitions: string[] }>> {
   const entries = await loadYomitanTermBanks(zipPath)
   const sourceEntries: Record<string, { definitions: string[] }> = {}
+  const wordKeyIndex = buildWordKeyIndex(langFile.entries)
 
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
     const [word, reading, , , , defs] = entry as YomitanEntry
-    const targetKey = resolveJitendexKey(word, reading || word, langFile.entries)
-    if (!targetKey) continue
-
-    const definitions = extractDefinitionTexts(defs, maxDefinitions)
-    if (definitions.length === 0) continue
-
-    const existing = sourceEntries[targetKey]
-    if (!existing) {
-      sourceEntries[targetKey] = { definitions }
-      continue
+    const targetKey = resolveJitendexKeyWithIndex(word, reading || word, langFile.entries, wordKeyIndex)
+    if (targetKey) {
+      const definitions = extractDefinitionTexts(defs, maxDefinitions)
+      if (definitions.length > 0) {
+        const existing = sourceEntries[targetKey]
+        if (!existing) {
+          sourceEntries[targetKey] = { definitions }
+        } else {
+          for (const def of definitions) {
+            const normalized = def.toLowerCase().trim()
+            if (!existing.definitions.some((item) => item.toLowerCase().trim() === normalized)) {
+              if (existing.definitions.length < maxDefinitions) existing.definitions.push(def)
+            }
+          }
+        }
+      }
     }
 
-    for (const def of definitions) {
-      const normalized = def.toLowerCase().trim()
-      if (!existing.definitions.some((item) => item.toLowerCase().trim() === normalized)) {
-        if (existing.definitions.length < maxDefinitions) existing.definitions.push(def)
-      }
+    if ((index + 1) % 50000 === 0) {
+      console.log(`  Processed ${index + 1} / ${entries.length} Jitendex entries...`)
     }
   }
 
