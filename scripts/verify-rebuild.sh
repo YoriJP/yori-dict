@@ -65,6 +65,7 @@ compare_json() {
   local label="$1" file_a="$2" file_b="$3" jq_filter="$4"
   local norm_a="$TMPDIR_BASE/$(basename "$file_a" .json)-A.json"
   local norm_b="$TMPDIR_BASE/$(basename "$file_a" .json)-B.json"
+  local diff_file="$TMPDIR_BASE/$(basename "$file_a" .json).diff"
 
   if [ ! -f "$file_a" ]; then
     echo "  SKIP $label — file A not found: $file_a"
@@ -87,18 +88,27 @@ compare_json() {
     HAS_DIFF=1
     # Show a brief summary
     local lines
-    local diff_output
-    diff_output=$(diff -u "$norm_a" "$norm_b" || true)
-    lines=$(printf '%s\n' "$diff_output" | wc -l | tr -d ' ')
+    diff -u "$norm_a" "$norm_b" > "$diff_file" || true
+    lines=$(wc -l < "$diff_file" | tr -d ' ')
     echo "    ($lines lines of diff)"
-    printf '%s\n' "$diff_output" | head -30
+    sed -n '1,30p' "$diff_file"
     echo "    ..."
     echo "    Full diff: diff -u $norm_a $norm_b"
   fi
 }
 
 CORE_FILTER='del(.updatedAt) | .stats |= del(.updatedAt?)'
-LANG_FILTER='del(.updatedAt) | .stats |= del(.updatedAt?)'
+LANG_FILTER='
+  del(.updatedAt)
+  | .stats |= del(.updatedAt?)
+  | .entries |= with_entries(
+      .value |= (
+        .definitions |= sort
+        | .examples |= sort_by(.ja, .text, .source)
+        | ._defSources |= with_entries(.value |= sort)
+      )
+    )
+'
 
 compare_json "core.json" \
   "$REPO_ROOT/data/core.json" \
@@ -116,6 +126,7 @@ echo ""
 echo "=== Step 5: Compare SQLite ==="
 DB_A="$REPO_ROOT/dict.sqlite"
 DB_B="$REPO_ROOT/$WORKTREE/dict.sqlite"
+DB_DIFF_FILE="$TMPDIR_BASE/db.diff"
 
 if [ -f "$DB_A" ] && [ -f "$DB_B" ]; then
   for table in words translations examples; do
@@ -138,8 +149,8 @@ if [ -f "$DB_A" ] && [ -f "$DB_B" ]; then
   else
     echo "DIFF FOUND ✗"
     HAS_DIFF=1
-    db_diff=$(diff -u "$TMPDIR_BASE/db-A.sql" "$TMPDIR_BASE/db-B.sql" || true)
-    printf '%s\n' "$db_diff" | head -30
+    diff -u "$TMPDIR_BASE/db-A.sql" "$TMPDIR_BASE/db-B.sql" > "$DB_DIFF_FILE" || true
+    sed -n '1,30p' "$DB_DIFF_FILE"
     echo "    Full diff: diff -u $TMPDIR_BASE/db-A.sql $TMPDIR_BASE/db-B.sql"
   fi
 elif [ ! -f "$DB_A" ]; then
