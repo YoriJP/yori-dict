@@ -143,6 +143,26 @@ bun run import:wiktionary --mode refresh
 bun run build:db
 ```
 
+### Backfill with Gemini safely
+
+```bash
+# Preview only high-value missing entries
+bun run import:gemini --dry-run --langs zh-tw --common-only --min-frequency 10000 --jlpt-max 3 --limit 100
+
+# Real run with a spend cap and JSON report
+bun run import:gemini --langs zh-tw --common-only --min-frequency 10000 --limit 5000 --max-cost-usd 2 --report-file reports/gemini-zh-tw.json
+```
+
+Useful flags:
+
+- `--common-only` limits generation to entries marked common in `data/core.json`
+- `--min-frequency <rank>` keeps only entries with frequency rank less than or equal to the threshold
+- `--jlpt-max <n>` keeps entries at or easier than `N<n>` (for example `3` keeps N3-N5)
+- `--exclude-regex <pattern>` skips symbol-heavy or low-signal matches
+- `--max-input-tokens <n>` stops before a batch prompt gets too large
+- `--max-cost-usd <n>` stops before the next batch would exceed the estimated spend
+- `--report-file <path>` writes a JSON report with filters, token usage, and estimated cost
+
 ### Inspect one entry from the command line
 
 ```bash
