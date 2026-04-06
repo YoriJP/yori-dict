@@ -1,11 +1,11 @@
-# Yori Dict 🈳
+# Yori Dict
 
 [![Bun](https://img.shields.io/badge/Bun-%23000000.svg?style=for-the-badge&logo=bun&logoColor=white)](https://bun.sh)
 [![Hono](https://img.shields.io/badge/Hono-E36002?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev)
 [![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![License](https://img.shields.io/badge/License-CC--BY--SA--4.0-green.svg?style=for-the-badge)](LICENSE)
 
-**Fast, multilingual Japanese dictionary API focused on core vocabulary and kanji-first lookup.**
+**Fast, multilingual Japanese dictionary API focused on core vocabulary, deterministic rebuilds, and kanji-first lookup.**
 
 - ⚡ **~1ms response time** - SQLite with optimized indexes
 - 🌍 **Multilingual** - English, German, Korean, Chinese (Simplified & Traditional)
@@ -15,7 +15,21 @@
 - 🎯 **JLPT levels** - N5-N1 tagged for study progress
 - 📊 **Frequency ranks** - JPDB frequency data for 178,644 entries
 
----
+## Table of Contents
+
+- [Quick Try](#quick-try)
+- [Project Status](#project-status)
+- [Quick Start](#quick-start)
+- [Common Workflows](#common-workflows)
+- [API Reference](#api-reference)
+- [Data Sources & Coverage](#data-sources--coverage)
+- [Architecture](#architecture)
+- [Development](#development)
+- [SDK](#sdk)
+- [Contributing](#contributing)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+
 
 ## Quick Try
 
@@ -46,7 +60,14 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 }
 ```
 
----
+
+## Project Status
+
+- **Checked-in snapshots** live under `data/core.json` and `data/lang/*.json`
+- **Deterministic rebuilds** are supported with `bun run rebuild:all`
+- **Rebuild verification** is built in via `bun run verify:rebuild`
+- **AI backfill** exists as an opt-in path via `import:gemini`, but it is intentionally excluded from the reproducible pipeline
+
 
 ## Quick Start
 
@@ -58,11 +79,19 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 - Python 3 + sudachipy (only needed for `import:tatoeba`): `pip install sudachipy sudachidict-core`
 - `GEMINI_API_KEY` or `GOOGLE_API_KEY` only if you plan to run `import:gemini`
 
+### Choose a Workflow
+
+| Goal | Recommended commands | When to use it |
+|------|----------------------|----------------|
+| Run the API quickly | `bun run data:pull` → `bun run build:db` → `bun run dev` | You want the checked-in snapshot with minimal setup |
+| Rebuild from source | `bun run rebuild:all` → `bun run verify:rebuild` | You are changing importers, snapshots, or build logic |
+| Backfill missing definitions | `bun run import:gemini ...` | You explicitly want non-deterministic AI-generated definitions |
+
 ### Install & Run
 
 ```bash
 # Clone and install
-git clone https://github.com/user/yori-dict.git
+git clone https://github.com/anilahsu/yori-dict.git
 cd yori-dict
 bun install
 
@@ -79,9 +108,47 @@ bun run verify:rebuild  # optional: rebuild in a temp worktree and compare outpu
 bun run dev
 ```
 
-Server runs at `http://localhost:3000`
+Server runs at `http://localhost:3000`.
 
----
+If you touch importer logic or checked-in snapshots, finish with:
+
+```bash
+bun run verify:rebuild
+```
+
+That command rebuilds in a temporary Git worktree and compares normalized JSON and SQLite outputs against the committed snapshot.
+
+
+## Common Workflows
+
+### Run the API locally
+
+```bash
+bun run data:pull
+bun run build:db
+bun run dev
+```
+
+### Rebuild dictionary data from source
+
+```bash
+bun run rebuild:all
+bun run verify:rebuild
+```
+
+### Refresh one source without rebuilding everything
+
+```bash
+bun run import:wiktionary --mode refresh
+bun run build:db
+```
+
+### Inspect one entry from the command line
+
+```bash
+curl -s "http://localhost:3000/v1/lookup?word=食べる&lang=en" | jq
+```
+
 
 ## API Reference
 
@@ -95,7 +162,6 @@ http://localhost:3000/docs
 
 The spec is also available as a raw file at `GET /openapi.yaml` and in the repo at [`openapi.yaml`](openapi.yaml).
 
----
 
 ### `GET /v1/lookup`
 
@@ -153,7 +219,6 @@ curl "localhost:3000/v1/lookup?word=たべる"
 
 Returns `{"status": "ok"}` when the server is running.
 
----
 
 ## Data Sources & Coverage
 
@@ -186,7 +251,7 @@ Returns `{"status": "ok"}` when the server is running.
 | [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) | JLPT N5-N1 levels | Public Domain | `import:jlpt` |
 | [JPDB freq list](https://github.com/MarvNC/jpdb-freq-list) | Frequency ranks (178,644 entries in the current JSON snapshot) | CC-BY-NC-SA-4.0 | `import:frequency` |
 
----
+
 
 ## Architecture
 
@@ -330,7 +395,6 @@ CREATE TABLE examples (
 
 The server runs `initSchema()` on startup so an empty SQLite file gets minimal tables; **`bun run build:db`** is what populates a database that fully matches this layout (including `frequency` on `words`).
 
----
 
 ## Development
 
@@ -448,7 +512,7 @@ yori-dict/
 | `GEMINI_API_KEY` | unset | Gemini API key for `import:gemini` |
 | `GOOGLE_API_KEY` | unset | Alternative env var accepted by `@google/genai` / `import:gemini` |
 
----
+
 
 ## SDK
 
@@ -494,14 +558,13 @@ The SDK is auto-generated from `openapi.yaml`. After any API changes, regenerate
 bun run sdk:generate
 ```
 
----
 
 ## Contributing
 
 ### Setup for Development
 
 ```bash
-git clone https://github.com/user/yori-dict.git
+git clone https://github.com/anilahsu/yori-dict.git
 cd yori-dict
 git lfs install
 bun install
@@ -510,30 +573,37 @@ bun run build:db
 bun run dev
 ```
 
+For importer or snapshot work, prefer:
+
+```bash
+bun run rebuild:all
+bun run verify:rebuild
+```
+
 ### Running Tests
 
 ```bash
-bun test               # Run all tests across 5 files
+bun test               # Run all tests
 bun test --watch       # Watch mode
 ```
 
-**Test files:**
+Useful focused test commands:
 
-| File | Tests | Covers |
-|------|-------|--------|
-| `tests/api.test.ts` | 43 | HTTP endpoints, response contracts, multi-language coverage, error handling |
-| `tests/conjugator.test.ts` | 29 | Verb/adjective conjugation for all word types |
-| `tests/import-base.test.ts` | 34 | Multi-source merge logic, deduplication, import modes |
-| `tests/import-kaikki.test.ts` | 20 | Kaikki JSONL parser (Korean/Chinese) |
-| `tests/build-db.test.ts` | 2 | SQLite build pipeline smoke test |
-
-Run a single file:
 ```bash
 bun test tests/api.test.ts
 bun test tests/conjugator.test.ts
 bun test tests/import-base.test.ts
 bun test tests/import-kaikki.test.ts
 bun test tests/build-db.test.ts
+bun test tests/import-jitendex.test.ts
+bun test tests/import-yomitan.test.ts
+```
+
+Before opening a PR for importer, schema, or snapshot changes, the most useful checks are:
+
+```bash
+bun test
+bun run verify:rebuild
 ```
 
 ### Code Style
@@ -556,7 +626,6 @@ bun test tests/build-db.test.ts
    bun run rebuild:all
    ```
 
----
 
 ## Deployment
 
@@ -591,7 +660,6 @@ See `.github/workflows/railway-deployment.yml`
 2. Set start command: `bun run start`
 3. Ensure Git LFS files are pulled during build
 
----
 
 ## Troubleshooting
 
@@ -697,7 +765,6 @@ bun run import:jmdict --lang en --mode merge  # Apply
 ```
 </details>
 
----
 
 ## Import Architecture
 
@@ -771,7 +838,6 @@ bun run verify:rebuild     # rebuild in a temp worktree and compare outputs
 # GEMINI_API_KEY=... bun run import:gemini --langs de,ko,zh-cn,zh-tw
 ```
 
----
 
 ## License
 
