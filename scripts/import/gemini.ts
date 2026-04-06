@@ -3,27 +3,32 @@
  *
  * Default workflow:
  *   - Use `data/lang/en.json` as the master key list
- *   - For each target language file, find entries with missing definitions
+ *   - Filter to the most useful missing entries using core metadata
  *   - Ask Gemini SDK to generate concise dictionary definitions
  *   - Save generated definitions with source `ai`
+ *   - Track tokens and estimated spend for safer runs
  *
  * Usage:
  *   bun run import:gemini
- *   bun run import:gemini --langs de,ko,zh-cn,zh-tw --limit 5000
+ *   bun run import:gemini --langs zh-tw --common-only --min-frequency 10000 --limit 5000
+ *   bun run import:gemini --max-cost-usd 2 --report-file reports/gemini.json
  *   bun run import:gemini --dry-run
  */
 
 import { GoogleGenAI } from '@google/genai'
-import { mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
+import { mkdir } from 'fs/promises'
+import { dirname } from 'path'
 import {
   addLangDefinition,
   createEmptyLangEntry,
   isDefinitionArtifact,
+  loadCore,
   loadLang,
   parseKey,
   sanitizeDefinitionText,
   saveLang,
+  type CoreEntry,
   type LangEntry,
   type LangFile,
 } from './base'
@@ -31,7 +36,7 @@ import {
 type TargetLang = 'en' | 'de' | 'ko' | 'zh-cn' | 'zh-tw'
 type SeedLang = TargetLang | 'none'
 
-interface CliOptions {
+export interface CliOptions {
   langs: TargetLang[]
   seedLang: SeedLang
   model: string
@@ -43,6 +48,15 @@ interface CliOptions {
   retries: number
   minDelayMs: number
   temperature: number
+  commonOnly: boolean
+  minFrequency: number | null
+  jlptMax: number | null
+  excludeRegex: string | null
+  maxInputTokens: number | null
+  maxCostUsd: number | null
+  reportFile: string | null
+  inputPricePer1M: number | null
+  outputPricePer1M: number | null
   dryRun: boolean
 }
 
@@ -53,7 +67,103 @@ interface PromptItem {
   sourceDefinitions: string[]
 }
 
+export interface SelectionFilters {
+  commonOnly: boolean
+  minFrequency: number | null
+  jlptMax: number | null
+  excludePattern: RegExp | null
+}
+
+export interface MissingSelectionResult {
+  totalMissing: number
+  eligibleMissing: number
+  pagedMissing: number
+  excludedByCommon: number
+  excludedByFrequency: number
+  excludedByJlpt: number
+  excludedByRegex: number
+  keys: string[]
+}
+
+export interface UsageStats {
+  promptTokens: number
+  candidateTokens: number
+  thoughtsTokens: number
+  totalTokens: number
+}
+
+export interface PricingConfig {
+  inputUsdPerMillion: number
+  outputUsdPerMillion: number
+}
+
+interface GenerateResult {
+  text: string
+  usage: UsageStats
+}
+
+interface RunTotals {
+  promptTokens: number
+  candidateTokens: number
+  thoughtsTokens: number
+  totalTokens: number
+  estimatedCostUsd: number
+  countRequests: number
+  generateRequests: number
+  generatedEntries: number
+}
+
+interface LanguageReport {
+  lang: TargetLang
+  totalMissing: number
+  eligibleMissing: number
+  pagedMissing: number
+  excludedByCommon: number
+  excludedByFrequency: number
+  excludedByJlpt: number
+  excludedByRegex: number
+  batches: number
+  failedBatches: number
+  updatedEntries: number
+  addedDefinitions: number
+  promptTokens: number
+  candidateTokens: number
+  thoughtsTokens: number
+  totalTokens: number
+  estimatedCostUsd: number
+  stoppedReason: 'none' | 'budget' | 'max-input-tokens'
+}
+
+interface RunReport {
+  generatedAt: string
+  model: string
+  dryRun: boolean
+  pricing: PricingConfig | null
+  options: {
+    langs: TargetLang[]
+    seedLang: SeedLang
+    batchSize: number
+    maxDefs: number
+    saveEvery: number
+    limit: number | null
+    offset: number
+    retries: number
+    minDelayMs: number
+    temperature: number
+    commonOnly: boolean
+    minFrequency: number | null
+    jlptMax: number | null
+    excludeRegex: string | null
+    maxInputTokens: number | null
+    maxCostUsd: number | null
+    reportFile: string | null
+  }
+  totals: RunTotals
+  languages: LanguageReport[]
+}
+
 const DATA_DIR = './data'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const LANG_DIR = `${DATA_DIR}/lang`
 const ALL_LANGS: TargetLang[] = ['en', 'de', 'ko', 'zh-cn', 'zh-tw']
 
@@ -71,6 +181,13 @@ const STYLE_HINT: Record<TargetLang, string> = {
   ko: 'Use natural Korean dictionary glosses in Hangul.',
   'zh-cn': 'Use only Simplified Chinese.',
   'zh-tw': 'Use only Traditional Chinese used in Taiwan.',
+}
+
+const MODEL_PRICING: Record<string, PricingConfig> = {
+  'gemini-3.1-flash-lite-preview': {
+    inputUsdPerMillion: 0.25,
+    outputUsdPerMillion: 1.5,
+  },
 }
 
 function sleep(ms: number): Promise<void> {
@@ -101,6 +218,14 @@ function parseFloatRange(value: string, name: string, min: number, max: number):
   return parsed
 }
 
+function parsePositiveFloat(value: string, name: string): number {
+  const parsed = Number.parseFloat(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive number`)
+  }
+  return parsed
+}
+
 function parseLangs(value: string): TargetLang[] {
   const tokens = value.split(',').map((v) => v.trim().toLowerCase()).filter(Boolean)
   const unique: TargetLang[] = []
@@ -126,16 +251,16 @@ function parseSeedLang(value: string): SeedLang {
   throw new Error(`Unsupported --seed-lang: ${value}`)
 }
 
-function normalizeModelName(value: string): string {
+export function normalizeModelName(value: string): string {
   const trimmed = value.trim()
   return trimmed.startsWith('models/') ? trimmed.slice('models/'.length) : trimmed
 }
 
-function parseArgs(args: string[]): CliOptions {
+export function parseArgs(args: string[]): CliOptions {
   const opts: CliOptions = {
     langs: [...ALL_LANGS],
     seedLang: 'en',
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3.1-flash-lite-preview',
     batchSize: 20,
     maxDefs: 3,
     saveEvery: 10,
@@ -144,6 +269,15 @@ function parseArgs(args: string[]): CliOptions {
     retries: 5,
     minDelayMs: 250,
     temperature: 0.2,
+    commonOnly: false,
+    minFrequency: null,
+    jlptMax: null,
+    excludeRegex: null,
+    maxInputTokens: null,
+    maxCostUsd: null,
+    reportFile: null,
+    inputPricePer1M: null,
+    outputPricePer1M: null,
     dryRun: false,
   }
 
@@ -184,6 +318,35 @@ function parseArgs(args: string[]): CliOptions {
     } else if (arg === '--temperature' && next) {
       opts.temperature = parseFloatRange(next, '--temperature', 0, 2)
       i++
+    } else if (arg === '--min-frequency' && next) {
+      opts.minFrequency = parsePositiveInt(next, '--min-frequency')
+      i++
+    } else if (arg === '--jlpt-max' && next) {
+      opts.jlptMax = parsePositiveInt(next, '--jlpt-max')
+      i++
+      if (opts.jlptMax !== null && opts.jlptMax > 5) {
+        throw new Error('--jlpt-max must be between 1 and 5')
+      }
+    } else if (arg === '--exclude-regex' && next) {
+      opts.excludeRegex = next
+      i++
+    } else if (arg === '--max-input-tokens' && next) {
+      opts.maxInputTokens = parsePositiveInt(next, '--max-input-tokens')
+      i++
+    } else if (arg === '--max-cost-usd' && next) {
+      opts.maxCostUsd = parsePositiveFloat(next, '--max-cost-usd')
+      i++
+    } else if (arg === '--report-file' && next) {
+      opts.reportFile = next
+      i++
+    } else if (arg === '--input-price-per-1m' && next) {
+      opts.inputPricePer1M = parsePositiveFloat(next, '--input-price-per-1m')
+      i++
+    } else if (arg === '--output-price-per-1m' && next) {
+      opts.outputPricePer1M = parsePositiveFloat(next, '--output-price-per-1m')
+      i++
+    } else if (arg === '--common-only') {
+      opts.commonOnly = true
     } else if (arg === '--dry-run') {
       opts.dryRun = true
     } else if (arg === '--help' || arg === '-h') {
@@ -210,45 +373,153 @@ Usage:
   bun run import:gemini [options]
 
 Options:
-  --langs <list>        Comma-separated targets (default: en,de,ko,zh-cn,zh-tw)
-  --seed-lang <lang>    Master key/definition source language (default: en, use "none" to disable)
-  --model <name>        Gemini model for SDK calls (default: gemini-2.0-flash)
-  --batch-size <n>      Entries per API call (default: 20)
-  --max-defs <n>        Max generated definitions per entry (default: 3)
-  --save-every <n>      Save every N batches (default: 10)
-  --limit <n>           Process at most N missing entries per language
-  --offset <n>          Skip first N missing entries per language
-  --retries <n>         Retry count per failed request (default: 5)
-  --min-delay-ms <n>    Delay between requests in milliseconds (default: 250)
-  --temperature <n>     Generation temperature 0-2 (default: 0.2)
-  --dry-run             Preview missing counts without writing
-  --help, -h            Show this help
+  --langs <list>             Comma-separated targets (default: en,de,ko,zh-cn,zh-tw)
+  --seed-lang <lang>         Master key/definition source language (default: en, use "none" to disable)
+  --model <name>             Gemini model for SDK calls (default: gemini-3.1-flash-lite-preview)
+  --batch-size <n>           Entries per API call (default: 20)
+  --max-defs <n>             Max generated definitions per entry (default: 3)
+  --save-every <n>           Save every N batches (default: 10)
+  --limit <n>                Process at most N filtered missing entries per language
+  --offset <n>               Skip first N filtered missing entries per language
+  --retries <n>              Retry count per failed request (default: 5)
+  --min-delay-ms <n>         Delay between requests in milliseconds (default: 250)
+  --temperature <n>          Generation temperature 0-2 (default: 0.2)
+  --common-only              Only generate for entries marked common in core.json
+  --min-frequency <rank>     Only include entries with frequency <= rank
+  --jlpt-max <n>             Only include entries at or easier than N<n> (e.g. 3 keeps N3-N5)
+  --exclude-regex <pattern>  Skip entries whose word/reading/key matches this JavaScript regex
+  --max-input-tokens <n>     Stop if a batch prompt exceeds this many input tokens
+  --max-cost-usd <n>         Stop before the next batch would exceed this estimated spend
+  --report-file <path>       Write a JSON run report with filters, usage, and estimated cost
+  --input-price-per-1m <n>   Override input token price per 1M tokens for cost estimation
+  --output-price-per-1m <n>  Override output token price per 1M tokens for cost estimation
+  --dry-run                  Preview filtered counts without writing
+  --help, -h                 Show this help
 
 Examples:
-  bun run import:gemini --langs de,ko,zh-cn,zh-tw
-  bun run import:gemini --limit 1000 --batch-size 10
-  bun run import:gemini --dry-run
+  bun run import:gemini --langs zh-tw --common-only --min-frequency 10000 --limit 5000
+  bun run import:gemini --langs de --jlpt-max 3 --max-cost-usd 2 --report-file reports/gemini-de.json
+  bun run import:gemini --dry-run --exclude-regex '^[\\p{P}\\p{S}]+$'
 `)
 }
 
-function collectMissingKeys(
-  masterKeys: string[],
-  target: LangFile,
-  offset: number,
-  limit: number | null
-): string[] {
-  const missing: string[] = []
+export function buildSelectionFilters(opts: CliOptions): SelectionFilters {
+  let excludePattern: RegExp | null = null
 
-  for (const key of masterKeys) {
-    const entry = target.entries[key]
-    if (!entry || entry.definitions.length === 0) {
-      missing.push(key)
+  if (opts.excludeRegex) {
+    try {
+      excludePattern = new RegExp(opts.excludeRegex, 'u')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Invalid --exclude-regex: ${message}`)
     }
   }
 
-  const start = Math.min(offset, missing.length)
-  const end = limit === null ? missing.length : Math.min(start + limit, missing.length)
-  return missing.slice(start, end)
+  return {
+    commonOnly: opts.commonOnly,
+    minFrequency: opts.minFrequency,
+    jlptMax: opts.jlptMax,
+    excludePattern,
+  }
+}
+
+function matchesExcludePattern(pattern: RegExp | null, key: string): boolean {
+  if (!pattern) return false
+  const { word, reading } = parseKey(key)
+  pattern.lastIndex = 0
+  if (pattern.test(key)) return true
+  pattern.lastIndex = 0
+  if (pattern.test(word)) return true
+  pattern.lastIndex = 0
+  return pattern.test(reading)
+}
+
+function compareMissingKeys(
+  leftKey: string,
+  rightKey: string,
+  coreEntries: Record<string, CoreEntry>
+): number {
+  const left = coreEntries[leftKey]
+  const right = coreEntries[rightKey]
+
+  const commonDelta = Number(Boolean(right?.common)) - Number(Boolean(left?.common))
+  if (commonDelta !== 0) return commonDelta
+
+  const leftFrequency = left?.frequency ?? Number.MAX_SAFE_INTEGER
+  const rightFrequency = right?.frequency ?? Number.MAX_SAFE_INTEGER
+  if (leftFrequency !== rightFrequency) return leftFrequency - rightFrequency
+
+  const leftJlpt = left?.jlpt ?? 0
+  const rightJlpt = right?.jlpt ?? 0
+  if (leftJlpt !== rightJlpt) return rightJlpt - leftJlpt
+
+  return leftKey.localeCompare(rightKey)
+}
+
+export function collectMissingKeys(
+  masterKeys: string[],
+  target: LangFile,
+  coreEntries: Record<string, CoreEntry>,
+  filters: SelectionFilters,
+  offset: number,
+  limit: number | null
+): MissingSelectionResult {
+  const eligible: string[] = []
+  let totalMissing = 0
+  let excludedByCommon = 0
+  let excludedByFrequency = 0
+  let excludedByJlpt = 0
+  let excludedByRegex = 0
+
+  for (const key of masterKeys) {
+    const entry = target.entries[key]
+    if (entry && entry.definitions.length > 0) continue
+
+    totalMissing++
+    const coreEntry = coreEntries[key]
+
+    if (filters.commonOnly && !coreEntry?.common) {
+      excludedByCommon++
+      continue
+    }
+
+    if (filters.minFrequency !== null) {
+      if (coreEntry?.frequency === null || coreEntry?.frequency === undefined || coreEntry.frequency > filters.minFrequency) {
+        excludedByFrequency++
+        continue
+      }
+    }
+
+    if (filters.jlptMax !== null) {
+      if (coreEntry?.jlpt === null || coreEntry?.jlpt === undefined || coreEntry.jlpt < filters.jlptMax) {
+        excludedByJlpt++
+        continue
+      }
+    }
+
+    if (matchesExcludePattern(filters.excludePattern, key)) {
+      excludedByRegex++
+      continue
+    }
+
+    eligible.push(key)
+  }
+
+  eligible.sort((left, right) => compareMissingKeys(left, right, coreEntries))
+
+  const start = Math.min(offset, eligible.length)
+  const end = limit === null ? eligible.length : Math.min(start + limit, eligible.length)
+
+  return {
+    totalMissing,
+    eligibleMissing: eligible.length,
+    pagedMissing: end - start,
+    excludedByCommon,
+    excludedByFrequency,
+    excludedByJlpt,
+    excludedByRegex,
+    keys: eligible.slice(start, end),
+  }
 }
 
 function normalizeDefinitionList(raw: unknown, maxDefs: number): string[] {
@@ -340,23 +611,50 @@ function buildPrompt(
 ): string {
   const sourceLabel = sourceLang === 'none' ? 'none' : LANG_NAME[sourceLang]
   return [
-    `You are a multilingual dictionary editor.`,
+    'You are a multilingual dictionary editor.',
     `Target language: ${LANG_NAME[lang]}.`,
     `Input source definition language: ${sourceLabel}.`,
     STYLE_HINT[lang],
-    `Generate concise dictionary-style glosses.`,
-    `Output strict JSON only in this shape:`,
-    `{"items":[{"id":"<id>","definitions":["..."]}]}`,
-    `Rules:`,
-    `- Keep each "id" exactly as provided.`,
-    `- Definitions must be short phrases, not full sentences.`,
-    `- Do not add numbering, markdown, explanations, or comments.`,
+    'Generate concise dictionary-style glosses.',
+    'Output strict JSON only in this shape:',
+    '{"items":[{"id":"<id>","definitions":["..."]}]}',
+    'Rules:',
+    '- Keep each "id" exactly as provided.',
+    '- Definitions must be short phrases, not full sentences.',
+    '- Do not add numbering, markdown, explanations, or comments.',
     `- Provide 1 to ${maxDefs} definitions when possible; return [] if unknown.`,
-    `- Do not include duplicate definitions within the same id.`,
-    ``,
-    `Items:`,
+    '- Do not include duplicate definitions within the same id.',
+    '',
+    'Items:',
     JSON.stringify(items),
   ].join('\n')
+}
+
+function getNumberField(record: Record<string, unknown>, camel: string, snake: string): number {
+  const value = record[camel] ?? record[snake]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+export function parseUsageMetadata(value: unknown): UsageStats {
+  if (!value || typeof value !== 'object') {
+    return { promptTokens: 0, candidateTokens: 0, thoughtsTokens: 0, totalTokens: 0 }
+  }
+
+  const record = value as Record<string, unknown>
+  return {
+    promptTokens: getNumberField(record, 'promptTokenCount', 'prompt_token_count'),
+    candidateTokens: getNumberField(record, 'candidatesTokenCount', 'candidates_token_count'),
+    thoughtsTokens: getNumberField(record, 'thoughtsTokenCount', 'thoughts_token_count'),
+    totalTokens: getNumberField(record, 'totalTokenCount', 'total_token_count'),
+  }
+}
+
+function getResponseText(response: unknown): string {
+  if (response && typeof response === 'object') {
+    const record = response as Record<string, unknown>
+    if (typeof record.text === 'string') return record.text
+  }
+  return ''
 }
 
 async function callGemini(
@@ -365,7 +663,7 @@ async function callGemini(
   prompt: string,
   temperature: number,
   retries: number
-): Promise<string> {
+): Promise<GenerateResult> {
   let lastError: Error | null = null
 
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -378,13 +676,17 @@ async function callGemini(
           responseMimeType: 'application/json',
         },
       })
-      const text = response.text?.trim()
+      const text = getResponseText(response).trim()
 
       if (!text) {
         throw new Error('Gemini returned no text content')
       }
 
-      return text
+      const usageContainer = response as unknown as { usageMetadata?: unknown; usage_metadata?: unknown }
+      return {
+        text,
+        usage: parseUsageMetadata(usageContainer.usageMetadata ?? usageContainer.usage_metadata),
+      }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
       if (attempt >= retries) break
@@ -394,6 +696,37 @@ async function callGemini(
   }
 
   throw lastError ?? new Error('Gemini request failed')
+}
+
+async function countPromptTokens(
+  client: GoogleGenAI,
+  model: string,
+  prompt: string,
+  retries: number
+): Promise<number> {
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await client.models.countTokens({
+        model,
+        contents: prompt,
+      })
+      const container = response as unknown as { totalTokens?: unknown; total_tokens?: unknown }
+      const totalTokens = container.totalTokens ?? container.total_tokens
+      if (typeof totalTokens !== 'number' || !Number.isFinite(totalTokens) || totalTokens < 0) {
+        throw new Error('Gemini countTokens returned an invalid token count')
+      }
+      return totalTokens
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      if (attempt >= retries) break
+      const backoff = Math.min(15000, 500 * 2 ** (attempt - 1))
+      await sleep(backoff)
+    }
+  }
+
+  throw lastError ?? new Error('Gemini countTokens request failed')
 }
 
 function getSourceDefinitions(
@@ -432,33 +765,149 @@ function ensureEntry(target: LangFile, key: string): LangEntry {
   return created
 }
 
+export function resolvePricing(opts: CliOptions): PricingConfig | null {
+  const normalizedModel = normalizeModelName(opts.model)
+  const preset = MODEL_PRICING[normalizedModel] ?? null
+
+  const inputUsdPerMillion = opts.inputPricePer1M ?? preset?.inputUsdPerMillion ?? null
+  const outputUsdPerMillion = opts.outputPricePer1M ?? preset?.outputUsdPerMillion ?? null
+
+  if (inputUsdPerMillion === null || outputUsdPerMillion === null) {
+    return null
+  }
+
+  return { inputUsdPerMillion, outputUsdPerMillion }
+}
+
+function estimateBatchOutputTokens(batchSize: number, opts: CliOptions, totals: RunTotals): number {
+  if (totals.generatedEntries > 0 && totals.candidateTokens > 0) {
+    const averagePerEntry = totals.candidateTokens / totals.generatedEntries
+    return Math.max(1, Math.ceil(averagePerEntry * batchSize))
+  }
+
+  return Math.max(120, batchSize * (opts.maxDefs * 6 + 3))
+}
+
+function estimateUsageCost(usage: UsageStats, pricing: PricingConfig | null): number {
+  if (!pricing) return 0
+  const inputCost = (usage.promptTokens / 1_000_000) * pricing.inputUsdPerMillion
+  const outputCost = (usage.candidateTokens / 1_000_000) * pricing.outputUsdPerMillion
+  return inputCost + outputCost
+}
+
+function makeEmptyTotals(): RunTotals {
+  return {
+    promptTokens: 0,
+    candidateTokens: 0,
+    thoughtsTokens: 0,
+    totalTokens: 0,
+    estimatedCostUsd: 0,
+    countRequests: 0,
+    generateRequests: 0,
+    generatedEntries: 0,
+  }
+}
+
+function mergeUsageIntoTotals(totals: RunTotals, usage: UsageStats, pricing: PricingConfig | null): void {
+  totals.promptTokens += usage.promptTokens
+  totals.candidateTokens += usage.candidateTokens
+  totals.thoughtsTokens += usage.thoughtsTokens
+  totals.totalTokens += usage.totalTokens
+  totals.estimatedCostUsd += estimateUsageCost(usage, pricing)
+}
+
+function roundCurrency(value: number): string {
+  return value.toFixed(4)
+}
+
+async function writeReport(path: string, report: RunReport): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await Bun.write(path, JSON.stringify(report, null, 2))
+}
+
 async function processLanguage(
   lang: TargetLang,
   opts: CliOptions,
   masterKeys: string[],
   seedFile: LangFile | null,
-  client: GoogleGenAI | null
-): Promise<void> {
+  coreEntries: Record<string, CoreEntry>,
+  filters: SelectionFilters,
+  pricing: PricingConfig | null,
+  client: GoogleGenAI | null,
+  globalTotals: RunTotals
+): Promise<LanguageReport> {
   const langPath = `${LANG_DIR}/${lang}.json`
   const target = await loadLang(langPath, lang)
-  const missingKeys = collectMissingKeys(masterKeys, target, opts.offset, opts.limit)
+  const selection = collectMissingKeys(masterKeys, target, coreEntries, filters, opts.offset, opts.limit)
 
   console.log(`\n=== ${lang} ===`)
-  console.log(`Missing entries selected: ${missingKeys.length.toLocaleString()}`)
+  console.log(`Missing entries total: ${selection.totalMissing.toLocaleString()}`)
+  console.log(`Eligible after filters: ${selection.eligibleMissing.toLocaleString()}`)
+  console.log(`Selected after offset/limit: ${selection.pagedMissing.toLocaleString()}`)
+  if (selection.excludedByCommon > 0) {
+    console.log(`Excluded by common filter: ${selection.excludedByCommon.toLocaleString()}`)
+  }
+  if (selection.excludedByFrequency > 0) {
+    console.log(`Excluded by frequency filter: ${selection.excludedByFrequency.toLocaleString()}`)
+  }
+  if (selection.excludedByJlpt > 0) {
+    console.log(`Excluded by JLPT filter: ${selection.excludedByJlpt.toLocaleString()}`)
+  }
+  if (selection.excludedByRegex > 0) {
+    console.log(`Excluded by regex filter: ${selection.excludedByRegex.toLocaleString()}`)
+  }
 
-  if (missingKeys.length === 0) {
+  if (selection.keys.length === 0) {
     console.log('Nothing to fill.')
-    return
+    return {
+      lang,
+      totalMissing: selection.totalMissing,
+      eligibleMissing: selection.eligibleMissing,
+      pagedMissing: selection.pagedMissing,
+      excludedByCommon: selection.excludedByCommon,
+      excludedByFrequency: selection.excludedByFrequency,
+      excludedByJlpt: selection.excludedByJlpt,
+      excludedByRegex: selection.excludedByRegex,
+      batches: 0,
+      failedBatches: 0,
+      updatedEntries: 0,
+      addedDefinitions: 0,
+      promptTokens: 0,
+      candidateTokens: 0,
+      thoughtsTokens: 0,
+      totalTokens: 0,
+      estimatedCostUsd: 0,
+      stoppedReason: 'none',
+    }
   }
 
   if (opts.dryRun) {
-    const preview = missingKeys.slice(0, 5).map((k) => {
+    const preview = selection.keys.slice(0, 5).map((k) => {
       const { word, reading } = parseKey(k)
       return `${word} [${reading}]`
     })
     console.log('Dry-run preview:')
     for (const row of preview) console.log(`  - ${row}`)
-    return
+    return {
+      lang,
+      totalMissing: selection.totalMissing,
+      eligibleMissing: selection.eligibleMissing,
+      pagedMissing: selection.pagedMissing,
+      excludedByCommon: selection.excludedByCommon,
+      excludedByFrequency: selection.excludedByFrequency,
+      excludedByJlpt: selection.excludedByJlpt,
+      excludedByRegex: selection.excludedByRegex,
+      batches: 0,
+      failedBatches: 0,
+      updatedEntries: 0,
+      addedDefinitions: 0,
+      promptTokens: 0,
+      candidateTokens: 0,
+      thoughtsTokens: 0,
+      totalTokens: 0,
+      estimatedCostUsd: 0,
+      stoppedReason: 'none',
+    }
   }
 
   if (!client) {
@@ -470,22 +919,76 @@ async function processLanguage(
   let updatedEntries = 0
   let addedDefinitions = 0
   let hasUnsavedChanges = false
+  let stoppedReason: LanguageReport['stoppedReason'] = 'none'
 
-  for (let i = 0; i < missingKeys.length; i += opts.batchSize) {
-    const batchKeys = missingKeys.slice(i, i + opts.batchSize)
+  const localTotals = makeEmptyTotals()
+
+  for (let i = 0; i < selection.keys.length; i += opts.batchSize) {
+    const batchKeys = selection.keys.slice(i, i + opts.batchSize)
     const items = buildPromptItems(batchKeys, lang, opts.seedLang, seedFile)
     const prompt = buildPrompt(lang, opts.seedLang, opts.maxDefs, items)
     const allowedIds = new Set(batchKeys)
+    let promptTokens = 0
     batches++
 
     process.stdout.write(
       `\r  Batch ${batches.toLocaleString()} ` +
-      `(${Math.min(i + opts.batchSize, missingKeys.length).toLocaleString()}/${missingKeys.length.toLocaleString()})`
+      `(${Math.min(i + opts.batchSize, selection.keys.length).toLocaleString()}/${selection.keys.length.toLocaleString()})`
     )
 
     try {
+      const needsPreflightCount = opts.maxInputTokens !== null || opts.maxCostUsd !== null
+      if (needsPreflightCount) {
+        promptTokens = await countPromptTokens(client, opts.model, prompt, opts.retries)
+        globalTotals.countRequests++
+        localTotals.countRequests++
+      }
+
+      if (opts.maxInputTokens !== null && promptTokens > opts.maxInputTokens) {
+        stoppedReason = 'max-input-tokens'
+        console.log(
+          `\n  Stopping before batch ${batches.toLocaleString()}: ` +
+          `prompt uses ${promptTokens.toLocaleString()} input tokens, above --max-input-tokens=${opts.maxInputTokens.toLocaleString()}`
+        )
+        break
+      }
+
+      if (opts.maxCostUsd !== null) {
+        if (!pricing) {
+          throw new Error(
+            `No pricing preset found for model "${opts.model}". ` +
+            'Pass --input-price-per-1m and --output-price-per-1m to use --max-cost-usd.'
+          )
+        }
+
+        const estimatedUsage: UsageStats = {
+          promptTokens,
+          candidateTokens: estimateBatchOutputTokens(batchKeys.length, opts, globalTotals),
+          thoughtsTokens: 0,
+          totalTokens: promptTokens + estimateBatchOutputTokens(batchKeys.length, opts, globalTotals),
+        }
+        const projectedCost = globalTotals.estimatedCostUsd + estimateUsageCost(estimatedUsage, pricing)
+
+        if (projectedCost > opts.maxCostUsd) {
+          stoppedReason = 'budget'
+          console.log(
+            `\n  Stopping before batch ${batches.toLocaleString()}: ` +
+            `estimated spend would rise to $${roundCurrency(projectedCost)}, above --max-cost-usd=$${roundCurrency(opts.maxCostUsd)}`
+          )
+          break
+        }
+      }
+
       const raw = await callGemini(client, opts.model, prompt, opts.temperature, opts.retries)
-      const result = parseGeminiResult(raw, allowedIds, opts.maxDefs)
+      localTotals.generateRequests++
+      globalTotals.generateRequests++
+      localTotals.generatedEntries += batchKeys.length
+      globalTotals.generatedEntries += batchKeys.length
+
+      mergeUsageIntoTotals(localTotals, raw.usage, pricing)
+      mergeUsageIntoTotals(globalTotals, raw.usage, pricing)
+
+      const result = parseGeminiResult(raw.text, allowedIds, opts.maxDefs)
 
       for (const key of batchKeys) {
         const defs = result.get(key) ?? []
@@ -511,7 +1014,7 @@ async function processLanguage(
       console.log(`\n  Batch failed: ${message}`)
     }
 
-    if (opts.minDelayMs > 0 && i + opts.batchSize < missingKeys.length) {
+    if (opts.minDelayMs > 0 && i + opts.batchSize < selection.keys.length) {
       await sleep(opts.minDelayMs)
     }
 
@@ -529,10 +1032,38 @@ async function processLanguage(
   console.log(`Batches: ${batches.toLocaleString()} (failed: ${failedBatches.toLocaleString()})`)
   console.log(`Updated entries: ${updatedEntries.toLocaleString()}`)
   console.log(`Added definitions: ${addedDefinitions.toLocaleString()}`)
+  if (localTotals.generateRequests > 0) {
+    console.log(`Prompt tokens: ${localTotals.promptTokens.toLocaleString()}`)
+    console.log(`Candidate tokens: ${localTotals.candidateTokens.toLocaleString()}`)
+    if (pricing) {
+      console.log(`Estimated spend: $${roundCurrency(localTotals.estimatedCostUsd)}`)
+    }
+  }
   if (updatedEntries > 0) {
     console.log(`Saved: ${langPath}`)
   } else {
     console.log('No file changes written.')
+  }
+
+  return {
+    lang,
+    totalMissing: selection.totalMissing,
+    eligibleMissing: selection.eligibleMissing,
+    pagedMissing: selection.pagedMissing,
+    excludedByCommon: selection.excludedByCommon,
+    excludedByFrequency: selection.excludedByFrequency,
+    excludedByJlpt: selection.excludedByJlpt,
+    excludedByRegex: selection.excludedByRegex,
+    batches,
+    failedBatches,
+    updatedEntries,
+    addedDefinitions,
+    promptTokens: localTotals.promptTokens,
+    candidateTokens: localTotals.candidateTokens,
+    thoughtsTokens: localTotals.thoughtsTokens,
+    totalTokens: localTotals.totalTokens,
+    estimatedCostUsd: localTotals.estimatedCostUsd,
+    stoppedReason,
   }
 }
 
@@ -548,6 +1079,8 @@ async function loadSeedFile(seedLang: SeedLang): Promise<LangFile | null> {
 
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2))
+  const pricing = resolvePricing(opts)
+  const filters = buildSelectionFilters(opts)
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null
   const client = !opts.dryRun
     ? new GoogleGenAI(apiKey ? { apiKey } : {})
@@ -561,6 +1094,19 @@ async function main(): Promise<void> {
   console.log(`Max definitions per entry: ${opts.maxDefs}`)
   console.log(`Offset: ${opts.offset.toLocaleString()}`)
   console.log(`Limit: ${opts.limit === null ? 'none' : opts.limit.toLocaleString()}`)
+  console.log(`Common only: ${opts.commonOnly ? 'yes' : 'no'}`)
+  console.log(`Min frequency: ${opts.minFrequency ?? 'none'}`)
+  console.log(`JLPT max: ${opts.jlptMax ?? 'none'}`)
+  console.log(`Exclude regex: ${opts.excludeRegex ?? 'none'}`)
+  console.log(`Max input tokens: ${opts.maxInputTokens ?? 'none'}`)
+  console.log(`Max cost USD: ${opts.maxCostUsd ?? 'none'}`)
+  if (pricing) {
+    console.log(
+      `Pricing: input $${pricing.inputUsdPerMillion}/1M, output $${pricing.outputUsdPerMillion}/1M`
+    )
+  } else if (opts.maxCostUsd !== null) {
+    console.log('Pricing: unavailable for this model without overrides')
+  }
   console.log(`Dry run: ${opts.dryRun ? 'yes' : 'no'}`)
 
   if (!opts.dryRun && !apiKey) {
@@ -574,24 +1120,86 @@ async function main(): Promise<void> {
   if (!existsSync(masterPath)) {
     throw new Error(`Master language file not found: ${masterPath}`)
   }
+  if (!existsSync(CORE_PATH)) {
+    throw new Error(`Core metadata file not found: ${CORE_PATH}`)
+  }
+
   console.log('Loading master key list: en')
   const masterFile = await loadLang(masterPath, 'en')
   const masterKeys = Object.keys(masterFile.entries)
-
+  const core = await loadCore(CORE_PATH)
   const seedFile = opts.seedLang === 'en'
     ? masterFile
     : await loadSeedFile(opts.seedLang)
 
   console.log(`Master key count: ${masterKeys.length.toLocaleString()}`)
 
+  const totals = makeEmptyTotals()
+  const languages: LanguageReport[] = []
+
   for (const lang of opts.langs) {
-    await processLanguage(lang, opts, masterKeys, seedFile, client)
+    const report = await processLanguage(
+      lang,
+      opts,
+      masterKeys,
+      seedFile,
+      core.entries,
+      filters,
+      pricing,
+      client,
+      totals
+    )
+    languages.push(report)
+
+    if (report.stoppedReason === 'budget') {
+      console.log('\nGlobal budget limit reached; skipping remaining languages.')
+      break
+    }
+
+    if (report.stoppedReason === 'max-input-tokens') {
+      console.log('\nStopped due to --max-input-tokens; adjust batch size or token cap to continue.')
+      break
+    }
+  }
+
+  if (opts.reportFile) {
+    const report: RunReport = {
+      generatedAt: new Date().toISOString(),
+      model: opts.model,
+      dryRun: opts.dryRun,
+      pricing,
+      options: {
+        langs: opts.langs,
+        seedLang: opts.seedLang,
+        batchSize: opts.batchSize,
+        maxDefs: opts.maxDefs,
+        saveEvery: opts.saveEvery,
+        limit: opts.limit,
+        offset: opts.offset,
+        retries: opts.retries,
+        minDelayMs: opts.minDelayMs,
+        temperature: opts.temperature,
+        commonOnly: opts.commonOnly,
+        minFrequency: opts.minFrequency,
+        jlptMax: opts.jlptMax,
+        excludeRegex: opts.excludeRegex,
+        maxInputTokens: opts.maxInputTokens,
+        maxCostUsd: opts.maxCostUsd,
+        reportFile: opts.reportFile,
+      },
+      totals,
+      languages,
+    }
+    await writeReport(opts.reportFile, report)
+    console.log(`Report written: ${opts.reportFile}`)
   }
 
   console.log('\n=== Done ===')
 }
 
-main().catch((error) => {
-  console.error('Import failed:', error)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error('Import failed:', error)
+    process.exit(1)
+  })
+}
