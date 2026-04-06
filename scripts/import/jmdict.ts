@@ -130,6 +130,12 @@ interface GitHubRelease {
   assets: { name: string; browser_download_url: string }[]
 }
 
+export function resolveCoreMergeMode(mode: ImportMode): ImportMode {
+  // core.json is shared across every language file, so a language-scoped refresh
+  // must not replace the whole core snapshot with a partial import.
+  return mode === 'refresh' ? 'merge' : mode
+}
+
 // ============================================================================
 // Download Functions
 // ============================================================================
@@ -353,7 +359,7 @@ async function importJMdict(
   const coreStats = mergeCoreEntries(
     core.entries,
     aggregatedCoreEntries,
-    mode === 'refresh' ? 'replace' : mode
+    resolveCoreMergeMode(mode)
   )
   if (mode !== 'diff') {
     await saveCore(CORE_PATH, core)
@@ -487,7 +493,9 @@ Examples:
   console.log('\n=== Import Complete ===')
 }
 
-main().catch((err) => {
-  console.error('Import failed:', err)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Import failed:', err)
+    process.exit(1)
+  })
+}

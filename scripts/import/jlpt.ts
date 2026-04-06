@@ -171,7 +171,7 @@ interface EnrichStats {
   notFound: number
 }
 
-function enrichCoreWithJlpt(
+export function enrichCoreWithJlpt(
   coreEntries: Record<string, { jlpt: number | null }>,
   jlptMap: Map<string, number>,
   mode: ImportMode
@@ -189,12 +189,14 @@ function enrichCoreWithJlpt(
     if (level !== undefined) {
       stats.matched++
 
-      if (entry.jlpt === level) {
+      const nextLevel = entry.jlpt === null ? level : Math.max(entry.jlpt, level)
+
+      if (entry.jlpt === nextLevel) {
         stats.alreadyHad++
       } else {
         stats.updated++
         if (mode !== 'diff') {
-          entry.jlpt = level
+          entry.jlpt = nextLevel
         }
       }
     }
@@ -331,7 +333,9 @@ async function main(): Promise<void> {
   console.log('\n=== Import Complete ===')
 }
 
-main().catch((err) => {
-  console.error('Import failed:', err)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Import failed:', err)
+    process.exit(1)
+  })
+}
