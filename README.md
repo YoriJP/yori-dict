@@ -5,15 +5,15 @@
 [![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![License](https://img.shields.io/badge/License-CC--BY--SA--4.0-green.svg?style=for-the-badge)](LICENSE)
 
-**Fast, multilingual Japanese dictionary API with automatic verb conjugations.**
+**Fast, multilingual Japanese dictionary API focused on core vocabulary and kanji-first lookup.**
 
 - ⚡ **~1ms response time** - SQLite with optimized indexes
 - 🌍 **Multilingual** - English, German, Korean, Chinese (Simplified & Traditional)
 - 🔤 **Auto conjugations** - ichidan, godan, suru, kuru verbs + i-adjectives
-- 📝 **Example sentences** - 82k+ curated examples from Tatoeba
-- 🗺️ **Proper nouns** - 740k+ names, places, and companies via JMnedict
+- 📝 **Example sentences** - 98,547 unique Japanese sentences / 154,330 bilingual pairs
+- 📚 **Core-vocabulary focus** - excludes bulk proper-name imports and prioritizes higher-signal entries
 - 🎯 **JLPT levels** - N5-N1 tagged for study progress
-- 📊 **Frequency ranks** - JPDB frequency data for 311k+ entries
+- 📊 **Frequency ranks** - JPDB frequency data for 178,644 entries
 
 ---
 
@@ -56,6 +56,7 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 - ~2GB disk space (data cache + JSON files + SQLite)
 - Git LFS (`git lfs install`)
 - Python 3 + sudachipy (only needed for `import:tatoeba`): `pip install sudachipy sudachidict-core`
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY` only if you plan to run `import:gemini`
 
 ### Install & Run
 
@@ -71,7 +72,10 @@ bun run build:db     # Build SQLite (~10s)
 bun run dev          # Start server
 
 # Option B: Build from scratch (fresh data)
-bun run rebuild:all  # base imports + enrichment + build:db
+bun run rebuild:all  # base imports + deterministic enrichment + build:db
+bun run verify:rebuild  # optional: rebuild in a temp worktree and compare outputs
+# Optional: AI backfill for missing definitions (SDK-based, not included in rebuild:all)
+# bun run import:gemini --langs de,ko,zh-cn,zh-tw --limit 5000
 bun run dev
 ```
 
@@ -100,7 +104,7 @@ Lookup a Japanese word by kanji or reading.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `word` | string | ✅ | Japanese word (kanji, hiragana, or katakana) |
-| `lang` | string | ❌ | Target language: `en`, `de`, `ko`, `zh-cn`, `zh-tw` (aliases `zh-CN`, `zh-TW` also accepted; default: `en`) |
+| `lang` | string | ❌ | Target language: `en`, `de`, `ko`, `zh-cn`, `zh-tw` (aliases `zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant` accepted; default: `en`) |
 
 **Examples:**
 
@@ -131,7 +135,7 @@ curl "localhost:3000/v1/lookup?word=たべる"
     "past": "string",
     "te": "string"
   },
-  "examples": [               // Optional - may be empty
+  "examples": [               // Always present - may be empty
     {"japanese": "string", "translation": "string"}
   ]
 }
@@ -155,29 +159,32 @@ Returns `{"status": "ok"}` when the server is running.
 
 | Language | Entries | Examples | Sources |
 |----------|---------|----------|---------|
-| **English** | ~939k | ~34k | JMdict, JMnedict, Wiktionary (+55k defs), Tatoeba |
-| **German** | ~860k | ~28k | JMdict, JMnedict, Wadoku (+2.5k defs), Tatoeba |
-| **Chinese (CN)** | ~765k | ~8k | Kaikki, JMnedict, Tatoeba (`jpn-cmn`) |
-| **Chinese (TW)** | ~765k | ~8k | Kaikki, JMnedict, Tatoeba (`jpn-cmn`, converted to Traditional) |
-| **Korean** | ~772k | ~3.8k | KRDICT (NIKL), JMnedict, Tatoeba (`jpn-kor`) |
+| **English** | 214,624 | 108,733 | JMdict, Wiktionary, JMdict Yomitan examples, Jitendex, Tatoeba |
+| **German** | 128,071 | 27,733 | JMdict, Wadoku, Tatoeba |
+| **Chinese (CN)** | 44,250 | 7,392 | Kaikki, ZH-JA, CC-CEDICT, Tatoeba (`jpn-cmn`) |
+| **Chinese (TW)** | 44,250 | 7,388 | Kaikki, ZH-JA, CC-CEDICT, Tatoeba (`jpn-cmn`, converted to Traditional) |
+| **Korean** | 33,630 | 3,836 | KRDICT (NIKL), kowiktionary fallback, Tatoeba (`jpn-kor`) |
 
-> **Note:** Entry counts include ~743k proper nouns from JMnedict (surnames, given names, place names, company names, etc.). Core vocabulary entries (JMdict) are ~214k for EN/DE, ~25-32k for ZH/KO.
+> **Note:** These counts are measured from the current `data/core.json` + `data/lang/*.json` snapshot. Example counts are bilingual pairs per language, so the same Japanese sentence may appear in multiple language totals.
 
 **Source Details:**
 
 | Source | Data | License | Imported Via |
 |--------|------|---------|--------------|
-| [JMdict-simplified](https://github.com/scriptin/jmdict-simplified) | Base dictionary (~214k words) | CC-BY-SA-4.0 | `import:jmdict` |
-| [JMnedict](https://github.com/scriptin/jmdict-simplified) | Proper names (~743k entries) | CC-BY-SA-3.0 | `import:jmnedict` |
+| [JMdict-simplified](https://github.com/scriptin/jmdict-simplified) | Base dictionary backbone for the current snapshot | CC-BY-SA-4.0 | `import:jmdict` |
+| [JMdict Yomitan](https://github.com/yomidevs/jmdict-yomitan) | Extra English example pairs in the current snapshot | CC-BY-SA-4.0 | `import:jmdict-examples` |
+| [Jitendex](https://jitendex.org) | English gloss enrichment reflected in the current snapshot | CC-BY-SA-4.0 | `import:jitendex` |
 | [Tatoeba](https://tatoeba.org) via [ManyThings](https://manythings.org/anki/) and [raw exports](https://downloads.tatoeba.org/exports/per_language/) | Example sentences | CC-BY-2.0 | `import:tatoeba` (requires `sudachipy`) |
 | [Wiktionary](https://kaikki.org) | Additional definitions | CC-BY-SA-3.0 | `import:wiktionary` |
 | [Kaikki](https://kaikki.org) (zhwiktionary) | Chinese definitions | CC-BY-SA-3.0 | `import:kaikki` |
 | [CC-CEDICT](https://cc-cedict.org) | Chinese character forms for Sino-Japanese vocabulary | CC-BY-SA-4.0 | `import:cedict` |
 | ZH-JA Yomitan dictionaries (白水社/中日大辞典/小学館, user-provided) | Chinese definitions for Japanese vocabulary | Licensed (user-supplied) | `import:zhja` |
 | [KRDICT](https://krdict.korean.go.kr) (via [yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic)) | Korean translations | CC-BY-SA-2.0-KR | `import:krdict` |
+| [Kaikki](https://kaikki.org/kowiktionary/rawdata.html) (kowiktionary) | Conservative Korean fallback importer reflected in the current snapshot | CC-BY-SA-3.0 | `import:kowiktionary-ko` |
 | [Wadoku](https://github.com/WaDoku/WaDokuJT-Data) | German definitions | CC-BY-SA-3.0 | `import:wadoku` |
+| [Google Gemini](https://ai.google.dev/gemini-api/docs) via [`@google/genai`](https://www.npmjs.com/package/@google/genai) | Optional AI backfill for missing definitions | Commercial / API terms apply | `import:gemini` |
 | [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) | JLPT N5-N1 levels | Public Domain | `import:jlpt` |
-| [JPDB freq list](https://github.com/MarvNC/jpdb-freq-list) | Frequency ranks (~478k entries) | CC-BY-NC-SA-4.0 | `import:frequency` |
+| [JPDB freq list](https://github.com/MarvNC/jpdb-freq-list) | Frequency ranks (178,644 entries in the current JSON snapshot) | CC-BY-NC-SA-4.0 | `import:frequency` |
 
 ---
 
@@ -191,13 +198,14 @@ Returns `{"status": "ok"}` when the server is running.
 │   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
 │   │   IMPORT     │    │   BUILD      │    │   SERVE      │     │
 │   │              │    │              │    │              │     │
-│   │ JMdict JSON  │───▶│ data/*.json  │───▶│ dict.sqlite  │     │
-│   │ JMnedict     │    │              │    │              │     │
-│   │ Kaikki JSONL │    │ ~1GB+ JSON   │    │ ~682MB SQLite│     │
-│   │ Tatoeba TSV  │    │              │    │              │     │
-│   │ Wiktionary   │    │              │    │ ~1ms lookup  │     │
-│   │ Wadoku/JLPT  │    │              │    │              │     │
-│   └──────────────┘    └──────────────┘    └──────────────┘     │
+│   │ JMdict JSON  │───▶│ data/core.json    │──▶│ dict.sqlite │  │
+│   │ KRDICT JSON  │    │ data/lang/en.json │   │             │  │
+│   │ Kaikki JSONL │    │ data/lang/de.json │   │ ~167MiB     │  │
+│   │ Tatoeba TSV  │    │ data/lang/ko.json │   │             │  │
+│   │ Wiktionary   │    │ data/lang/zh-*    │   │ ~1ms lookup │  │
+│   │ Wadoku/JLPT  │    │                   │   │             │  │
+│   │ Gemini SDK*  │    │                   │   │             │  │
+│   └──────────────┘    │ ~186MiB total JSON │   └─────────────┘  │
 │         ▲                    ▲                   ▲              │
 │         │                    │                   │              │
 │    ┌────┴────┐          ┌────┴────┐        ┌────┴────┐         │
@@ -208,6 +216,71 @@ Returns `{"status": "ok"}` when the server is running.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+`*` Optional post-processing step for missing definitions only; not part of `rebuild:all`.
+
+### JSON Data Layout
+
+The intermediate JSON is split into two tiers to eliminate duplication (~186MiB total in the current snapshot vs much larger monolithic per-language files):
+
+```
+data/
+  core.json           ← language-agnostic: word, reading, POS, common, jlpt, frequency
+  lang/
+    en.json           ← English definitions + examples
+    de.json           ← German definitions + examples
+    ko.json           ← Korean definitions + examples
+    zh-cn.json        ← Chinese (Simplified) definitions + examples
+    zh-tw.json        ← Chinese (Traditional) definitions + examples
+  cache/              ← downloaded raw source data (gitignored)
+```
+
+**Git LFS:** `.gitattributes` tracks **`data/*.json` only** (paths one level under `data/`, e.g. `data/core.json`). Files in **`data/lang/`** are normal Git blobs unless you add a separate `git lfs track` rule.
+
+**`data/core.json`** — one entry per word, shared across all languages:
+```jsonc
+{
+  "entries": {
+    "食べる:たべる": {
+      "word": "食べる",
+      "reading": "たべる",
+      "partOfSpeech": ["ichidan verb", "transitive verb"],
+      "common": true,
+      "jlpt": 5,          // highest JLPT level (5=N5 easiest, 1=N1 hardest), or null
+      "frequency": 195    // JPDB rank (lower = more common), or null
+    }
+  }
+}
+```
+
+**`data/lang/*.json`** — definitions and examples per language:
+```jsonc
+{
+  "lang": "en",
+  "entries": {
+    "食べる:たべる": {
+      "definitions": ["to eat", "to live on (e.g. a salary)"],
+      "examples": [{ "ja": "毎朝食べます", "text": "I eat every morning", "source": "tatoeba" }],
+      "_defSources": {      // pipeline-internal: which source added each definition
+        "to eat": ["jmdict"],
+        "to live on (e.g. a salary)": ["jmdict"],
+        "to dine": ["ai"]
+      }
+    }
+  }
+}
+```
+
+The `_defSources` field enables selective `--mode refresh` (re-import one source without touching others). Consumers can safely ignore it.
+
+### Schema Compatibility (v2 + legacy)
+
+`build-db` auto-detects input layout:
+
+- **v2 preferred:** `data/core.json` + `data/lang/*.json`
+- **legacy fallback:** `data/{lang}.json` (v1 monolithic files)
+
+This allows incremental migration: existing legacy data can still build successfully, while new import flow writes v2 files.
+
 ### Why Two-Stage Pipeline?
 
 | Stage | Benefit |
@@ -215,11 +288,11 @@ Returns `{"status": "ok"}` when the server is running.
 | **Import** | Download once, cache raw data, convert to unified JSON format |
 | **Build** | Fast SQLite generation, supports incremental updates, debuggable |
 
-The intermediate JSON format allows:
-- **Multi-source merging** - Combine JMdict + Wiktionary + manual entries
-- **Language-specific builds** - Build only languages you need
-- **Diff support** - Preview changes with `--mode diff` before applying
-- **Git LFS storage** - Track dictionary data in version control
+The split JSON format allows:
+- **Multi-source merging** — combine JMdict + Wiktionary + manual entries per language
+- **Source-selective refresh** — re-import one source with `--mode refresh`
+- **Diff support** — preview changes with `--mode diff` before applying
+- **Git LFS storage** — optional for large JSON; see note under [JSON Data Layout](#json-data-layout) and `.gitattributes`
 
 ### Database Schema
 
@@ -229,18 +302,18 @@ CREATE TABLE words (
   id TEXT PRIMARY KEY,          -- "word:reading" format
   word TEXT NOT NULL,           -- Kanji form
   reading TEXT NOT NULL,        -- Hiragana
-  part_of_speech TEXT NOT NULL, -- JSON array
+  part_of_speech TEXT NOT NULL, -- JSON array of strings
   common INTEGER DEFAULT 0,     -- 1 = common word flag
-  jlpt TEXT,                    -- JSON array [5,4,3,2,1]
+  jlpt TEXT,                    -- JSON array, e.g. [5] for N5; null if unknown
   frequency INTEGER             -- JPDB rank (1 = most common, NULL if unknown)
 );
 
 -- Per-language translations
 CREATE TABLE translations (
   word_id TEXT NOT NULL,
-  lang TEXT NOT NULL,           -- "en", "de", etc.
-  definitions TEXT NOT NULL,    -- JSON array
-  sources TEXT NOT NULL,        -- ["jmdict", "wiktionary"]
+  lang TEXT NOT NULL,           -- "en", "de", "ko", "zh-cn", "zh-tw"
+  definitions TEXT NOT NULL,    -- JSON array of strings
+  sources TEXT NOT NULL,        -- JSON array of source names
   PRIMARY KEY (word_id, lang)
 );
 
@@ -251,9 +324,11 @@ CREATE TABLE examples (
   lang TEXT NOT NULL,
   japanese TEXT NOT NULL,
   translation TEXT NOT NULL,
-  source TEXT NOT NULL
+  source TEXT NOT NULL          -- e.g. "tatoeba"
 );
 ```
+
+The server runs `initSchema()` on startup so an empty SQLite file gets minimal tables; **`bun run build:db`** is what populates a database that fully matches this layout (including `frequency` on `words`).
 
 ---
 
@@ -277,38 +352,52 @@ yori-dict/
 │   └── core/             # Serialization, auth, SSE utilities
 ├── scripts/
 │   ├── import/
-│   │   ├── base.ts       # Shared types & merge logic
-│   │   ├── jmdict.ts     # JMdict importer (base vocabulary)
-│   │   ├── jmnedict.ts   # JMnedict importer (proper nouns/names)
-│   │   ├── kaikki.ts     # Chinese definitions (Kaikki/zhwiktionary)
-│   │   ├── krdict.ts     # Korean translations (KRDICT/NIKL)
-│   │   ├── jlpt.ts       # JLPT level importer
-│   │   ├── cedict.ts     # CC-CEDICT Chinese character enrichment
-│   │   ├── zhja.ts       # ZH-JA Yomitan reverse-map (Chinese definitions)
-│   │   ├── frequency.ts  # JPDB frequency rank importer
-│   │   ├── tatoeba.ts    # Example sentences
-│   │   ├── wadoku.ts     # German definitions
-│   │   └── wiktionary.ts # English definitions enrichment
-│   ├── build-db.ts       # JSON → SQLite compiler
-│   ├── pull-data.ts      # Git LFS materializer
-│   ├── verify-dict.ts    # Dictionary quality checker
-│   ├── cleanup-dict.ts   # Dictionary cleanup (dedup, fix artifacts)
-│   └── add.ts            # Manual entry CLI
+│   │   ├── base.ts           # Shared types & merge logic
+│   │   ├── jmdict.ts         # JMdict importer (base vocabulary)
+│   │   ├── jmdict-examples.ts
+│   │   ├── jitendex.ts
+│   │   ├── kaikki.ts         # Chinese (Kaikki/zhwiktionary)
+│   │   ├── kowiktionary-ko.ts
+│   │   ├── krdict.ts         # Korean (KRDICT/NIKL)
+│   │   ├── jlpt.ts
+│   │   ├── cedict.ts         # CC-CEDICT
+│   │   ├── zhja.ts           # ZH-JA Yomitan reverse-map
+│   │   ├── yomitan.ts        # Shared Yomitan helpers (imported by importers)
+│   │   ├── gemini.ts
+│   │   ├── frequency.ts      # JPDB ranks
+│   │   ├── tatoeba.ts
+│   │   ├── wadoku.ts
+│   │   └── wiktionary.ts
+│   ├── audit/
+│   │   └── kanji-vocab-gaps.ts
+│   ├── build-db.ts           # JSON → SQLite compiler
+│   ├── pull-data.ts          # Git LFS materializer
+│   ├── verify-dict.ts
+│   ├── cleanup-dict.ts       # Dedup / fix artifacts on a single JSON file
+│   ├── sync-zh-cn-from-tw.ts      # OpenCC merge zh-tw → zh-cn (`bun run sync:zh-cn-from-tw`)
+│   └── add.ts
 ├── tests/
-│   ├── api.test.ts            # API endpoint tests
-│   ├── conjugator.test.ts     # Conjugation engine tests
-│   ├── import-base.test.ts    # Import merge logic tests
-│   ├── import-kaikki.test.ts  # Kaikki parser tests
-│   └── build-db.test.ts       # DB build pipeline tests
+│   ├── api.test.ts
+│   ├── audit-kanji-vocab-gaps.test.ts
+│   ├── build-db.test.ts
+│   ├── conjugator.test.ts
+│   ├── import-base.test.ts
+│   ├── import-jitendex.test.ts
+│   ├── import-kaikki.test.ts
+│   ├── import-kowiktionary-ko.test.ts
+│   ├── import-yomitan.test.ts
+│   └── import-zhja.test.ts
 ├── data/
-│   ├── en.json           # English dictionary (Git LFS)
-│   ├── de.json           # German dictionary (Git LFS)
-│   ├── ko.json           # Korean dictionary (Git LFS)
-│   ├── zh-cn.json        # Chinese Simplified dictionary (Git LFS)
-│   ├── zh-tw.json        # Chinese Traditional dictionary (Git LFS)
+│   ├── core.json         # Language-agnostic word data (LFS if tracked; see .gitattributes)
+│   ├── lang/
+│   │   ├── en.json
+│   │   ├── de.json
+│   │   ├── ko.json
+│   │   ├── zh-cn.json
+│   │   └── zh-tw.json
 │   └── cache/            # Downloaded raw data (gitignored)
-├── openapi.yaml          # OpenAPI 3.0 spec (source of truth for SDK codegen)
-├── openapi-ts.config.ts  # SDK codegen config (@hey-api/openapi-ts)
+├── openapi.yaml
+├── openapi-ts.config.ts
 └── dict.sqlite           # Built database (gitignored)
 ```
 
@@ -319,26 +408,36 @@ yori-dict/
 | `bun run dev` | Start dev server with hot reload |
 | `bun run start` | Start production server |
 | `bun run test` | Run test suite |
-| `bun run rebuild:all` | Full rebuild: base imports + enrichment + build:db |
-| `bun run import:base` | Run all base importers (jmdict + kaikki, `--mode replace`) |
-| `bun run import:enrichment` | Run all enrichment importers (jlpt, tatoeba, wadoku, wiktionary) |
+| `bun run rebuild:all` | Full deterministic rebuild: base imports + enrichment + build:db |
+| `bun run verify:rebuild` | Rebuild in a temporary worktree and compare normalized JSON + SQLite outputs against the checked-in snapshot |
+| `bun run import:base` | Run all base importers (jmdict + kaikki + krdict, `--mode replace`) |
+| `bun run import:enrichment` | Run deterministic enrichment importers (jlpt, tatoeba, wadoku, wiktionary, jmdict-examples, jitendex, kowiktionary-ko, cedict, frequency, zhja) |
 | `bun run import:jmdict --lang en,de` | Import JMdict base dictionary |
-| `bun run import:jmnedict` | Import JMnedict proper names (~743k entries) |
+| `bun run import:jmdict-examples` | Enrich English with extra JMdict example pairs |
+| `bun run import:jitendex` | Enrich English with Jitendex glosses |
 | `bun run import:kaikki` | Import Chinese definitions from Kaikki (zhwiktionary) |
+| `bun run import:kowiktionary-ko` | Fill Korean gaps from kowiktionary fallback data |
 | `bun run import:krdict` | Import Korean translations from KRDICT (NIKL) |
+| `bun run import:gemini` | Optional Gemini SDK backfill for missing definitions |
+| `bun run sync:zh-cn-from-tw` | Merge zh-cn from zh-tw (OpenCC tw→cn); use `--apply` to write |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
 | `bun run import:cedict` | Import CC-CEDICT Chinese character forms (zh-cn, zh-tw) |
 | `bun run import:zhja` | Import ZH-JA Yomitan dicts (user-supplied ZIPs → zh-cn, zh-tw) |
-| `bun run import:frequency` | Import JPDB frequency ranks (~311k entries matched) |
+| `bun run import:frequency` | Import JPDB frequency ranks |
 | `bun run import:tatoeba` | Import example sentences (all languages) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
 | `bun run import:wiktionary` | Import Wiktionary definitions |
 | `bun run build:db` | Build SQLite from JSON files |
+| `bun run audit:kanji-vocab-gaps` | Report missing / thin kanji-bearing vocabulary by supported language |
 | `bun run verify:dict <path>` | Check dictionary for duplicates and artifacts |
 | `bun run cleanup:dict <path>` | Fix duplicates and artifacts (add `--apply` to write) |
 | `bun run data:pull` | Pull dictionary files from Git LFS |
 | `bun run add` | Add manual dictionary entries |
 | `bun run sdk:generate` | Regenerate `sdk/` from `openapi.yaml` |
+
+`bun run audit:kanji-vocab-gaps --limit 250` writes per-language JSON reports under `data/reports/kanji-vocab-gaps/` so you can prioritize high-frequency kanji-bearing vocabulary that is missing, thin, or only backed by a weak fallback source.
+
+`bun run verify:rebuild` creates a temporary Git worktree, copies `data/cache/`, reruns the full deterministic pipeline, then compares normalized JSON and SQLite outputs. The JSON comparison ignores order-only differences in `definitions`, `examples`, and `_defSources` so the check stays focused on real data drift.
 
 ### Environment Variables
 
@@ -346,6 +445,8 @@ yori-dict/
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `DATABASE_PATH` | `./dict.sqlite` | SQLite database path |
+| `GEMINI_API_KEY` | unset | Gemini API key for `import:gemini` |
+| `GOOGLE_API_KEY` | unset | Alternative env var accepted by `@google/genai` / `import:gemini` |
 
 ---
 
@@ -383,7 +484,7 @@ if (data) {
 }
 ```
 
-All request parameters and response shapes are fully typed from the OpenAPI spec. The `lang` parameter accepts `'en' | 'de' | 'ko' | 'zh-CN' | 'zh-TW'` (and lowercase aliases).
+All request parameters and response shapes are fully typed from the OpenAPI spec. The `lang` parameter accepts canonical values (`en`, `de`, `ko`, `zh-cn`, `zh-tw`) and the documented aliases (`zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant`).
 
 ### Regenerating
 
@@ -507,7 +608,17 @@ pip install sudachipy sudachidict-core
 <details>
 <summary><b>Build failed: "No language files found"</b></summary>
 
-You need to import data first:
+You need to import data first. The build script reads from `data/core.json` and `data/lang/*.json`:
+```bash
+bun run import:base   # builds core.json + all lang files
+bun run build:db
+```
+</details>
+
+<details>
+<summary><b>Build failed: "core.json not found"</b></summary>
+
+Run the base importers first — they create `data/core.json`:
 ```bash
 bun run import:jmdict --lang en
 bun run build:db
@@ -545,7 +656,7 @@ sqlite3 dict.sqlite "SELECT * FROM words WHERE word = '食べる'"
 
 If missing, re-import:
 ```bash
-bun run import:jmdict --lang en --mode replace
+bun run import:jmdict --lang en --mode replace  # writes data/core.json + data/lang/en.json
 bun run build:db
 ```
 </details>
@@ -553,11 +664,31 @@ bun run build:db
 <details>
 <summary><b>Import modes explained</b></summary>
 
-All import scripts support these modes via `--mode <mode>`:
-- `merge` (default): Add new entries/definitions, merge with existing
-- `diff`: Preview changes without writing files
-- `refresh`: Strip all data from a source and re-import it
-- `replace`: Full replace — remove stale keys, then write fresh (base importers only)
+Importers compare entries by key: `word:reading`.
+Use `--mode <mode>` to choose how incoming source data is applied.
+
+| Mode | What it does | Removes old data? | Writes files? |
+|---|---|---|---|
+| `merge` | Add new keys; merge incoming fields into existing keys | No (keeps unrelated existing keys/data) | Yes |
+| `diff` | Run the same comparison as `merge` and print stats only | No | No |
+| `refresh` | Remove data from the same source first, then import that source again | Yes (source-scoped) | Yes |
+| `replace` | Treat incoming data as full snapshot: prune keys not in source, overwrite keys in source | Yes (snapshot-scoped) | Yes |
+
+How to read this in practice:
+
+- `merge`: safest default for incremental updates.
+- `diff`: preview before applying (`added/updated/unchanged`).
+- `refresh`: best when one source changed or was imported incorrectly.
+- `replace`: full rebuild behavior for that importer's dataset.
+
+Important notes:
+
+- Not every importer supports every mode. Use the mode table below for exact support.
+- `replace` is intentionally used mainly by base importers; enrichment importers usually use `merge/diff/refresh`.
+- `refresh` behavior depends on importer type:
+  - Definition importers: strip only definitions/examples attributed to that source (via `_defSources` and example `source`), then re-merge.
+  - Core enrichment importers (`jlpt`, `frequency`): reset the specific core field, then re-apply from source.
+  - Example importer (`tatoeba`): remove existing `tatoeba` examples, then re-import examples.
 
 Example:
 ```bash
@@ -570,24 +701,33 @@ bun run import:jmdict --lang en --mode merge  # Apply
 
 ## Import Architecture
 
-Imports are split into two tiers:
+Imports are split into three stages:
 
-**Base importers** — create dictionary entries from scratch (must run first):
-- `bun run import:jmdict --lang en,de`  → data/en.json, data/de.json
-- `bun run import:kaikki`               → data/zh-cn.json, data/zh-tw.json
-- `bun run import:krdict`               → data/ko.json
-- `bun run import:jmnedict`             → merges proper names into all language files
+**Base importers** — create entries from scratch (must run first):
+- `bun run import:jmdict --lang en,de`  → `data/core.json` + `data/lang/en.json`, `data/lang/de.json`
+- `bun run import:kaikki`               → `data/lang/zh-cn.json`, `data/lang/zh-tw.json`
+- `bun run import:krdict`               → `data/lang/ko.json`
 
-> **Note:** `import:krdict` copies JLPT levels directly from JMdict entries, so `import:jlpt` is a no-op for `ko` — no need to run it separately.
+**Deterministic enrichment importers** — add data to existing entries (require base imports):
+- `bun run import:jlpt`       → `data/core.json` (JLPT levels, all languages share core)
+- `bun run import:frequency`  → `data/core.json` (JPDB frequency ranks)
+- `bun run import:tatoeba`    → all `data/lang/*.json` (example sentences)
+- `bun run import:wadoku`     → `data/lang/de.json` (German definitions)
+- `bun run import:wiktionary` → `data/lang/en.json` (English definitions)
+- `bun run import:jmdict-examples` → `data/lang/en.json` (extra English example pairs)
+- `bun run import:jitendex`   → `data/lang/en.json` (English gloss enrichment)
+- `bun run import:kowiktionary-ko` → `data/lang/ko.json` (fallback Korean coverage reflected in the current snapshot)
+- `bun run import:cedict`     → `data/lang/zh-cn.json`, `data/lang/zh-tw.json` (Chinese character forms)
+- `bun run import:zhja`       → `data/lang/zh-cn.json`, `data/lang/zh-tw.json` (user-supplied ZIPs)
 
-**Enrichment importers** — add data to existing entries (require base imports):
-- `bun run import:jlpt`       → adds JLPT levels to all languages
-- `bun run import:tatoeba`    → adds example sentences to all languages
-- `bun run import:wadoku`     → adds German definitions to de.json
-- `bun run import:wiktionary` → adds English definitions to en.json
-- `bun run import:cedict`     → adds Chinese character forms to zh-cn.json, zh-tw.json
-- `bun run import:zhja`      → adds Chinese definitions from ZH-JA Yomitan dicts (user-supplied)
-- `bun run import:frequency`  → adds JPDB frequency ranks to en.json (311k entries)
+**Optional AI backfill** — fills entries that still have missing definitions after deterministic imports:
+- `bun run import:gemini --langs de,ko,zh-cn,zh-tw` → writes `ai`-sourced definitions into `data/lang/*.json`
+
+> **Note:** `import:gemini` is intentionally not included in `import:enrichment` or `rebuild:all`. It is API-backed, rate-limited, cost-bearing, and non-deterministic. It uses the official `@google/genai` SDK and requires `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+
+> **Aligning KO / ZH with German coverage:** Use `import:gemini` with `--seed-lang en` (default) so missing keys match the English master list. Korean and Traditional Chinese need roughly **~98k** and **~94k** new definitions, respectively, to cover the same JMdict-backed keys as German (`de` has ~128k defined entries; `ko`/`zh-tw` currently ~32–40k). Run in batches (`--limit`) and prefer a cost-efficient model, e.g. `--model gemini-2.5-flash-lite`.
+
+> **zh-cn from zh-tw:** After expanding `zh-tw`, run `bun run sync:zh-cn-from-tw` (preview) then `bun run sync:zh-cn-from-tw --apply` to merge **Simplified** glosses from **Traditional** via OpenCC (`zh-tw-opencc` source tag), without a second Gemini pass for Chinese variants.
 
 > **Note:** `import:zhja` requires user-supplied ZIP files placed in `data/cache/` (licensed content, not auto-downloaded): `zhja-hakusuisha.zip`, `zhja-chuunichi.zip`, `zhja-shogakukan.zip`. The script is skipped automatically if no matching ZIPs are present.
 
@@ -596,22 +736,39 @@ Imports are split into two tiers:
 | Script | Default mode | Available modes |
 |---|---|---|
 | `import:jmdict` | `merge` | `merge`, `diff`, `replace`, `refresh` |
-| `import:jmnedict` | `merge` | `merge`, `diff`, `replace`, `refresh` |
 | `import:kaikki` | `merge` | `merge`, `diff`, `replace`, `refresh` |
 | `import:krdict` | `replace` | `merge`, `diff`, `replace`, `refresh` |
 | `import:jlpt` | `merge` | `merge`, `diff`, `refresh` |
 | `import:tatoeba` | `merge` | `merge`, `diff`, `refresh` |
 | `import:wadoku` | `merge` | `merge`, `diff`, `refresh` |
 | `import:wiktionary` | `merge` | `merge`, `diff`, `refresh` |
+| `import:jmdict-examples` | `merge` | `merge`, `diff`, `refresh` |
+| `import:jitendex` | `merge` | `merge`, `diff`, `refresh` |
+| `import:kowiktionary-ko` | `merge` | `merge`, `diff` |
 | `import:cedict` | `merge` | `merge`, `diff`, `refresh` |
 | `import:zhja` | `merge` | `merge`, `diff`, `refresh` |
 | `import:frequency` | `merge` | `merge`, `diff`, `refresh` |
+| `import:gemini` | n/a | no import modes; uses `--langs`, `--limit`, `--batch-size`, `--dry-run`, etc. |
+
+**Duplicate-definition conflict policy (where supported):**
+
+Many definition importers support:
+
+- `--dup-policy merge` (default): keep existing + append incoming
+- `--dup-policy skip`: keep existing, skip conflicting incoming definitions
+- `--dup-policy replace`: replace only conflicting existing definitions, keep unrelated ones
+- `--dup-policy ask`: interactive prompt with conflict samples, then choose `skip/replace/merge`
+
+Use `--dup-samples <n>` to control how many conflict examples are shown in `ask` mode.
 
 **Convenience scripts:**
 ```bash
 bun run import:base        # run all base importers (--mode replace)
-bun run import:enrichment  # run all enrichment importers
-bun run rebuild:all        # base + enrichment + build:db (full rebuild)
+bun run import:enrichment  # run deterministic enrichment importers only
+bun run rebuild:all        # base + deterministic enrichment + build:db
+bun run verify:rebuild     # rebuild in a temp worktree and compare outputs
+# optional afterwards:
+# GEMINI_API_KEY=... bun run import:gemini --langs de,ko,zh-cn,zh-tw
 ```
 
 ---
@@ -623,7 +780,7 @@ bun run rebuild:all        # base + enrichment + build:db (full rebuild)
 ## Acknowledgments
 
 - [JMdict/EDICT](https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project) - Original dictionary project
-- [jmdict-simplified](https://github.com/scriptin/jmdict-simplified) - Pre-processed JMdict/JMnedict JSON
+- [jmdict-simplified](https://github.com/scriptin/jmdict-simplified) - Pre-processed JMdict JSON
 - [yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) - JLPT vocabulary lists
 - [Tatoeba](https://tatoeba.org) / [ManyThings.org](https://manythings.org/anki/) / [Tatoeba raw exports](https://downloads.tatoeba.org/exports/per_language/) - Example sentences
 - [Wadoku](https://www.wadoku.de) - Japanese-German dictionary

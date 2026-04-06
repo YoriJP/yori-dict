@@ -1,10 +1,12 @@
 /**
- * Tatoeba Examples Importer - Adds example sentences to dictionary entries
+ * Tatoeba Examples Importer - Adds example sentences to lang/*.json
  *
  * Data sources:
  *   - English: https://www.manythings.org/anki/jpn-eng.zip
  *   - Korean/Chinese: https://downloads.tatoeba.org/exports/per_language/
  * License: CC-BY 2.0 FR
+ *
+ * Writes: data/lang/{lang}.json (examples field only)
  *
  * Usage:
  *   bun run import:tatoeba
@@ -18,41 +20,29 @@ import { existsSync, readdirSync, createReadStream, renameSync, unlinkSync } fro
 import { createInterface } from 'readline'
 import * as OpenCC from 'opencc-js'
 import {
-  type DictEntry,
-  type DictFile,
-  type Example,
-  loadDict,
-  saveDict,
+  type LangFile,
+  loadCore,
+  loadLang,
+  saveLang,
   downloadWithProgress,
 } from './base'
 
-// Lazy-initialized converter: Simplified Chinese → Traditional Chinese (Taiwan variant)
 let _s2twConverter: ((text: string) => string) | null = null
 function toTraditional(text: string): string {
-  if (!_s2twConverter) _s2twConverter = OpenCC.Converter({ from: 'cn', to: 'tw' })
-  return _s2twConverter(text)
+  if (!_s2twConverter) _s2twConverter = OpenCC.Converter({ from: 'cn', to: 'tw' }) as (s: string) => string
+  return _s2twConverter!(text)
 }
 
 // ============================================================================
-// Sudachi tokenizer — native subprocess, streaming mode
-//
-// Requires: pip install sudachipy sudachidict-core
-//
-// Sentences are streamed to sudachipy stdin line by line; output is read
-// line by line as it arrives (-m C = most granular split mode).
-// Output format per token (with -a flag):
-//   surface\tPOS\tnormalized_form\tdictionary_form\treading\t...
-// Sentences are separated by "EOS" lines.
+// Sudachi tokenizer
 // ============================================================================
 
 interface SudachiMorpheme {
   surface: string
-  dictionaryForm: string  // col 4 with -a flag
+  dictionaryForm: string
 }
 
-const SUDACHI_TIMEOUT_MS = 30_000  // 30s timeout waiting for next EOS
-
-// Cache result of sudachipy --version so we only check once per process.
+const SUDACHI_TIMEOUT_MS = 30_000
 let _sudachiChecked = false
 
 async function checkSudachi(): Promise<void> {
@@ -69,11 +59,6 @@ async function checkSudachi(): Promise<void> {
   _sudachiChecked = true
 }
 
-/**
- * Tokenize sentences using a single long-running sudachipy subprocess.
- * Sentences are written to stdin one by one; output is read line by line.
- * Returns a parallel array of morpheme arrays (one per sentence).
- */
 async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
   await checkSudachi()
 
@@ -84,10 +69,6 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
   })
 
   const result: SudachiMorpheme[][] = []
-
-  // Single persistent decoder with stream:true so multibyte characters
-  // (e.g. Japanese kanji) split across chunk boundaries are reassembled
-  // correctly rather than being replaced with U+FFFD.
   const decoder = new TextDecoder('utf-8', { fatal: false })
   const reader = proc.stdout.getReader()
   let buf = ''
@@ -100,24 +81,17 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
     )
 
     while (true) {
-      // Read chunks until we have a full line
       while (!buf.includes('\n')) {
-        const chunk = await Promise.race([
-          reader.read(),
-          timeoutPromise,
-        ])
+        const chunk = await Promise.race([reader.read(), timeoutPromise])
         if (chunk.done) {
-          // Flush any remaining bytes held by the streaming decoder
           buf += decoder.decode()
           break
         }
-        // stream:true keeps incomplete multibyte sequences buffered inside
-        // the decoder until the next chunk completes them
         buf += decoder.decode(chunk.value, { stream: true })
       }
 
       const nl = buf.indexOf('\n')
-      if (nl === -1) break  // EOF without EOS
+      if (nl === -1) break
 
       const line = buf.slice(0, nl)
       buf = buf.slice(nl + 1)
@@ -133,7 +107,6 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
     return morphemes
   }
 
-  // Stream sentences to stdin, collect one EOS group per sentence
   for (const sentence of sentences) {
     proc.stdin.write(sentence + '\n')
     result.push(await readNextEOS())
@@ -155,6 +128,8 @@ async function tokenizeAll(sentences: string[]): Promise<SudachiMorpheme[][]> {
 // ============================================================================
 
 const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const CACHE_DIR = './data/cache'
 const TATOEBA_BASE = 'https://downloads.tatoeba.org/exports/per_language'
 
@@ -216,7 +191,6 @@ interface TatoebaSentence {
 
 interface WordIndex {
   wordToKeys: Map<string, Set<string>>
-  entries: Record<string, DictEntry>
 }
 
 interface MatchResult {
@@ -232,17 +206,11 @@ interface ImportStats {
 }
 
 // ============================================================================
-// Download and cache helpers
+// Download helpers
 // ============================================================================
 
-async function ensureDownloaded(url: string, archivePath: string): Promise<void> {
-  await downloadWithProgress(url, archivePath)
-}
-
 async function unzipIfNeeded(zipPath: string, textPath: string): Promise<void> {
-  if (existsSync(textPath)) {
-    return
-  }
+  if (existsSync(textPath)) return
 
   const tmpPath = textPath + '.tmp'
   try {
@@ -252,9 +220,7 @@ async function unzipIfNeeded(zipPath: string, textPath: string): Promise<void> {
     })
     const stderrText = await new Response(proc.stderr).text()
     const exitCode = await proc.exited
-    if (exitCode !== 0) {
-      throw new Error(`Failed to unzip ${zipPath}: ${stderrText}`)
-    }
+    if (exitCode !== 0) throw new Error(`Failed to unzip ${zipPath}: ${stderrText}`)
     renameSync(tmpPath, textPath)
   } catch (err) {
     try { unlinkSync(tmpPath) } catch {}
@@ -263,9 +229,7 @@ async function unzipIfNeeded(zipPath: string, textPath: string): Promise<void> {
 }
 
 async function bunzip2IfNeeded(bz2Path: string, textPath: string): Promise<void> {
-  if (existsSync(textPath)) {
-    return
-  }
+  if (existsSync(textPath)) return
 
   const tmpPath = textPath + '.tmp'
   console.log(`  Decompressing: ${bz2Path}`)
@@ -276,9 +240,7 @@ async function bunzip2IfNeeded(bz2Path: string, textPath: string): Promise<void>
     })
     const stderrText = await new Response(proc.stderr).text()
     const exitCode = await proc.exited
-    if (exitCode !== 0) {
-      throw new Error(`Failed to decompress ${bz2Path}: ${stderrText}`)
-    }
+    if (exitCode !== 0) throw new Error(`Failed to decompress ${bz2Path}: ${stderrText}`)
     renameSync(tmpPath, textPath)
   } catch (err) {
     try { unlinkSync(tmpPath) } catch {}
@@ -300,7 +262,6 @@ function parseManyThingsFile(text: string): TatoebaSentence[] {
 
   for (const line of lines) {
     if (!line.trim()) continue
-
     const parts = line.split('\t')
     if (parts.length < 2) continue
 
@@ -308,20 +269,14 @@ function parseManyThingsFile(text: string): TatoebaSentence[] {
     let translation: string
 
     if (isJapanese(parts[0])) {
-      japanese = parts[0]
-      translation = parts[1]
+      japanese = parts[0]; translation = parts[1]
     } else if (isJapanese(parts[1])) {
-      japanese = parts[1]
-      translation = parts[0]
+      japanese = parts[1]; translation = parts[0]
     } else {
       continue
     }
 
-    sentences.push({
-      japanese,
-      translation,
-      attribution: parts[2] || 'tatoeba',
-    })
+    sentences.push({ japanese, translation, attribution: parts[2] || 'tatoeba' })
   }
 
   return sentences
@@ -329,10 +284,7 @@ function parseManyThingsFile(text: string): TatoebaSentence[] {
 
 async function* streamTsv(path: string): AsyncGenerator<string[]> {
   const stream = createReadStream(path, { encoding: 'utf-8' })
-  const rl = createInterface({
-    input: stream,
-    crlfDelay: Infinity,
-  })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
 
   for await (const line of rl) {
     if (!line.trim()) continue
@@ -366,11 +318,8 @@ async function loadSentenceMap(path: string, targetIds: Set<string>): Promise<Ma
     if (parts.length < 2) continue
     const id = parts[0].trim()
     if (!targetIds.has(id)) continue
-
-    // Per-language files can vary by export profile; sentence text is always the last column.
     const text = parts[parts.length - 1].trim()
     if (!text) continue
-
     sentenceMap.set(id, text)
   }
 
@@ -403,7 +352,6 @@ async function buildSentencePairsFromRaw(
 
   for await (const parts of streamTsv(linksPath)) {
     if (parts.length < 2) continue
-
     const japaneseId = parts[0].trim()
     const translationId = parts[1].trim()
     const japanese = japaneseMap.get(japaneseId)
@@ -431,7 +379,7 @@ async function downloadManyThings(config: ManyThingsConfig): Promise<TatoebaSent
   const zipPath = `${CACHE_DIR}/tatoeba-${config.code}.zip`
   const textPath = `${CACHE_DIR}/tatoeba-${config.code}.txt`
 
-  await ensureDownloaded(config.url, zipPath)
+  await downloadWithProgress(config.url, zipPath)
   await unzipIfNeeded(zipPath, textPath)
 
   const text = await Bun.file(textPath).text()
@@ -452,20 +400,15 @@ async function downloadRawPair(config: RawPairConfig): Promise<TatoebaSentence[]
   const jpnSentencesUrl = `${TATOEBA_BASE}/jpn/jpn_sentences.tsv.bz2`
   const targetSentencesUrl = `${TATOEBA_BASE}/${config.targetCode}/${config.targetCode}_sentences.tsv.bz2`
 
-  await ensureDownloaded(linksUrl, linksBz2)
-  await ensureDownloaded(jpnSentencesUrl, jpnSentencesBz2)
-  await ensureDownloaded(targetSentencesUrl, targetSentencesBz2)
+  await downloadWithProgress(linksUrl, linksBz2)
+  await downloadWithProgress(jpnSentencesUrl, jpnSentencesBz2)
+  await downloadWithProgress(targetSentencesUrl, targetSentencesBz2)
 
   await bunzip2IfNeeded(linksBz2, linksTsv)
   await bunzip2IfNeeded(jpnSentencesBz2, jpnSentencesTsv)
   await bunzip2IfNeeded(targetSentencesBz2, targetSentencesTsv)
 
-  return buildSentencePairsFromRaw(
-    linksTsv,
-    jpnSentencesTsv,
-    targetSentencesTsv,
-    config.code
-  )
+  return buildSentencePairsFromRaw(linksTsv, jpnSentencesTsv, targetSentencesTsv, config.code)
 }
 
 async function downloadTatoeba(lang: string): Promise<TatoebaSentence[]> {
@@ -475,13 +418,10 @@ async function downloadTatoeba(lang: string): Promise<TatoebaSentence[]> {
     return []
   }
 
-  if (config.kind === 'manythings') {
-    return downloadManyThings(config)
-  }
+  if (config.kind === 'manythings') return downloadManyThings(config)
 
   const pairs = await downloadRawPair(config)
 
-  // zh-tw shares the cmn (Simplified Chinese) corpus — convert translations to Traditional
   if (lang === 'zh-tw') {
     console.log('  Converting Simplified Chinese → Traditional Chinese (Taiwan)...')
     const converted = pairs.map((p) => ({ ...p, translation: toTraditional(p.translation) }))
@@ -493,36 +433,35 @@ async function downloadTatoeba(lang: string): Promise<TatoebaSentence[]> {
 }
 
 // ============================================================================
-// Matching logic
+// Matching logic — uses core.json for word index
 // ============================================================================
 
-function buildWordIndex(dict: DictFile): WordIndex {
+async function buildWordIndex(): Promise<WordIndex> {
   const wordToKeys = new Map<string, Set<string>>()
 
-  for (const [key, entry] of Object.entries(dict.entries)) {
-    // Index by word (kanji) form only — readings are not indexed to avoid false
-    // positives from kana substrings that appear inside unrelated words.
+  if (!existsSync(CORE_PATH)) {
+    throw new Error('core.json not found — run import:jmdict first')
+  }
+
+  const core = await loadCore(CORE_PATH)
+  for (const [key, entry] of Object.entries(core.entries)) {
     const wordKeys = wordToKeys.get(entry.word) || new Set()
     wordKeys.add(key)
     wordToKeys.set(entry.word, wordKeys)
   }
 
-  return {
-    wordToKeys,
-    entries: dict.entries,
-  }
+  return { wordToKeys }
 }
 
 function findMatchingEntries(
   sentence: TatoebaSentence,
   morphemes: SudachiMorpheme[],
   index: WordIndex,
+  langEntries: Record<string, import('./base').LangEntry>
 ): MatchResult[] {
   const results: MatchResult[] = []
   const seenKeys = new Set<string>()
 
-  // Try both surface form and dictionary form so inflected forms like
-  // 食べた (surface) match dictionary entry 食べる (dictionaryForm).
   const candidates = new Set<string>()
   for (const m of morphemes) {
     candidates.add(m.surface)
@@ -535,6 +474,8 @@ function findMatchingEntries(
 
     for (const key of keys) {
       if (seenKeys.has(key)) continue
+      // Only match if we have a lang entry for this key
+      if (!langEntries[key]) continue
       seenKeys.add(key)
       results.push({ key, sentence })
     }
@@ -548,8 +489,9 @@ function findMatchingEntries(
 // ============================================================================
 
 async function importExamples(
-  dict: DictFile,
+  lang: LangFile,
   sentences: TatoebaSentence[],
+  wordIndex: WordIndex,
   maxExamples: number,
   mode: ImportMode
 ): Promise<ImportStats> {
@@ -560,18 +502,14 @@ async function importExamples(
     examplesAdded: 0,
   }
 
-  console.log('  Building word index...')
-  const index = buildWordIndex(dict)
-  console.log(`  Indexed ${index.wordToKeys.size.toLocaleString()} unique words`)
+  const exampleCounts = new Map<string, number>()
+  for (const [key, entry] of Object.entries(lang.entries)) {
+    exampleCounts.set(key, entry.examples.length)
+  }
 
   console.log(`  Tokenizing ${sentences.length.toLocaleString()} sentences with sudachi...`)
   const allMorphemes = await tokenizeAll(sentences.map((s) => s.japanese))
   console.log('  Tokenization complete.')
-
-  const exampleCounts = new Map<string, number>()
-  for (const [key, entry] of Object.entries(dict.entries)) {
-    exampleCounts.set(key, entry.examples.length)
-  }
 
   const updatedEntries = new Set<string>()
 
@@ -581,27 +519,27 @@ async function importExamples(
     const morphemes = allMorphemes[i] ?? []
     stats.sentencesProcessed++
 
-    const matches = findMatchingEntries(sentence, morphemes, index)
+    const matches = findMatchingEntries(sentence, morphemes, wordIndex, lang.entries)
     stats.matchesFound += matches.length
 
     for (const match of matches) {
       const currentCount = exampleCounts.get(match.key) || 0
       if (currentCount >= maxExamples) continue
 
-      const entry = dict.entries[match.key]
+      const entry = lang.entries[match.key]
+      if (!entry) continue
+
       const exists = entry.examples.some(
         (ex) => ex.ja === match.sentence.japanese && ex.text === match.sentence.translation
       )
       if (exists) continue
 
-      const newExample: Example = {
-        ja: match.sentence.japanese,
-        text: match.sentence.translation,
-        sources: ['tatoeba'],
-      }
-
       if (mode !== 'diff') {
-        entry.examples.push(newExample)
+        entry.examples.push({
+          ja: match.sentence.japanese,
+          text: match.sentence.translation,
+          source: 'tatoeba',
+        })
       }
 
       exampleCounts.set(match.key, currentCount + 1)
@@ -621,12 +559,17 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
   console.log(`Mode: ${mode}`)
   console.log(`Max examples per word: ${maxExamples}`)
 
+  // Build word index from core.json (shared across all langs)
+  console.log('\nBuilding word index from core.json...')
+  const wordIndex = await buildWordIndex()
+  console.log(`  Indexed ${wordIndex.wordToKeys.size.toLocaleString()} unique words`)
+
   for (const lang of langs) {
     console.log(`\n=== Processing ${lang} ===`)
 
-    const dictPath = `${DATA_DIR}/${lang}.json`
-    if (!existsSync(dictPath)) {
-      console.log(`  Dictionary file not found: ${dictPath}`)
+    const langPath = `${LANG_DIR}/${lang}.json`
+    if (!existsSync(langPath)) {
+      console.log(`  Lang file not found: ${langPath}`)
       console.log('  Skipping...')
       continue
     }
@@ -639,24 +582,29 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
     }
     console.log(`  Loaded ${sentences.length.toLocaleString()} sentence pairs`)
 
-    console.log('\nLoading dictionary...')
-    const dict = await loadDict(dictPath, lang)
-    console.log(`  Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
+    console.log('\nLoading lang file...')
+    const langFile = await loadLang(langPath, lang)
+    console.log(`  Entries: ${Object.keys(langFile.entries).length.toLocaleString()}`)
 
     if (mode === 'refresh') {
-      // Strip all existing tatoeba examples before re-importing
       console.log('\nStripping existing tatoeba examples...')
       let stripped = 0
-      for (const entry of Object.values(dict.entries)) {
+      for (const entry of Object.values(langFile.entries)) {
         const before = entry.examples.length
-        entry.examples = entry.examples.filter((e) => !e.sources.includes('tatoeba'))
+        entry.examples = entry.examples.filter((e) => e.source !== 'tatoeba')
         stripped += before - entry.examples.length
       }
       console.log(`  Stripped ${stripped.toLocaleString()} tatoeba examples`)
     }
 
     console.log('\nImporting examples...')
-    const stats = await importExamples(dict, sentences, maxExamples, mode === 'refresh' ? 'merge' : mode)
+    const stats = await importExamples(
+      langFile,
+      sentences,
+      wordIndex,
+      maxExamples,
+      mode === 'refresh' ? 'merge' : mode
+    )
 
     console.log('\nResults:')
     console.log(`  Sentences processed: ${stats.sentencesProcessed.toLocaleString()}`)
@@ -665,11 +613,11 @@ async function importTatoeba(langs: string[], mode: ImportMode, maxExamples: num
     console.log(`  Entries updated: ${stats.entriesUpdated.toLocaleString()}`)
 
     if (mode === 'refresh') {
-      await saveDict(dictPath, dict)
-      console.log(`\nSaved to: ${dictPath}`)
+      await saveLang(langPath, langFile)
+      console.log(`\nSaved to: ${langPath}`)
     } else if (mode !== 'diff' && stats.examplesAdded > 0) {
-      await saveDict(dictPath, dict)
-      console.log(`\nSaved to: ${dictPath}`)
+      await saveLang(langPath, langFile)
+      console.log(`\nSaved to: ${langPath}`)
     } else if (mode === 'diff') {
       console.log('\n(Diff mode - no changes made)')
     }
@@ -684,7 +632,7 @@ function printHelp(): void {
   console.log(`
 Tatoeba Examples Importer
 
-Adds example sentences from Tatoeba to dictionary entries.
+Adds example sentences from Tatoeba to lang/*.json entries.
 Data sources:
   - en: manythings.org (jpn-eng)
   - de: Tatoeba raw exports (jpn-deu links + sentence tables)
@@ -714,21 +662,18 @@ Examples:
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
 
-  // Handle --help before any filesystem access
   if (args.includes('--help') || args.includes('-h')) {
     printHelp()
     return
   }
 
-  if (!existsSync(DATA_DIR)) {
-    console.error(`Data directory not found: ${DATA_DIR}`)
-    console.error('This is an enrichment importer — run base importers first:')
-    console.error('  bun run import:jmdict --lang en')
-    console.error('  (or: bun run rebuild:all for a full rebuild)')
+  if (!existsSync(LANG_DIR)) {
+    console.error(`Lang directory not found: ${LANG_DIR}`)
+    console.error('This is an enrichment importer — run base importers first.')
     process.exit(1)
   }
 
-  const availableLangs = readdirSync(DATA_DIR)
+  const availableLangs = readdirSync(LANG_DIR)
     .filter((f) => f.endsWith('.json') && !f.includes('/'))
     .map((f) => f.replace('.json', ''))
     .filter((lang) => LANG_CONFIG[lang])
@@ -749,7 +694,6 @@ async function main(): Promise<void> {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)
-        console.error('Supported modes: merge, diff, refresh')
         process.exit(1)
       }
       i++
@@ -765,7 +709,6 @@ async function main(): Promise<void> {
 
   if (langs.length === 0) {
     console.error('No languages with Tatoeba data available.')
-    console.error('Supported: en, ko, zh-cn, zh-tw')
     process.exit(1)
   }
 

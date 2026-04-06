@@ -7,7 +7,7 @@ info:
     Supports lookup by kanji or reading with per-language translations.
 
     **Deduplication:** `definitions` are deduplicated across sources (JMdict, Kaikki, Wiktionary, Wadoku).
-    `examples` are also deduplicated — each unique `japanese` sentence appears at most once.
+    `examples` are deduplicated by `(japanese, translation)` pair.
   license:
     name: CC-BY-SA-4.0
 servers:
@@ -85,7 +85,7 @@ paths:
           description: |
             Translation language code. Default is `en`.
             Canonical values: `en`, `de`, `ko`, `zh-cn`, `zh-tw`.
-            Accepted aliases: `zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant`.
+            Accepted aliases (case-insensitive): `zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant`.
           schema:
             type: string
             default: en
@@ -122,6 +122,7 @@ paths:
                     definitions:
                       - to eat
                       - to live on (e.g. a salary)
+                    frequency: 195
                     conjugations:
                       dictionary: 食べる
                       polite: たべます
@@ -218,6 +219,7 @@ components:
           $ref: '#/components/schemas/Conjugations'
         examples:
           type: array
+          description: Example sentences for this word in the requested language. Always present (may be empty).
           items:
             $ref: '#/components/schemas/ExampleSentence'
     Conjugations:

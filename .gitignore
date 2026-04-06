@@ -9,6 +9,7 @@ dict.sqlite
 # Downloaded source data (re-fetchable via import scripts)
 data/cache/
 data/raw/
+data/reports/
 
 # Build output
 dist/

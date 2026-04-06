@@ -5,17 +5,15 @@
  *   - https://kaikki.org/zhwiktionary/raw-wiktextract-data.jsonl.gz
  * License: CC-BY-SA 3.0 (Wiktionary) / MIT (wiktextract)
  *
+ * Writes:
+ *   - data/lang/zh-cn.json
+ *   - data/lang/zh-tw.json (bootstrapped from zh-cn via OpenCC)
+ *
  * Usage:
  *   bun run import:kaikki
  *   bun run import:kaikki --lang zh-cn
  *   bun run import:kaikki --mode diff
  *   bun run import:kaikki --file=zh-cn=/path/to/raw-zhwiktionary.jsonl
- *
- * Key normalization:
- *   Kaikki source data often uses truncated or variant readings (e.g. "行く:い"
- *   instead of "行く:いく"). After collecting source entries, keys are
- *   automatically normalized against en.json so that zh-cn/zh-tw translations
- *   are always keyed identically to JMdict entries.
  */
 
 import { mkdir } from 'fs/promises'
@@ -25,18 +23,20 @@ import { createGunzip } from 'zlib'
 import { pipeline } from 'stream/promises'
 import * as OpenCC from 'opencc-js'
 import {
-  type DictEntry,
-  type Definition,
+  type DuplicateConflictPolicyInput,
   type ImportMode,
+  type CoreEntry,
   makeKey,
-  loadDict,
-  saveDict,
-  mergeDefinitions,
-  mergeDictEntries,
-  refreshDictSource,
+  loadCore,
+  loadLang,
+  saveLang,
+  createEmptyLang,
+  mergeLangEntries,
+  refreshLangSource,
+  analyzeLangDefinitionConflicts,
+  resolveDuplicateConflictPolicy,
   printStats,
   downloadWithProgress,
-  mergeArrays,
 } from './base'
 
 // ============================================================================
@@ -44,6 +44,8 @@ import {
 // ============================================================================
 
 const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const CACHE_DIR = './data/cache'
 
 type ImportLang = 'zh-cn' | 'zh-tw'
@@ -57,25 +59,30 @@ const SOURCE_CONFIG: Record<KaikkiSourceLang, { url: string; cacheName: string }
 }
 
 const INCLUDED_POS = new Set([
-  'noun',
-  'verb',
-  'adj',
-  'adv',
-  'intj',
-  'pron',
-  'conj',
-  'particle',
-  'counter',
-  'prefix',
-  'suffix',
-  'affix',
-  'phrase',
-  'proverb',
-  'num',
+  'noun', 'verb', 'adj', 'adv', 'intj', 'pron', 'conj',
+  'particle', 'counter', 'prefix', 'suffix', 'affix', 'phrase', 'proverb', 'num',
 ])
 
 const SKIP_SENSE_TAGS = new Set(['alt-of', 'form-of', 'romanization', 'Rōmaji'])
 const DEFAULT_MAX_DEFINITIONS = 8
+const META_DEFINITION_PATTERNS = [
+  /的[舊旧]字體形式$/,
+  /的[舊旧]字体形式$/,
+  /的異體字$/,
+  /的异体字$/,
+  /的繁體字$/,
+  /的繁体字$/,
+  /的簡體字$/,
+  /的简体字$/,
+  /的古字$/,
+  /的俗字$/,
+  /的別字$/,
+  /的别字$/,
+  /的另一種寫法$/,
+  /的另一种写法$/,
+  /的另一寫法$/,
+  /的另一写法$/,
+]
 
 // ============================================================================
 // Types
@@ -122,20 +129,11 @@ export function extractReading(entry: WiktEntry): string | null {
     for (const form of entry.forms) {
       if (form.ruby && form.ruby.length > 0) {
         const reading = form.ruby.map(([_, kana]) => kana).join('')
-        if (reading && /[\u3040-\u309F]/.test(reading)) {
-          return reading
-        }
+        if (reading && /[\u3040-\u309F]/.test(reading)) return reading
       }
-
       if (form.tags?.includes('romanization')) continue
-
-      if (form.form && /^[\u3040-\u309F]+$/.test(form.form)) {
-        return form.form
-      }
-
-      if (form.form && /^[\u30A0-\u30FF]+$/.test(form.form)) {
-        return katakanaToHiragana(form.form)
-      }
+      if (form.form && /^[\u3040-\u309F]+$/.test(form.form)) return form.form
+      if (form.form && /^[\u30A0-\u30FF]+$/.test(form.form)) return katakanaToHiragana(form.form)
     }
   }
 
@@ -147,13 +145,8 @@ export function extractReading(entry: WiktEntry): string | null {
     }
   }
 
-  if (/^[\u3040-\u309F]+$/.test(entry.word)) {
-    return entry.word
-  }
-
-  if (/^[\u30A0-\u30FF]+$/.test(entry.word)) {
-    return katakanaToHiragana(entry.word)
-  }
+  if (/^[\u3040-\u309F]+$/.test(entry.word)) return entry.word
+  if (/^[\u30A0-\u30FF]+$/.test(entry.word)) return katakanaToHiragana(entry.word)
 
   return null
 }
@@ -171,6 +164,7 @@ export function extractDefinitions(entry: WiktEntry): string[] {
     for (const gloss of glosses) {
       const cleaned = gloss.replace(/\s+/g, ' ').trim()
       if (!cleaned) continue
+      if (isFilteredKaikkiDefinition(cleaned)) continue
 
       const normalized = cleaned.toLowerCase()
       if (seen.has(normalized)) continue
@@ -181,6 +175,13 @@ export function extractDefinitions(entry: WiktEntry): string[] {
   }
 
   return definitions
+}
+
+export function isFilteredKaikkiDefinition(definition: string): boolean {
+  const cleaned = definition.replace(/\s+/g, ' ').trim()
+  if (!cleaned) return true
+
+  return META_DEFINITION_PATTERNS.some((pattern) => pattern.test(cleaned))
 }
 
 export function mapPos(pos: string): string {
@@ -214,20 +215,12 @@ export function parseEntry(entry: WiktEntry): ParsedWiktEntry | null {
   const definitions = extractDefinitions(entry)
   if (definitions.length === 0) return null
 
-  return {
-    word: entry.word,
-    reading,
-    pos: mapPos(entry.pos),
-    definitions,
-  }
+  return { word: entry.word, reading, pos: mapPos(entry.pos), definitions }
 }
 
 async function* streamJsonLines(filePath: string): AsyncGenerator<WiktEntry> {
   const fileStream = createReadStream(filePath, { encoding: 'utf-8' })
-  const rl = createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  })
+  const rl = createInterface({ input: fileStream, crlfDelay: Infinity })
 
   for await (const line of rl) {
     if (!line.trim()) continue
@@ -240,12 +233,8 @@ async function* streamJsonLines(filePath: string): AsyncGenerator<WiktEntry> {
 }
 
 // ============================================================================
-// Source file resolution (download/cache/local override)
+// Source file resolution
 // ============================================================================
-
-async function downloadIfNeeded(url: string, path: string): Promise<void> {
-  await downloadWithProgress(url, path)
-}
 
 async function gunzipIfNeeded(gzipPath: string, jsonlPath: string): Promise<void> {
   if (existsSync(jsonlPath)) {
@@ -256,11 +245,7 @@ async function gunzipIfNeeded(gzipPath: string, jsonlPath: string): Promise<void
   const tmpPath = jsonlPath + '.tmp'
   console.log('  Decompressing archive...')
   try {
-    await pipeline(
-      createReadStream(gzipPath),
-      createGunzip(),
-      createWriteStream(tmpPath)
-    )
+    await pipeline(createReadStream(gzipPath), createGunzip(), createWriteStream(tmpPath))
     renameSync(tmpPath, jsonlPath)
   } catch (err) {
     try { unlinkSync(tmpPath) } catch {}
@@ -269,15 +254,10 @@ async function gunzipIfNeeded(gzipPath: string, jsonlPath: string): Promise<void
   console.log(`  Wrote JSONL: ${jsonlPath}`)
 }
 
-async function resolveSourcePath(
-  lang: KaikkiSourceLang,
-  fileOverride?: string
-): Promise<string> {
+async function resolveSourcePath(lang: KaikkiSourceLang, fileOverride?: string): Promise<string> {
   if (fileOverride) {
-    if (!existsSync(fileOverride)) {
-      throw new Error(`Override file not found for ${lang}: ${fileOverride}`)
-    }
-    console.log(`  Using override file for ${lang}: ${fileOverride}`)
+    if (!existsSync(fileOverride)) throw new Error(`Override file not found: ${fileOverride}`)
+    console.log(`  Using override file: ${fileOverride}`)
     return fileOverride
   }
 
@@ -286,76 +266,121 @@ async function resolveSourcePath(
   const gzipPath = `${CACHE_DIR}/${source.cacheName}`
   const jsonlPath = gzipPath.replace(/\.gz$/, '')
 
-  await downloadIfNeeded(source.url, gzipPath)
+  await downloadWithProgress(source.url, gzipPath)
   await gunzipIfNeeded(gzipPath, jsonlPath)
 
   return jsonlPath
 }
 
 // ============================================================================
-// Key normalization against en.json
+// Key normalization against core.json
 // ============================================================================
 
-/**
- * Build a word → canonical keys index from en.json (JMdict).
- * Used to normalize source keys that use variant/truncated readings.
- */
-async function buildEnIndex(): Promise<{ enKeys: Set<string>; enByWord: Map<string, string[]> }> {
-  const enPath = `${DATA_DIR}/en.json`
-  if (!existsSync(enPath)) {
-    return { enKeys: new Set(), enByWord: new Map() }
-  }
-
-  const en = await loadDict(enPath, 'en')
-  const enKeys = new Set(Object.keys(en.entries))
-  const enByWord = new Map<string, string[]>()
-
-  for (const key of enKeys) {
-    const word = key.split(':')[0]
-    const existing = enByWord.get(word) ?? []
-    existing.push(key)
-    enByWord.set(word, existing)
-  }
-
-  return { enKeys, enByWord }
+export interface CoreIndex {
+  coreKeys: Set<string>
+  coreEntries: Record<string, CoreEntry>
+  coreByWord: Map<string, string[]>
+  coreByReading: Map<string, string[]>
 }
 
-/**
- * Normalize source entry keys to match JMdict canonical keys from en.json.
- *
- * For each source key not present in en.json: if the word part (before ":")
- * matches exactly one en.json key, re-key the entry to the canonical form,
- * merging definitions if the canonical key already exists. Ambiguous matches
- * (word has multiple readings in en.json) are left as-is.
- */
-function normalizeSourceKeys(
-  sourceEntries: Record<string, DictEntry>,
-  enKeys: Set<string>,
-  enByWord: Map<string, string[]>
+export async function buildCoreIndex(): Promise<CoreIndex> {
+  if (!existsSync(CORE_PATH)) {
+    return {
+      coreKeys: new Set(),
+      coreEntries: {},
+      coreByWord: new Map(),
+      coreByReading: new Map(),
+    }
+  }
+
+  const core = await loadCore(CORE_PATH)
+  const coreKeys = new Set(Object.keys(core.entries))
+  const coreByWord = new Map<string, string[]>()
+  const coreByReading = new Map<string, string[]>()
+
+  for (const key of coreKeys) {
+    const [word, reading] = key.split(':')
+    const existing = coreByWord.get(word) ?? []
+    existing.push(key)
+    coreByWord.set(word, existing)
+
+    const readingExisting = coreByReading.get(reading) ?? []
+    readingExisting.push(key)
+    coreByReading.set(reading, readingExisting)
+  }
+
+  return { coreKeys, coreEntries: core.entries, coreByWord, coreByReading }
+}
+
+function chooseBestCandidate(candidates: string[], coreEntries: Record<string, CoreEntry>): string | null {
+  if (candidates.length === 0) return null
+  if (candidates.length === 1) return candidates[0]
+
+  const commonCandidates = candidates.filter((key) => coreEntries[key]?.common)
+  if (commonCandidates.length === 1) return commonCandidates[0]
+  if (commonCandidates.length > 1) candidates = commonCandidates
+
+  const ranked = candidates
+    .map((key) => ({ key, frequency: coreEntries[key]?.frequency ?? Number.MAX_SAFE_INTEGER }))
+    .sort((a, b) => a.frequency - b.frequency)
+
+  if (ranked.length === 1) return ranked[0].key
+  if (ranked[0].frequency < ranked[1].frequency) return ranked[0].key
+  return null
+}
+
+export function resolveCanonicalKey(word: string, reading: string, index: CoreIndex): string | null {
+  const exact = makeKey(word, reading)
+  if (index.coreKeys.has(exact)) return exact
+
+  const wordCandidates = index.coreByWord.get(word) ?? []
+  if (wordCandidates.length === 1) return wordCandidates[0]
+
+  const readingMatches = wordCandidates.filter((key) => key.split(':')[1] === reading)
+  if (readingMatches.length === 1) return readingMatches[0]
+  if (readingMatches.length > 1) {
+    const bestReadingMatch = chooseBestCandidate(readingMatches, index.coreEntries)
+    if (bestReadingMatch) return bestReadingMatch
+  }
+
+  const bestWordMatch = chooseBestCandidate(wordCandidates, index.coreEntries)
+  if (bestWordMatch) return bestWordMatch
+
+  // As a last resort, allow reading-only matches when there is exactly one candidate.
+  const readingCandidates = index.coreByReading.get(reading) ?? []
+  if (readingCandidates.length === 1) return readingCandidates[0]
+
+  return null
+}
+
+export function normalizeSourceKeys(
+  sourceEntries: Record<string, { definitions: string[] }>,
+  index: CoreIndex
 ): { rekeyed: number; merged: number; ambiguous: number } {
   let rekeyed = 0
   let merged = 0
   let ambiguous = 0
 
-  const toProcess = Object.keys(sourceEntries).filter((k) => !enKeys.has(k))
+  const toProcess = Object.keys(sourceEntries).filter((k) => !index.coreKeys.has(k))
 
   for (const srcKey of toProcess) {
-    const word = srcKey.split(':')[0]
-    const candidates = enByWord.get(word)
-
-    if (!candidates || candidates.length === 0) continue
-    if (candidates.length > 1) { ambiguous++; continue }
-
-    const canonicalKey = candidates[0]
+    const [word, reading] = srcKey.split(':')
+    const canonicalKey = resolveCanonicalKey(word, reading, index)
+    if (!canonicalKey) { ambiguous++; continue }
     const srcEntry = sourceEntries[srcKey]
     const existing = sourceEntries[canonicalKey]
 
     if (existing) {
-      existing.definitions = mergeDefinitions(existing.definitions, srcEntry.definitions)
+      // Merge definitions
+      for (const def of srcEntry.definitions) {
+        const normalized = def.toLowerCase().trim()
+        if (!existing.definitions.some((d) => d.toLowerCase().trim() === normalized)) {
+          existing.definitions.push(def)
+        }
+      }
       merged++
     } else {
-      const [canonicalWord, canonicalReading] = canonicalKey.split(':')
-      sourceEntries[canonicalKey] = { ...srcEntry, word: canonicalWord, reading: canonicalReading }
+      sourceEntries[canonicalKey] = { definitions: srcEntry.definitions }
       rekeyed++
     }
 
@@ -373,22 +398,20 @@ async function importKaikkiLanguage(
   lang: KaikkiSourceLang,
   mode: ImportMode,
   maxDefsPerEntry: number,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number,
   fileOverride?: string
 ): Promise<ImportStats> {
   console.log(`\n=== Importing ${lang} from Kaikki ===`)
   console.log(`Mode: ${mode}`)
 
   const sourcePath = await resolveSourcePath(lang, fileOverride)
-  const dictPath = `${DATA_DIR}/${lang}.json`
-  const dict = await loadDict(dictPath, lang)
-  console.log(`  Existing entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
+  const langPath = `${LANG_DIR}/${lang}.json`
+  const langFile = mode === 'replace' ? createEmptyLang(lang) : await loadLang(langPath, lang)
+  console.log(`  Existing entries: ${Object.keys(langFile.entries).length.toLocaleString()}`)
 
-  const sourceEntries: Record<string, DictEntry> = {}
-  const stats: ImportStats = {
-    processed: 0,
-    parsed: 0,
-    produced: 0,
-  }
+  const sourceEntries: Record<string, { definitions: string[] }> = {}
+  const stats: ImportStats = { processed: 0, parsed: 0, produced: 0 }
 
   const progressEvery = 100000
 
@@ -406,43 +429,30 @@ async function importKaikkiLanguage(
     stats.parsed++
 
     const key = makeKey(parsed.word, parsed.reading)
-    const newDefinitions: Definition[] = parsed.definitions
-      .slice(0, maxDefsPerEntry)
-      .map((text) => ({
-        text,
-        sources: ['kaikki'],
-      }))
+    const newDefs = parsed.definitions.slice(0, maxDefsPerEntry)
 
     const existing = sourceEntries[key]
     if (existing) {
-      const ep = existing.partOfSpeech.find((p) => p.value === parsed.pos)
-      if (ep) {
-        ep.sources = mergeArrays(ep.sources, ['kaikki'])
-      } else {
-        existing.partOfSpeech.push({ value: parsed.pos, sources: ['kaikki'] })
+      for (const def of newDefs) {
+        const normalized = def.toLowerCase().trim()
+        if (!existing.definitions.some((d) => d.toLowerCase().trim() === normalized)) {
+          if (existing.definitions.length < maxDefsPerEntry) {
+            existing.definitions.push(def)
+          }
+        }
       }
-      existing.definitions = mergeDefinitions(existing.definitions, newDefinitions).slice(0, maxDefsPerEntry)
       continue
     }
 
-    sourceEntries[key] = {
-      word: parsed.word,
-      reading: parsed.reading,
-      partOfSpeech: [{ value: parsed.pos, sources: ['kaikki'] }],
-      common: false,
-      commonSources: [],
-      jlpt: [],
-      definitions: newDefinitions,
-      examples: [],
-    }
+    sourceEntries[key] = { definitions: newDefs }
   }
 
   console.log('')
 
-  // Normalize keys against en.json so entries align with JMdict canonical keys
-  const { enKeys, enByWord } = await buildEnIndex()
-  if (enKeys.size > 0) {
-    const normStats = normalizeSourceKeys(sourceEntries, enKeys, enByWord)
+  // Normalize keys against core.json
+  const coreIndex = await buildCoreIndex()
+  if (coreIndex.coreKeys.size > 0) {
+    const normStats = normalizeSourceKeys(sourceEntries, coreIndex)
     console.log(
       `  Key normalization: ${normStats.rekeyed} rekeyed, ` +
       `${normStats.merged} merged, ${normStats.ambiguous} ambiguous (skipped)`
@@ -453,60 +463,83 @@ async function importKaikkiLanguage(
   console.log(`  Produced source entries: ${stats.produced.toLocaleString()}`)
 
   if (mode === 'refresh') {
-    const refreshStats = refreshDictSource(dict.entries, sourceEntries, 'kaikki')
+    refreshLangSource(langFile.entries, 'kaikki')
+  }
+
+  const conflictPolicy = await resolveDuplicateConflictPolicy(
+    `kaikki/${lang}`,
+    duplicatePolicyInput,
+    analyzeLangDefinitionConflicts(langFile.entries, sourceEntries, duplicateSamples)
+  )
+
+  if (mode === 'refresh') {
+    const mergeStats = mergeLangEntries(langFile.entries, sourceEntries, 'kaikki', 'merge', conflictPolicy)
     console.log('\n=== Import Statistics ===')
-    console.log(`  New entries: ${refreshStats.added.toLocaleString()}`)
-    console.log(`  Updated entries: ${refreshStats.updated.toLocaleString()}`)
-    console.log(`  Removed entries: ${refreshStats.removed.toLocaleString()}`)
-    await saveDict(dictPath, dict)
-    console.log(`Saved to: ${dictPath}`)
+    console.log(`  New entries: ${mergeStats.added.toLocaleString()}`)
+    console.log(`  Updated entries: ${mergeStats.updated.toLocaleString()}`)
+    await saveLang(langPath, langFile)
+    console.log(`Saved to: ${langPath}`)
   } else {
-    const mergeStats = mergeDictEntries(dict.entries, sourceEntries, mode)
-    printStats(mergeStats, mode)
+    const mergeStats = mergeLangEntries(langFile.entries, sourceEntries, 'kaikki', mode, conflictPolicy)
+    printStats(mergeStats as { added: number; updated: number; unchanged: number }, mode)
     if (mode !== 'diff') {
-      await saveDict(dictPath, dict)
-      console.log(`Saved to: ${dictPath}`)
+      await saveLang(langPath, langFile)
+      console.log(`Saved to: ${langPath}`)
     }
   }
 
   return stats
 }
 
-async function bootstrapTraditionalChinese(mode: ImportMode): Promise<void> {
+async function bootstrapTraditionalChinese(
+  mode: ImportMode,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number
+): Promise<void> {
   console.log('\n=== Bootstrapping zh-tw from zh-cn ===')
 
-  const zhCnPath = `${DATA_DIR}/zh-cn.json`
-  const zhTwPath = `${DATA_DIR}/zh-tw.json`
+  const zhCnPath = `${LANG_DIR}/zh-cn.json`
+  const zhTwPath = `${LANG_DIR}/zh-tw.json`
 
   if (!existsSync(zhCnPath)) {
     throw new Error('zh-cn.json not found. Run zh-cn import first.')
   }
 
-  const zhCnDict = await loadDict(zhCnPath, 'zh-cn')
-  const zhTwDict = await loadDict(zhTwPath, 'zh-tw')
+  const zhCnLang = await loadLang(zhCnPath, 'zh-cn')
+  const zhTwLang = mode === 'replace' ? createEmptyLang('zh-tw') : await loadLang(zhTwPath, 'zh-tw')
 
-  // Convert Simplified Chinese → Traditional Chinese (Taiwan variant)
   const toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' })
 
-  const clonedEntries: Record<string, DictEntry> = {}
-  for (const [key, entry] of Object.entries(zhCnDict.entries)) {
-    const cloned = structuredClone(entry)
-    // Convert all kaikki definitions from simplified to traditional
-    cloned.definitions = cloned.definitions.map((def) =>
-      def.sources.includes('kaikki')
-        ? { ...def, text: toTraditional(def.text) }
-        : def
-    )
-    clonedEntries[key] = cloned
+  // Build source entries by converting zh-cn kaikki defs to Traditional
+  const sourceEntries: Record<string, { definitions: string[] }> = {}
+  for (const [key, entry] of Object.entries(zhCnLang.entries)) {
+    const kaikkiDefs = (entry._defSources
+      ? Object.entries(entry._defSources)
+          .filter(([, sources]) => sources.includes('kaikki'))
+          .map(([def]) => def)
+      : entry.definitions)
+      .map((def) => toTraditional(def))
+
+    if (kaikkiDefs.length > 0) {
+      sourceEntries[key] = { definitions: kaikkiDefs }
+    }
   }
 
-  // refresh means re-copy everything from zh-cn, equivalent to replace here
-  const effectiveMode = mode === 'refresh' ? 'replace' : mode
-  const stats = mergeDictEntries(zhTwDict.entries, clonedEntries, effectiveMode)
-  printStats(stats, effectiveMode)
+  if (mode === 'refresh') {
+    refreshLangSource(zhTwLang.entries, 'kaikki')
+  }
+
+  const effectiveMode = mode === 'refresh' ? 'merge' : mode
+  const conflictPolicy = await resolveDuplicateConflictPolicy(
+    'kaikki/zh-tw-bootstrap',
+    duplicatePolicyInput,
+    analyzeLangDefinitionConflicts(zhTwLang.entries, sourceEntries, duplicateSamples)
+  )
+  const stats = mergeLangEntries(zhTwLang.entries, sourceEntries, 'kaikki', effectiveMode, conflictPolicy)
+  printStats(stats as { added: number; updated: number; unchanged: number }, effectiveMode)
 
   if (mode !== 'diff') {
-    await saveDict(zhTwPath, zhTwDict)
+    await saveLang(zhTwPath, zhTwLang)
     console.log(`Saved to: ${zhTwPath}`)
   }
 }
@@ -556,9 +589,10 @@ Options:
   --lang <langs>    Comma-separated: zh-cn,zh-tw (default: zh-cn,zh-tw)
   --mode <mode>     merge | diff | replace | refresh (default: merge)
   --limit <n>       Max definitions per entry from source (default: 8)
+  --dup-policy      merge | skip | replace | ask (default: merge)
+  --dup-samples     How many conflict samples to show in ask mode (default: 5)
   --file=<lang>=<path>
                     Override local JSONL file for zh-cn
-                    Example: --file=zh-cn=./data/cache/zhwiktionary.jsonl
 
 Examples:
   bun run import:kaikki
@@ -573,19 +607,19 @@ async function main(): Promise<void> {
   let langs: ImportLang[] = ['zh-cn', 'zh-tw']
   let mode: ImportMode = 'merge'
   let maxDefsPerEntry = DEFAULT_MAX_DEFINITIONS
+  let duplicatePolicy: DuplicateConflictPolicyInput = 'merge'
+  let duplicateSamples = 5
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     const next = args[i + 1]
 
     if (arg === '--lang' && next) {
-      langs = next
-        .split(',')
-        .map((lang) => lang.trim() as ImportLang)
+      langs = next.split(',').map((lang) => lang.trim() as ImportLang)
       i++
     } else if (arg === '--mode' && next) {
-      if (next === 'merge' || next === 'diff' || next === 'replace' || next === 'refresh') {
-        mode = next
+      if (['merge', 'diff', 'replace', 'refresh'].includes(next)) {
+        mode = next as ImportMode
       } else {
         console.error(`Invalid mode: ${next}`)
         process.exit(1)
@@ -598,6 +632,21 @@ async function main(): Promise<void> {
         process.exit(1)
       }
       i++
+    } else if (arg === '--dup-policy' && next) {
+      if (['merge', 'skip', 'replace', 'ask'].includes(next)) {
+        duplicatePolicy = next as DuplicateConflictPolicyInput
+      } else {
+        console.error(`Invalid --dup-policy: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-samples' && next) {
+      duplicateSamples = parseInt(next, 10)
+      if (Number.isNaN(duplicateSamples) || duplicateSamples < 1) {
+        console.error(`Invalid --dup-samples: ${next}`)
+        process.exit(1)
+      }
+      i++
     } else if (arg === '--help' || arg === '-h') {
       printHelp()
       return
@@ -607,14 +656,13 @@ async function main(): Promise<void> {
   for (const lang of langs) {
     if (!['zh-cn', 'zh-tw'].includes(lang)) {
       console.error(`Unsupported language: ${lang}`)
-      console.error('Supported: zh-cn, zh-tw')
       process.exit(1)
     }
   }
 
   const fileOverrides = parseFileOverrides(args)
 
-  // Ensure zh-cn is processed before zh-tw (zh-tw bootstraps from zh-cn)
+  // Ensure zh-cn is processed before zh-tw
   if (langs.includes('zh-tw') && langs.includes('zh-cn')) {
     langs = [...langs.filter((l) => l !== 'zh-tw'), 'zh-tw' as ImportLang]
   }
@@ -623,16 +671,24 @@ async function main(): Promise<void> {
   console.log(`Languages: ${langs.join(', ')}`)
   console.log(`Mode: ${mode}`)
   console.log(`Max defs per entry: ${maxDefsPerEntry}`)
+  console.log(`Duplicate policy: ${duplicatePolicy}`)
 
   await mkdir(DATA_DIR, { recursive: true })
+  await mkdir(LANG_DIR, { recursive: true })
 
   for (const lang of langs) {
     if (lang === 'zh-cn') {
-      await importKaikkiLanguage(lang, mode, maxDefsPerEntry, fileOverrides[lang])
+      await importKaikkiLanguage(
+        lang,
+        mode,
+        maxDefsPerEntry,
+        duplicatePolicy,
+        duplicateSamples,
+        fileOverrides[lang]
+      )
       continue
     }
-
-    await bootstrapTraditionalChinese(mode)
+    await bootstrapTraditionalChinese(mode, duplicatePolicy, duplicateSamples)
   }
 
   console.log('\n=== Import Complete ===')

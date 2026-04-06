@@ -2,10 +2,10 @@ import { describe, test, expect } from 'bun:test'
 import {
   type DictEntry,
   type Definition,
-  type PosEntry,
-  type JlptEntry,
+  type LangEntry,
   mergeEntries,
   mergeDictEntries,
+  mergeLangEntries,
   mergeDefinitions,
   mergeExamples,
   mergeArrays,
@@ -15,6 +15,7 @@ import {
   parseKey,
   normalizeText,
   refreshDictSource,
+  refreshLangSource,
 } from '../scripts/import/base'
 
 // ============================================================================
@@ -500,5 +501,73 @@ describe('mergeDictEntries — replace mode — other tests', () => {
     expect(target['a:b']).toBeDefined()
     expect(target['a:b'].definitions[0].text).toBe('new-a')
     expect(target['c:d']).toBeUndefined()
+  })
+})
+
+describe('mergeLangEntries', () => {
+  test('diff mode reports updates without mutating target', () => {
+    const target: Record<string, LangEntry> = {
+      '食べる:たべる': {
+        definitions: ['to eat'],
+        examples: [],
+        _defSources: { 'to eat': ['jmdict'] },
+      },
+    }
+    const source = {
+      '食べる:たべる': { definitions: ['to consume'] },
+    }
+
+    const before = JSON.stringify(target)
+    const stats = mergeLangEntries(target, source, 'wiktionary', 'diff', 'merge')
+
+    expect(stats.updated).toBe(1)
+    expect(stats.unchanged).toBe(0)
+    expect(JSON.stringify(target)).toBe(before)
+  })
+
+  test('replace policy keeps non-conflicting definitions', () => {
+    const target: Record<string, LangEntry> = {
+      '食べる:たべる': {
+        definitions: ['to eat food', 'to have a meal'],
+        examples: [],
+        _defSources: {
+          'to eat food': ['jmdict'],
+          'to have a meal': ['jmdict'],
+        },
+      },
+    }
+    const source = {
+      '食べる:たべる': { definitions: ['to eat'] },
+    }
+
+    const stats = mergeLangEntries(target, source, 'wiktionary', 'merge', 'replace')
+
+    expect(stats.updated).toBe(1)
+    expect(target['食べる:たべる'].definitions).toContain('to eat')
+    expect(target['食べる:たべる'].definitions).toContain('to have a meal')
+    expect(target['食べる:たべる'].definitions).not.toContain('to eat food')
+  })
+})
+
+describe('refreshLangSource', () => {
+  test('removes empty entries after source data is stripped', () => {
+    const target: Record<string, LangEntry> = {
+      'a:b': {
+        definitions: ['x'],
+        examples: [{ ja: '文', text: 'x', source: 'tatoeba' }],
+        _defSources: { x: ['sourceA'] },
+      },
+      'c:d': {
+        definitions: ['y'],
+        examples: [],
+        _defSources: { y: ['sourceB'] },
+      },
+    }
+
+    refreshLangSource(target, 'sourceA')
+    refreshLangSource(target, 'tatoeba')
+
+    expect(target['a:b']).toBeUndefined()
+    expect(target['c:d']).toBeDefined()
   })
 })

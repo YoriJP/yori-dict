@@ -77,7 +77,18 @@ export interface ExampleRow {
 }
 
 // Data source types
-export type TranslationSource = 'jmdict' | 'wadoku' | 'krdict' | 'wiktionary' | 'kaikki' | 'ai'
+export type TranslationSource =
+  | 'jmdict'
+  | 'jmdict-examples'
+  | 'jitendex'
+  | 'wadoku'
+  | 'krdict'
+  | 'kowiktionary'
+  | 'wiktionary'
+  | 'kaikki'
+  | 'cedict'
+  | 'zhja'
+  | 'ai'
 
 // JMdict simplified types (for seed script)
 export interface JMdictWord {

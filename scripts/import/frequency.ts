@@ -1,5 +1,5 @@
 /**
- * JPDB Frequency Importer - Adds frequency ranks to Japanese dictionary entries
+ * JPDB Frequency Importer - Adds frequency ranks to core.json
  *
  * Source: https://github.com/MarvNC/jpdb-freq-list
  * License: CC BY-NC-SA 4.0 (non-commercial use only)
@@ -8,6 +8,8 @@
  * The JPDB frequency list uses Yomichan format 3:
  *   ["word","freq",{"value":N}]                           // kana-only
  *   ["word","freq",{"reading":"kana","frequency":{"value":N}}]  // kanji+reading
+ *
+ * Writes: data/core.json (frequency field only)
  *
  * Usage:
  *   bun run import:frequency
@@ -18,9 +20,8 @@
 import { mkdir } from 'fs/promises'
 import { existsSync, createWriteStream, renameSync, unlinkSync } from 'fs'
 import {
-  type DictEntry,
-  loadDict,
-  saveDict,
+  loadCore,
+  saveCore,
   downloadWithProgress,
 } from './base'
 
@@ -29,6 +30,7 @@ import {
 // ============================================================================
 
 const DATA_DIR = './data'
+const CORE_PATH = `${DATA_DIR}/core.json`
 const CACHE_DIR = './data/cache'
 const JPDB_ZIP_URL =
   'https://github.com/MarvNC/jpdb-freq-list/releases/download/2022-05-09/Freq.JPDB_2022-05-10T03_27_02.930Z.zip'
@@ -41,7 +43,6 @@ type ImportMode = 'merge' | 'diff' | 'refresh'
 // Types
 // ============================================================================
 
-// Map of word:reading → frequency rank (1 = most common)
 type FreqIndex = Map<string, number>
 
 // ============================================================================
@@ -67,7 +68,6 @@ async function extractJpdb(): Promise<void> {
   const tmpPath = JPDB_TXT_PATH + '.tmp'
 
   try {
-    // Extract only the term_meta_bank file (the large one with frequency entries)
     const proc = Bun.spawn(
       ['unzip', '-p', JPDB_ZIP_PATH, 'term_meta_bank_1.json'],
       { stderr: 'inherit' }
@@ -97,13 +97,6 @@ async function extractJpdb(): Promise<void> {
 // Parse JPDB Yomichan format 3
 // ============================================================================
 
-/**
- * Build a word:reading → rank map from the JPDB frequency file.
- *
- * File is a single-line JSON array in Yomichan format 3:
- *   [["word","freq",{"value":N}], ...]                            // kana-only
- *   [["word","freq",{"reading":"r","frequency":{"value":N}}], ...] // kanji+reading
- */
 async function buildFreqIndex(): Promise<FreqIndex> {
   console.log('  Building frequency index...')
   const index: FreqIndex = new Map()
@@ -122,11 +115,9 @@ async function buildFreqIndex(): Promise<FreqIndex> {
     let reading: string
 
     if (typeof meta?.reading === 'string' && typeof meta?.frequency?.value === 'number') {
-      // Kanji+reading entry: {"reading":"kana","frequency":{"value":N}}
       rank = meta.frequency.value
       reading = meta.reading
     } else if (typeof meta?.value === 'number') {
-      // Kana-only entry: {"value":N}
       rank = meta.value
       reading = word
     } else {
@@ -134,7 +125,6 @@ async function buildFreqIndex(): Promise<FreqIndex> {
     }
 
     const key = `${word}:${reading}`
-    // Keep the better (lower) rank if we see duplicates
     const existing = index.get(key)
     if (existing === undefined || rank < existing) {
       index.set(key, rank)
@@ -157,18 +147,17 @@ interface ImportStats {
 }
 
 function importFrequency(
-  dict: Record<string, DictEntry>,
+  coreEntries: Record<string, { frequency: number | null }>,
   index: FreqIndex,
   mode: ImportMode
 ): ImportStats {
   const stats: ImportStats = { total: 0, matched: 0, enriched: 0 }
 
-  for (const [key, entry] of Object.entries(dict)) {
+  for (const [key, entry] of Object.entries(coreEntries)) {
     stats.total++
 
-    // Strip existing frequency in refresh mode
     if (mode === 'refresh') {
-      entry.frequency = undefined
+      entry.frequency = null
     }
 
     const rank = index.get(key)
@@ -176,11 +165,8 @@ function importFrequency(
     stats.matched++
 
     if (mode !== 'diff') {
-      if (!entry.frequency || rank < entry.frequency.rank) {
-        entry.frequency = { rank, sources: ['jpdb'] }
-        stats.enriched++
-      } else if (entry.frequency && !entry.frequency.sources.includes('jpdb')) {
-        entry.frequency.sources.push('jpdb')
+      if (entry.frequency === null || rank < entry.frequency) {
+        entry.frequency = rank
         stats.enriched++
       }
     } else {
@@ -204,19 +190,16 @@ async function importFrequencyData(mode: ImportMode): Promise<void> {
 
   const index = await buildFreqIndex()
 
-  // Frequency is language-agnostic — apply to whichever dict file exists
-  // Use en.json as the canonical source (all langs share the same word:reading key)
-  const enPath = `${DATA_DIR}/en.json`
-  if (!existsSync(enPath)) {
-    console.error('en.json not found — run import:jmdict first')
+  if (!existsSync(CORE_PATH)) {
+    console.error('core.json not found — run import:jmdict first')
     process.exit(1)
   }
 
-  console.log('\n=== Processing en (canonical frequency store) ===')
-  const dict = await loadDict(enPath, 'en')
-  console.log(`  Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
+  console.log('\n=== Processing core.json ===')
+  const core = await loadCore(CORE_PATH)
+  console.log(`  Entries: ${Object.keys(core.entries).length.toLocaleString()}`)
 
-  const stats = importFrequency(dict.entries, index, mode)
+  const stats = importFrequency(core.entries, index, mode)
 
   console.log(`  Scanned: ${stats.total.toLocaleString()}`)
   console.log(`  Word:reading matches: ${stats.matched.toLocaleString()}`)
@@ -225,8 +208,8 @@ async function importFrequencyData(mode: ImportMode): Promise<void> {
   if (mode === 'diff') {
     console.log('  (Diff mode — no changes written)')
   } else if (stats.enriched > 0 || mode === 'refresh') {
-    await saveDict(enPath, dict)
-    console.log(`  Saved: ${enPath}`)
+    await saveCore(CORE_PATH, core)
+    console.log(`  Saved: ${CORE_PATH}`)
   } else {
     console.log('  No changes to write.')
   }
@@ -240,10 +223,10 @@ function printHelp(): void {
   console.log(`
 JPDB Frequency Importer
 
-Adds frequency ranks to Japanese dictionary entries using the JPDB frequency
+Adds frequency ranks to core.json entries using the JPDB frequency
 list (~470k entries from light novels, anime, and visual novels).
 
-Frequency is stored in en.json only (language-agnostic field) and exposed
+Frequency is stored in core.json (frequency field) and exposed
 through the API as a numeric rank (1 = most common).
 
 License note: JPDB data is CC BY-NC-SA 4.0 (non-commercial use only).

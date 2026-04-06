@@ -1,8 +1,10 @@
 /**
- * Wadoku Importer - Enriches German dictionary with Wadoku definitions
+ * Wadoku Importer - Enriches lang/de.json with Wadoku definitions
  *
  * Data source: https://github.com/WaDoku/WaDokuJT-Data
  * License: CC-BY-SA 3.0
+ *
+ * Writes: data/lang/de.json
  *
  * Usage:
  *   bun run import:wadoku
@@ -10,26 +12,25 @@
  */
 
 import { mkdir } from 'fs/promises'
-import { existsSync, unlinkSync } from 'fs'
+import { existsSync } from 'fs'
 import {
-  type DictEntry,
-  type DictFile,
-  type Definition,
+  type DuplicateConflictPolicyInput,
   makeKey,
-  loadDict,
-  saveDict,
-  mergeDefinitions,
-  refreshDictSource,
+  loadLang,
+  saveLang,
+  mergeLangEntries,
+  refreshLangSource,
+  analyzeLangDefinitionConflicts,
+  resolveDuplicateConflictPolicy,
 } from './base'
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-const DATA_DIR = './data'
+const LANG_DIR = './data/lang'
 const CACHE_DIR = './data/cache'
 
-// Wadoku data URL
 const WADOKU_URL = 'https://raw.githubusercontent.com/WaDoku/WaDokuJT-Data/master/WaDokuTest.tab'
 
 type ImportMode = 'merge' | 'diff' | 'refresh'
@@ -53,13 +54,11 @@ interface WadokuEntry {
 async function downloadWadoku(): Promise<string> {
   const cachePath = `${CACHE_DIR}/wadoku.tab`
 
-  // Check cache
   if (existsSync(cachePath)) {
     console.log(`  Using cached: ${cachePath}`)
     return Bun.file(cachePath).text()
   }
 
-  // Download
   console.log(`  Downloading: ${WADOKU_URL}`)
 
   const response = await fetch(WADOKU_URL, {
@@ -72,7 +71,6 @@ async function downloadWadoku(): Promise<string> {
 
   const text = await response.text()
 
-  // Cache for future use
   await mkdir(CACHE_DIR, { recursive: true })
   await Bun.write(cachePath, text)
   console.log(`  Cached to: ${cachePath}`)
@@ -84,10 +82,6 @@ async function downloadWadoku(): Promise<string> {
 // Parsing Functions
 // ============================================================================
 
-/**
- * Extract German translations from Wadoku markup
- * Format: <TrE: translation> or <TrE: <HW f: translation>>
- */
 function extractTranslations(markup: string): string[] {
   const flattenMarkup = (text: string): string => {
     let cleaned = text
@@ -95,9 +89,7 @@ function extractTranslations(markup: string): string[] {
 
     while (prev !== cleaned) {
       prev = cleaned
-      // Unwrap tags that carry payloads, e.g. <HW f: ...>, <Def.: ...>.
       cleaned = cleaned.replace(/<[^>]*:\s*([^<>]*)>/g, '$1')
-      // Remove marker tags with no payload, e.g. <Prior_1>, <JLPT2>.
       cleaned = cleaned.replace(/<[^>]+>/g, ' ')
     }
 
@@ -105,36 +97,22 @@ function extractTranslations(markup: string): string[] {
   }
 
   const translations: string[] = []
-  // Non-balanced regex is intentional: Wadoku has malformed rows where
-  // balanced scanning can over-consume into the next segments.
   const trePattern = /<TrE:\s*((?:[^<>]|<[^>]*>)*)>/g
   let match
 
   while ((match = trePattern.exec(markup)) !== null) {
     const text = flattenMarkup(match[1])
-
-    // Skip results that still contain markup fragments, are empty, or too short
     if (text.length >= 2 && !text.includes('<')) {
       translations.push(text)
     }
   }
 
-  // Deduplicate
   return [...new Set(translations)]
 }
 
-/**
- * Clean Japanese text - remove variant markers like [1], [2], etc.
- * and split on semicolons for variants
- */
 function parseJapanese(text: string): { word: string; variants: string[] } {
-  // Remove number markers like [1], [2]
   let cleaned = text.replace(/\s*\[\d+\]/g, '')
-
-  // Remove parenthetical kanji alternatives like (嗚呼; 嗟; 噫; 鳴呼)
   cleaned = cleaned.replace(/\s*\([^)]+\)/g, '')
-
-  // Split on semicolons for variants
   const parts = cleaned.split(/[;；]/).map((s) => s.trim()).filter(Boolean)
 
   return {
@@ -143,9 +121,6 @@ function parseJapanese(text: string): { word: string; variants: string[] } {
   }
 }
 
-/**
- * Clean reading - remove markers and separators
- */
 function parseReading(text: string): string {
   let cleaned = text.replace(/\s*\[\d+\]/g, '')
   cleaned = cleaned.replace(/\[WaSep\]/g, '')
@@ -154,36 +129,9 @@ function parseReading(text: string): string {
   cleaned = cleaned.replace(/\[Dev\]/g, '')
   cleaned = cleaned.replace(/\[suru\]/g, '')
   cleaned = cleaned.replace(/\[KanaSep\]/g, '')
-  cleaned = cleaned.trim()
-  return cleaned
+  return cleaned.trim()
 }
 
-/**
- * Map Wadoku POS codes to our format
- */
-function mapPartOfSpeech(wadokuPos: string): string[] {
-  const posMap: Record<string, string> = {
-    '名': 'noun',
-    '動': 'verb',
-    '形': 'adjective',
-    '副': 'adverb',
-    '感': 'interjection',
-    '連体': 'adnominal',
-    'サ変他': 'suru verb',
-    'サ変自': 'suru verb',
-    '接頭': 'prefix',
-    '接尾': 'suffix',
-    '助': 'particle',
-    '連': 'conjunction',
-    '代': 'pronoun',
-  }
-
-  return posMap[wadokuPos] ? [posMap[wadokuPos]] : []
-}
-
-/**
- * Parse Wadoku tab-delimited file
- */
 function parseWadokuFile(text: string): WadokuEntry[] {
   const entries: WadokuEntry[] = []
   const lines = text.split('\n')
@@ -200,31 +148,18 @@ function parseWadokuFile(text: string): WadokuEntry[] {
     const definitionMarkup = fields[3]
     const posRaw = fields[4]
 
-    // Skip header or invalid lines
     if (id === '*Japanisch' || !japaneseRaw) continue
 
-    // Parse Japanese text
     const { word } = parseJapanese(japaneseRaw)
     if (!word) continue
 
-    // Parse reading
     const reading = parseReading(readingRaw)
     if (!reading) continue
 
-    // Extract German translations
     const definitions = extractTranslations(definitionMarkup)
     if (definitions.length === 0) continue
 
-    // Map POS
-    const partOfSpeech = mapPartOfSpeech(posRaw).join(', ') || posRaw
-
-    entries.push({
-      id,
-      japanese: word,
-      reading,
-      definitions,
-      partOfSpeech,
-    })
+    entries.push({ id, japanese: word, reading, definitions, partOfSpeech: posRaw })
   }
 
   return entries
@@ -238,146 +173,129 @@ interface ImportStats {
   wadokuEntries: number
   matched: number
   newDefinitions: number
-  entriesUpdated: number
+  sourceEntries: number
 }
 
-function importWadoku(
-  dict: DictFile,
-  wadokuEntries: WadokuEntry[],
-  mode: ImportMode
-): ImportStats {
+function buildWadokuSourceEntries(
+  langEntries: Record<string, import('./base').LangEntry>,
+  wadokuEntries: WadokuEntry[]
+): { sourceEntries: Record<string, { definitions: string[] }>; stats: ImportStats } {
+  const sourceEntries: Record<string, { definitions: string[] }> = {}
   const stats: ImportStats = {
     wadokuEntries: wadokuEntries.length,
     matched: 0,
     newDefinitions: 0,
-    entriesUpdated: 0,
+    sourceEntries: 0,
   }
 
-  // Build lookup map for dictionary entries
+  // Build lookup map (word/reading → keys)
   const wordMap = new Map<string, string[]>()
-
-  for (const [key, entry] of Object.entries(dict.entries)) {
-    // Index by word
-    const wordKeys = wordMap.get(entry.word) || []
+  for (const key of Object.keys(langEntries)) {
+    const [word, reading] = key.split(':')
+    const wordKeys = wordMap.get(word) || []
     wordKeys.push(key)
-    wordMap.set(entry.word, wordKeys)
+    wordMap.set(word, wordKeys)
 
-    // Also index by reading if different
-    if (entry.reading !== entry.word) {
-      const readingKeys = wordMap.get(entry.reading) || []
+    if (reading !== word) {
+      const readingKeys = wordMap.get(reading) || []
       readingKeys.push(key)
-      wordMap.set(entry.reading, readingKeys)
+      wordMap.set(reading, readingKeys)
     }
   }
 
-  // Process Wadoku entries
   for (const wadoku of wadokuEntries) {
-    // Try to find matching dictionary entry
     const key = makeKey(wadoku.japanese, wadoku.reading)
-    let entry = dict.entries[key]
+    let entryKey = langEntries[key] ? key : undefined
 
-    // If no exact match, try to find by word only
-    if (!entry) {
+    if (!entryKey) {
       const candidates = wordMap.get(wadoku.japanese) || wordMap.get(wadoku.reading)
       if (candidates && candidates.length === 1) {
-        entry = dict.entries[candidates[0]]
+        entryKey = candidates[0]
       }
     }
 
-    if (!entry) continue
+    if (!entryKey) continue
 
     stats.matched++
-
-    // Check for new definitions
-    const existingTexts = new Set(entry.definitions.map((d) => d.text.toLowerCase()))
-    const newDefs: Definition[] = []
+    const existingDefs = langEntries[entryKey].definitions
+    const target = sourceEntries[entryKey] ?? { definitions: [] }
 
     for (const defText of wadoku.definitions) {
-      if (!existingTexts.has(defText.toLowerCase())) {
-        newDefs.push({
-          text: defText,
-          sources: ['wadoku'],
-        })
+      const normalized = defText.toLowerCase().trim()
+      const alreadyPresentInExisting = existingDefs.some((d) => d.toLowerCase().trim() === normalized)
+      const alreadyPresentInSource = target.definitions.some((d) => d.toLowerCase().trim() === normalized)
+      const alreadyPresent = alreadyPresentInExisting || alreadyPresentInSource
+      if (!alreadyPresent) {
+        target.definitions.push(defText)
         stats.newDefinitions++
       }
     }
-
-    if (newDefs.length > 0) {
-      stats.entriesUpdated++
-
-      if (mode !== 'diff') {
-        // Merge definitions
-        entry.definitions = mergeDefinitions(entry.definitions, newDefs)
-      }
+    if (target.definitions.length > 0) {
+      sourceEntries[entryKey] = target
     }
   }
 
-  return stats
+  stats.sourceEntries = Object.keys(sourceEntries).length
+  return { sourceEntries, stats }
 }
 
 // ============================================================================
 // Main Import Function
 // ============================================================================
 
-async function runImport(mode: ImportMode): Promise<void> {
+async function runImport(
+  mode: ImportMode,
+  duplicatePolicyInput: DuplicateConflictPolicyInput,
+  duplicateSamples: number
+): Promise<void> {
   console.log('=== [Enrichment] Wadoku German Importer ===')
   console.log(`Mode: ${mode}`)
 
-  // Check if German dictionary exists
-  const dictPath = `${DATA_DIR}/de.json`
-  if (!existsSync(dictPath)) {
-    console.error(`\nGerman dictionary not found: ${dictPath}`)
+  const langPath = `${LANG_DIR}/de.json`
+  if (!existsSync(langPath)) {
+    console.error(`\nGerman lang file not found: ${langPath}`)
     console.error('This is an enrichment importer — run base importers first:')
     console.error('  bun run import:jmdict --lang de')
-    console.error('  (or: bun run rebuild:all for a full rebuild)')
     process.exit(1)
   }
 
-  // Download Wadoku data
   console.log('\nDownloading Wadoku data...')
   const wadokuText = await downloadWadoku()
 
-  // Parse Wadoku entries
   console.log('\nParsing Wadoku entries...')
   const wadokuEntries = parseWadokuFile(wadokuText)
   console.log(`  Parsed ${wadokuEntries.length.toLocaleString()} entries`)
 
-  // Load German dictionary
-  console.log('\nLoading German dictionary...')
-  const dict = await loadDict(dictPath, 'de')
-  console.log(`  Entries: ${Object.keys(dict.entries).length.toLocaleString()}`)
-
-  // Import Wadoku definitions
-  console.log('\nImporting Wadoku definitions...')
+  console.log('\nLoading German lang file...')
+  const lang = await loadLang(langPath, 'de')
+  console.log(`  Entries: ${Object.keys(lang.entries).length.toLocaleString()}`)
 
   if (mode === 'refresh') {
-    // Strip all existing wadoku definitions before re-importing
     console.log('  Stripping existing wadoku definitions...')
-    let stripped = 0
-    for (const entry of Object.values(dict.entries)) {
-      const before = entry.definitions.length
-      entry.definitions = entry.definitions.filter((d) => !d.sources.includes('wadoku'))
-      stripped += before - entry.definitions.length
-    }
-    console.log(`  Stripped ${stripped.toLocaleString()} wadoku definitions`)
+    refreshLangSource(lang.entries, 'wadoku')
+    console.log('  Done.')
   }
 
-  const stats = importWadoku(dict, wadokuEntries, mode === 'refresh' ? 'merge' : mode)
+  console.log('\nBuilding Wadoku source entries...')
+  const { sourceEntries, stats } = buildWadokuSourceEntries(lang.entries, wadokuEntries)
+  const effectiveMode = mode === 'refresh' ? 'merge' : mode
+  const conflictPolicy = await resolveDuplicateConflictPolicy(
+    'wadoku/de',
+    duplicatePolicyInput,
+    analyzeLangDefinitionConflicts(lang.entries, sourceEntries, duplicateSamples)
+  )
+  const mergeStats = mergeLangEntries(lang.entries, sourceEntries, 'wadoku', effectiveMode, conflictPolicy)
 
-  // Print stats
   console.log('\nResults:')
   console.log(`  Wadoku entries: ${stats.wadokuEntries.toLocaleString()}`)
   console.log(`  Matched to dict: ${stats.matched.toLocaleString()}`)
   console.log(`  New definitions: ${stats.newDefinitions.toLocaleString()}`)
-  console.log(`  Entries updated: ${stats.entriesUpdated.toLocaleString()}`)
+  console.log(`  Source entries to merge: ${stats.sourceEntries.toLocaleString()}`)
+  console.log(`  Merged - new: ${mergeStats.added.toLocaleString()}, updated: ${mergeStats.updated.toLocaleString()}, unchanged: ${mergeStats.unchanged.toLocaleString()}`)
 
-  if (mode !== 'diff' && stats.entriesUpdated > 0) {
-    await saveDict(dictPath, dict)
-    console.log(`\nSaved to: ${dictPath}`)
-  } else if (mode === 'refresh') {
-    // In refresh mode, always save even if no new defs (stripped data must be persisted)
-    await saveDict(dictPath, dict)
-    console.log(`\nSaved to: ${dictPath}`)
+  if (mode !== 'diff' && (mergeStats.added > 0 || mergeStats.updated > 0 || mode === 'refresh')) {
+    await saveLang(langPath, lang)
+    console.log(`\nSaved to: ${langPath}`)
   } else if (mode === 'diff') {
     console.log('\n(Diff mode - no changes made)')
   }
@@ -391,7 +309,7 @@ function printHelp(): void {
   console.log(`
 Wadoku German Importer
 
-Enriches German dictionary with additional definitions from Wadoku.
+Enriches German lang file with additional definitions from Wadoku.
 Data source: https://github.com/WaDoku/WaDokuJT-Data
 
 Usage:
@@ -402,6 +320,8 @@ Options:
             merge   - Add new definitions to entries
             diff    - Preview changes, no modifications
             refresh - Strip and re-import only wadoku data
+  --dup-policy   merge | skip | replace | ask (default: merge)
+  --dup-samples  How many conflict samples to show in ask mode (default: 5)
 
 Examples:
   bun run import:wadoku
@@ -413,6 +333,8 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2)
 
   let mode: ImportMode = 'merge'
+  let duplicatePolicy: DuplicateConflictPolicyInput = 'merge'
+  let duplicateSamples = 5
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -423,7 +345,21 @@ async function main(): Promise<void> {
         mode = next
       } else {
         console.error(`Invalid mode: ${next}`)
-        console.error('Supported modes: merge, diff, refresh')
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-policy' && next) {
+      if (['merge', 'skip', 'replace', 'ask'].includes(next)) {
+        duplicatePolicy = next as DuplicateConflictPolicyInput
+      } else {
+        console.error(`Invalid --dup-policy: ${next}`)
+        process.exit(1)
+      }
+      i++
+    } else if (arg === '--dup-samples' && next) {
+      duplicateSamples = parseInt(next, 10)
+      if (Number.isNaN(duplicateSamples) || duplicateSamples < 1) {
+        console.error(`Invalid --dup-samples: ${next}`)
         process.exit(1)
       }
       i++
@@ -433,8 +369,8 @@ async function main(): Promise<void> {
     }
   }
 
-  await runImport(mode)
-
+  console.log(`Duplicate policy: ${duplicatePolicy}`)
+  await runImport(mode, duplicatePolicy, duplicateSamples)
   console.log('\n=== Import Complete ===')
 }
 
