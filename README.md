@@ -64,9 +64,10 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 ## Project Status
 
 - **Checked-in snapshots** live under `data/core.json` and `data/lang/*.json`
-- **Deterministic rebuilds** are supported with `bun run rebuild:all`
+- **Deterministic rebuilds** are supported with `bun run rebuild:all`, which now builds a candidate release without changing the active release pointer
 - **Rebuild verification** is built in via `bun run verify:rebuild`
-- **AI backfill** exists as an opt-in path via `import:gemini`, but it is intentionally excluded from the reproducible pipeline
+- **Runtime data** now comes from an immutable active release DB plus an overlay `updates.sqlite`
+- **AI backfill** exists as an opt-in path via `import:gemini`, and now writes incremental updates by default instead of mutating `data/lang/*.json`
 
 
 ## Quick Start
@@ -83,9 +84,9 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 
 | Goal | Recommended commands | When to use it |
 |------|----------------------|----------------|
-| Run the API quickly | `bun run data:pull` → `bun run build:db` → `bun run dev` | You want the checked-in snapshot with minimal setup |
-| Rebuild from source | `bun run rebuild:all` → `bun run verify:rebuild` | You are changing importers, snapshots, or build logic |
-| Backfill missing definitions | `bun run import:gemini ...` | You explicitly want non-deterministic AI-generated definitions |
+| Run the API quickly | `bun run data:pull` → `bun run build:db` → `bun run dev` | You want to build and activate a new immutable release from the checked-in snapshot |
+| Rebuild from source | `bun run rebuild:all` → `bun run release:activate --version <version>` | You are preparing a new candidate release from deterministic inputs |
+| Backfill missing definitions | `bun run import:gemini ...` | You want AI-generated updates to take effect immediately through the overlay update store |
 
 ### Install & Run
 
@@ -97,12 +98,13 @@ bun install
 
 # Option A: Use existing data (fastest)
 bun run data:pull    # Download from Git LFS
-bun run build:db     # Build SQLite (~10s)
+bun run build:db     # Build and activate a new immutable release (~10s)
 bun run dev          # Start server
 
 # Option B: Build from scratch (fresh data)
-bun run rebuild:all  # base imports + deterministic enrichment + build:db
+bun run rebuild:all  # base imports + deterministic enrichment + candidate release build
 bun run verify:rebuild  # optional: rebuild in a temp worktree and compare outputs
+bun run release:activate --version <version>  # promote the candidate release when you are ready
 # Optional: AI backfill for missing definitions (SDK-based, not included in rebuild:all)
 # bun run import:gemini --langs de,ko,zh-cn,zh-tw --limit 5000
 bun run dev
@@ -133,6 +135,7 @@ bun run dev
 
 ```bash
 bun run rebuild:all
+bun run release:activate --version <version>
 bun run verify:rebuild
 ```
 
@@ -149,7 +152,7 @@ bun run build:db
 # Preview only high-value missing entries
 bun run import:gemini --dry-run --langs zh-tw --common-only --min-frequency 10000 --jlpt-max 3 --limit 100
 
-# Real run with a spend cap and JSON report
+# Real run with a spend cap and JSON report, writing to updates.sqlite
 bun run import:gemini --langs zh-tw --common-only --min-frequency 10000 --limit 5000 --max-cost-usd 2 --report-file reports/gemini-zh-tw.json
 ```
 
@@ -482,7 +485,8 @@ yori-dict/
 │   └── cache/            # Downloaded raw data (gitignored)
 ├── openapi.yaml
 ├── openapi-ts.config.ts
-└── dict.sqlite           # Built database (gitignored)
+├── releases/             # Immutable release snapshots (gitignored)
+└── updates.sqlite        # Incremental overlay updates (gitignored)
 ```
 
 ### Available Scripts
@@ -492,7 +496,10 @@ yori-dict/
 | `bun run dev` | Start dev server with hot reload |
 | `bun run start` | Start production server |
 | `bun run test` | Run test suite |
-| `bun run rebuild:all` | Full deterministic rebuild: base imports + enrichment + build:db |
+| `bun run rebuild:all` | Full deterministic rebuild: base imports + enrichment + candidate release build |
+| `bun run release:build` | Build a versioned immutable release under `releases/<version>/` |
+| `bun run release:activate --version <version>` | Point the runtime at an existing release |
+| `bun run release:promote` | Merge active overlay updates into a new release |
 | `bun run verify:rebuild` | Rebuild in a temporary worktree and compare normalized JSON + SQLite outputs against the checked-in snapshot |
 | `bun run import:base` | Run all base importers (jmdict + kaikki + krdict, `--mode replace`) |
 | `bun run import:enrichment` | Run deterministic enrichment importers (jlpt, tatoeba, wadoku, wiktionary, jmdict-examples, jitendex, kowiktionary-ko, cedict, frequency, zhja) |
@@ -502,7 +509,10 @@ yori-dict/
 | `bun run import:kaikki` | Import Chinese definitions from Kaikki (zhwiktionary) |
 | `bun run import:kowiktionary-ko` | Fill Korean gaps from kowiktionary fallback data |
 | `bun run import:krdict` | Import Korean translations from KRDICT (NIKL) |
-| `bun run import:gemini` | Optional Gemini SDK backfill for missing definitions |
+| `bun run import:gemini` | Optional Gemini SDK backfill for missing definitions, writing to `updates.sqlite` by default |
+| `bun run update:ai` | Alias for Gemini backfill in `updates-db` mode |
+| `bun run update:source` | Diff deterministic `data/lang/*.json` against the active release and write source updates |
+| `bun run verify:updates` | Validate overlay updates against the active release |
 | `bun run sync:zh-cn-from-tw` | Merge zh-cn from zh-tw (OpenCC tw→cn); use `--apply` to write |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
 | `bun run import:cedict` | Import CC-CEDICT Chinese character forms (zh-cn, zh-tw) |
@@ -511,7 +521,7 @@ yori-dict/
 | `bun run import:tatoeba` | Import example sentences (all languages) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
 | `bun run import:wiktionary` | Import Wiktionary definitions |
-| `bun run build:db` | Build SQLite from JSON files |
+| `bun run build:db` | Build and activate a new immutable release from JSON files |
 | `bun run audit:kanji-vocab-gaps` | Report missing / thin kanji-bearing vocabulary by supported language |
 | `bun run verify:dict <path>` | Check dictionary for duplicates and artifacts |
 | `bun run cleanup:dict <path>` | Fix duplicates and artifacts (add `--apply` to write) |
