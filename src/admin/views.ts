@@ -19,254 +19,826 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", '&#39;')
 }
 
-function jsonBlock(value: unknown): string {
-  return `<pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre>`
+function jsonBlock(value: unknown, label = 'View raw JSON'): string {
+  return `<details class="json-details">
+    <summary>${escapeHtml(label)}</summary>
+    <pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre>
+  </details>`
 }
 
+function formatTimestamp(iso: string): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const month = months[d.getMonth()]
+    const day = d.getDate()
+    const year = d.getFullYear()
+    const hours = String(d.getHours()).padStart(2, '0')
+    const mins = String(d.getMinutes()).padStart(2, '0')
+    return `${month} ${day}, ${year} ${hours}:${mins}`
+  } catch {
+    return escapeHtml(iso)
+  }
+}
+
+function renderDefinitionList(data: Record<string, number>): string {
+  const entries = Object.entries(data)
+  if (entries.length === 0) return '<span class="text-muted">none</span>'
+  return `<dl class="stat-list">
+    ${entries.map(([key, val]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(val)}</dd>`).join('')}
+  </dl>`
+}
+
+function renderFilterBar(current: { lang?: string | null, sourceType?: string | null, status?: string | null, reviewStatus?: string | null }): string {
+  const langs: Language[] = ['en', 'de', 'ko', 'zh-cn', 'zh-tw']
+  const sourceTypes = ['source', 'ai']
+  const reviewStatuses = ['not_required', 'pending', 'approved', 'rejected']
+  return `<form method="GET" action="/admin/updates" class="filter-bar">
+    <label>Language
+      <select name="lang">
+        <option value="">All</option>
+        ${langs.map((l) => `<option value="${l}" ${current.lang === l ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+    </label>
+    <label>Source
+      <select name="sourceType">
+        <option value="">All</option>
+        ${sourceTypes.map((s) => `<option value="${s}" ${current.sourceType === s ? 'selected' : ''}>${s}</option>`).join('')}
+      </select>
+    </label>
+    <label>Review
+      <select name="reviewStatus">
+        <option value="">All</option>
+        ${reviewStatuses.map((r) => `<option value="${r}" ${current.reviewStatus === r ? 'selected' : ''}>${r}</option>`).join('')}
+      </select>
+    </label>
+    <button type="submit">Filter</button>
+  </form>`
+}
+
+const NAV_ITEMS = [
+  { href: '/admin', label: 'Dashboard', match: 'Dashboard' },
+  { href: '/admin/entry', label: 'Entry Inspector', match: 'Entry' },
+  { href: '/admin/review', label: 'AI Review', match: 'Review' },
+  { href: '/admin/updates', label: 'Updates', match: 'Updates' },
+  { href: '/admin/releases', label: 'Releases', match: 'Release' },
+  { href: '/admin/jobs', label: 'Jobs', match: 'Jobs' },
+]
+
 function renderPage(title: string, body: string): string {
+  const navHtml = NAV_ITEMS.map(item =>
+    `<a href="${item.href}" ${title.includes(item.match) ? 'aria-current="page"' : ''}>${item.label}</a>`
+  ).join('\n          ')
+
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)}</title>
+    <meta name="color-scheme" content="light" />
+    <title>${escapeHtml(title)} — Yori Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;400;700&family=Source+Sans+3:wght@300;400;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet" />
     <style>
       :root {
-        --bg: #f7f4ec;
-        --panel: rgba(255,255,255,0.82);
-        --panel-strong: #fffdf8;
-        --text: #1f1a16;
-        --muted: #6d6258;
-        --line: #d7cdc1;
-        --accent: #a64b2a;
-        --accent-soft: #f2d7c4;
-        --good: #265d45;
-        --warn: #8b5a10;
-        --bad: #8f2f2f;
-        --shadow: 0 18px 50px rgba(55, 33, 13, 0.08);
+        --hue: 45;
+
+        --surface-0: oklch(97% 0.008 var(--hue));
+        --surface-1: oklch(94.5% 0.012 var(--hue));
+        --surface-2: oklch(99% 0.005 var(--hue));
+        --surface-code: oklch(18% 0.015 var(--hue));
+        --surface-sidebar: oklch(22% 0.018 var(--hue));
+
+        --text-primary: oklch(22% 0.02 var(--hue));
+        --text-secondary: oklch(45% 0.03 var(--hue));
+        --text-tertiary: oklch(58% 0.025 var(--hue));
+        --text-on-dark: oklch(90% 0.01 var(--hue));
+        --text-on-code: oklch(92% 0.015 var(--hue));
+
+        --accent: oklch(52% 0.16 var(--hue));
+        --accent-hover: oklch(46% 0.17 var(--hue));
+        --accent-subtle: oklch(93% 0.035 var(--hue));
+
+        --positive: oklch(45% 0.12 155);
+        --positive-subtle: oklch(95% 0.025 155);
+        --caution: oklch(52% 0.12 85);
+        --caution-subtle: oklch(95% 0.03 85);
+        --negative: oklch(48% 0.14 25);
+        --negative-subtle: oklch(95% 0.025 25);
+        --info: oklch(52% 0.1 var(--hue));
+        --info-subtle: oklch(94% 0.03 var(--hue));
+
+        --border: oklch(88% 0.012 var(--hue));
+        --border-strong: oklch(78% 0.018 var(--hue));
+
+        --text-xs: clamp(0.6875rem, 0.65rem + 0.15vw, 0.75rem);
+        --text-sm: clamp(0.8125rem, 0.78rem + 0.15vw, 0.875rem);
+        --text-base: clamp(0.9375rem, 0.9rem + 0.2vw, 1rem);
+        --text-lg: clamp(1.125rem, 1rem + 0.4vw, 1.25rem);
+        --text-xl: clamp(1.5rem, 1.2rem + 0.8vw, 1.875rem);
+        --text-2xl: clamp(2rem, 1.5rem + 1.2vw, 2.5rem);
+
+        --font-display: "Fraunces", "Noto Serif JP", "Noto Serif KR", serif;
+        --font-body: "Source Sans 3", "Noto Sans JP", "Noto Sans KR", "Noto Sans SC", "Noto Sans TC", system-ui, sans-serif;
+        --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+        --font-jp: "Noto Sans JP", "Noto Sans SC", "Noto Sans TC", "Noto Sans KR", sans-serif;
+
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-5: 24px;
+        --space-6: 32px;
+        --space-7: 48px;
+        --space-8: 64px;
+
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
       }
-      * { box-sizing: border-box; }
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; }
+
       body {
-        margin: 0;
-        font-family: Georgia, "Times New Roman", serif;
-        color: var(--text);
-        background:
-          radial-gradient(circle at top left, rgba(166, 75, 42, 0.12), transparent 35%),
-          linear-gradient(180deg, #faf7f1 0%, var(--bg) 100%);
+        font-family: var(--font-body);
+        font-size: var(--text-base);
+        color: var(--text-primary);
+        background: var(--surface-0);
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
       }
+
+      /* -- Layout shell -- */
+      .shell {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        background: var(--surface-sidebar);
+        padding: var(--space-6) 0;
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        font-family: var(--font-display);
+        font-size: var(--text-xl);
+        font-weight: 700;
+        color: var(--text-on-dark);
+        padding: 0 var(--space-5);
+        margin-bottom: var(--space-7);
+        letter-spacing: -0.02em;
+      }
+      .sidebar-brand span {
+        font-weight: 300;
+        font-size: var(--text-sm);
+        display: block;
+        color: oklch(65% 0.02 var(--hue));
+        margin-top: var(--space-1);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .sidebar nav {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+      }
+      .sidebar nav a {
+        display: block;
+        padding: var(--space-3) var(--space-5);
+        color: oklch(72% 0.015 var(--hue));
+        text-decoration: none;
+        font-size: var(--text-sm);
+        font-weight: 400;
+        border-left: 3px solid transparent;
+        transition: color 120ms, background 120ms, border-color 120ms;
+      }
+      .sidebar nav a:hover {
+        color: var(--text-on-dark);
+        background: oklch(28% 0.015 var(--hue));
+      }
+      .sidebar nav a[aria-current="page"] {
+        color: var(--text-on-dark);
+        background: oklch(28% 0.02 var(--hue));
+        border-left-color: var(--accent);
+        font-weight: 600;
+      }
+
+      .mobile-toggle {
+        display: none;
+        position: fixed;
+        top: var(--space-3);
+        left: var(--space-3);
+        z-index: 100;
+        background: var(--surface-sidebar);
+        color: var(--text-on-dark);
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: var(--space-2) var(--space-3);
+        font-family: var(--font-body);
+        font-size: var(--text-sm);
+        cursor: pointer;
+      }
+
+      .content {
+        padding: var(--space-7) var(--space-7) var(--space-8);
+        max-width: 1000px;
+      }
+
+      /* -- Typography -- */
+      h1, h2, h3, h4 {
+        font-family: var(--font-display);
+        line-height: 1.2;
+        letter-spacing: -0.015em;
+      }
+      h1 {
+        font-size: var(--text-2xl);
+        font-weight: 700;
+        margin-bottom: var(--space-2);
+      }
+      h2 {
+        font-size: var(--text-lg);
+        font-weight: 700;
+        margin-bottom: var(--space-4);
+      }
+      h3 {
+        font-size: var(--text-base);
+        font-weight: 600;
+        margin-bottom: var(--space-2);
+      }
+
+      .page-header {
+        margin-bottom: var(--space-7);
+      }
+      .page-header p {
+        color: var(--text-secondary);
+        max-width: 600px;
+        margin-top: var(--space-2);
+      }
+
       a { color: var(--accent); text-decoration: none; }
       a:hover { text-decoration: underline; }
-      code, pre, input, select, button, textarea { font-family: "SFMono-Regular", Consolas, monospace; }
-      .shell {
-        max-width: 1320px;
-        margin: 0 auto;
-        padding: 24px;
+      .text-muted { color: var(--text-secondary); }
+      .text-tertiary { color: var(--text-tertiary); }
+      .text-sm { font-size: var(--text-sm); }
+      .text-mono { font-family: var(--font-mono); }
+      .text-jp { font-family: var(--font-jp); }
+
+      /* -- Metric strip -- */
+      .metric-strip {
+        display: flex;
+        gap: var(--space-6);
+        padding: var(--space-5) 0;
+        border-top: 2px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        margin-bottom: var(--space-6);
+        flex-wrap: wrap;
       }
-      .hero {
+      .metric-item {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding-right: var(--space-6);
+        border-right: 1px solid var(--border);
+      }
+      .metric-item:last-child {
+        border-right: none;
+        padding-right: 0;
+      }
+      .metric-value {
+        font-family: var(--font-display);
+        font-size: var(--text-xl);
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+      .metric-label {
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-tertiary);
+        font-weight: 600;
+      }
+
+      /* -- Sections -- */
+      .section {
+        margin-bottom: var(--space-7);
+      }
+      .section-header {
         display: flex;
         justify-content: space-between;
-        gap: 16px;
-        align-items: end;
-        margin-bottom: 24px;
+        align-items: baseline;
+        margin-bottom: var(--space-4);
       }
-      .hero h1 {
-        margin: 0;
-        font-size: 34px;
-        line-height: 1.05;
-      }
-      .hero p {
-        margin: 8px 0 0;
-        color: var(--muted);
-        max-width: 780px;
-      }
-      nav {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-      nav a {
-        padding: 8px 12px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        background: rgba(255,255,255,0.7);
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 16px;
-      }
-      .panel {
-        background: var(--panel);
-        border: 1px solid rgba(125, 108, 90, 0.18);
-        border-radius: 18px;
-        box-shadow: var(--shadow);
-        padding: 18px;
-        backdrop-filter: blur(8px);
-      }
-      .panel h2, .panel h3 {
-        margin: 0 0 10px;
-        font-size: 18px;
-      }
-      .metric {
-        font-size: 28px;
-        font-weight: 700;
-      }
-      .muted { color: var(--muted); }
+
       .two-col {
         display: grid;
-        grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
-        gap: 16px;
-        margin-top: 16px;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-6);
       }
-      .stack { display: grid; gap: 16px; }
+      .stack { display: grid; gap: var(--space-5); align-content: start; }
+
+      /* -- Tables -- */
       table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 14px;
       }
-      th, td {
-        padding: 10px 8px;
-        border-bottom: 1px solid var(--line);
+      th {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        padding: var(--space-2) var(--space-3);
+        padding-left: 0;
+        border-bottom: 2px solid var(--border);
         text-align: left;
-        vertical-align: top;
       }
-      th { color: var(--muted); font-weight: 600; }
+      td {
+        padding: var(--space-3);
+        padding-left: 0;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-sm);
+        vertical-align: baseline;
+      }
+      tr:hover td {
+        background: var(--surface-1);
+      }
+      tr.row-active td {
+        background: var(--positive-subtle);
+      }
+      td code {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+      }
+
+      /* -- Badges -- */
       .badge {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        border-radius: 999px;
-        padding: 4px 10px;
-        font-size: 12px;
-        border: 1px solid transparent;
+        gap: var(--space-1);
+        padding: 2px var(--space-2);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
         white-space: nowrap;
+        line-height: 1.4;
+      }
+      .badge::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .badge.active::before, .badge.approved::before, .badge.succeeded::before, .badge.source::before, .badge.not_required::before {
+        background: var(--positive);
       }
       .badge.active, .badge.approved, .badge.succeeded, .badge.source, .badge.not_required {
-        background: rgba(38, 93, 69, 0.12);
-        color: var(--good);
-        border-color: rgba(38, 93, 69, 0.18);
+        background: var(--positive-subtle);
+        color: var(--positive);
+      }
+      .badge.pending::before, .badge.running::before {
+        background: var(--caution);
       }
       .badge.pending, .badge.running {
-        background: rgba(139, 90, 16, 0.12);
-        color: var(--warn);
-        border-color: rgba(139, 90, 16, 0.18);
+        background: var(--caution-subtle);
+        color: var(--caution);
+      }
+      .badge.failed::before, .badge.rejected::before, .badge.superseded::before {
+        background: var(--negative);
       }
       .badge.failed, .badge.rejected, .badge.superseded {
-        background: rgba(143, 47, 47, 0.12);
-        color: var(--bad);
-        border-color: rgba(143, 47, 47, 0.18);
+        background: var(--negative-subtle);
+        color: var(--negative);
+      }
+      .badge.promoted::before, .badge.ai::before {
+        background: var(--info);
       }
       .badge.promoted, .badge.ai {
-        background: var(--accent-soft);
-        color: var(--accent);
-        border-color: rgba(166, 75, 42, 0.24);
+        background: var(--info-subtle);
+        color: var(--info);
       }
+      .badge.inactive {
+        background: var(--surface-1);
+        color: var(--text-tertiary);
+      }
+      .badge.inactive::before {
+        background: var(--text-tertiary);
+      }
+      .badge-row {
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      /* -- Forms -- */
       form {
         display: grid;
-        gap: 10px;
+        gap: var(--space-3);
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
       }
       .inline-form {
         display: flex;
-        gap: 8px;
+        gap: var(--space-3);
         flex-wrap: wrap;
         align-items: end;
       }
+      .filter-bar {
+        display: flex;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        align-items: end;
+        padding: var(--space-4) 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: var(--space-5);
+      }
       label {
         display: grid;
-        gap: 6px;
-        font-size: 13px;
-        color: var(--muted);
+        gap: var(--space-1);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
       }
-      input, select, textarea, button {
-        font-size: 14px;
-        border-radius: 10px;
-        border: 1px solid var(--line);
-        padding: 10px 12px;
-        background: var(--panel-strong);
-        color: var(--text);
+      input, select, textarea {
+        font-family: var(--font-body);
+        font-size: var(--text-sm);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        padding: var(--space-2) var(--space-3);
+        background: var(--surface-2);
+        color: var(--text-primary);
+        transition: border-color 150ms, box-shadow 150ms;
       }
-      textarea { min-height: 110px; resize: vertical; }
+      input:focus, select:focus, textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px oklch(52% 0.16 45 / 10%);
+      }
+      input.input-lg {
+        font-size: var(--text-lg);
+        font-family: var(--font-jp);
+        padding: var(--space-3) var(--space-4);
+      }
+      textarea {
+        min-height: 100px;
+        resize: vertical;
+        font-family: var(--font-mono);
+      }
+      code, pre {
+        font-family: var(--font-mono);
+      }
       button {
-        cursor: pointer;
-        background: linear-gradient(180deg, #b75935 0%, #8f4024 100%);
-        color: white;
+        font-family: var(--font-body);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        border-radius: var(--radius-sm);
         border: none;
+        padding: var(--space-2) var(--space-4);
+        cursor: pointer;
+        background: var(--accent);
+        color: var(--surface-2);
+        transition: background 120ms;
+        white-space: nowrap;
+      }
+      button:hover {
+        background: var(--accent-hover);
       }
       button.secondary {
-        background: #ede5db;
-        color: var(--text);
-        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
       }
-      .actions {
+      button.secondary:hover {
+        background: var(--surface-1);
+        border-color: var(--border-strong);
+        color: var(--text-primary);
+      }
+      button.sm {
+        font-size: var(--text-xs);
+        padding: var(--space-1) var(--space-3);
+      }
+      .btn-group {
         display: flex;
-        gap: 8px;
+        gap: var(--space-2);
+      }
+
+      /* -- Lists & items -- */
+      .item-list {
+        display: grid;
+        gap: 0;
+      }
+      .item {
+        padding: var(--space-4) 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .item:first-child {
+        padding-top: 0;
+      }
+      .item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: var(--space-3);
+        margin-bottom: var(--space-2);
         flex-wrap: wrap;
       }
-      .callout {
-        padding: 12px 14px;
-        border-radius: 12px;
-        background: rgba(166, 75, 42, 0.08);
-        border: 1px solid rgba(166, 75, 42, 0.18);
+      .item-word {
+        font-family: var(--font-jp);
+        font-size: var(--text-lg);
+        font-weight: 700;
       }
-      .empty {
-        padding: 24px;
-        border: 1px dashed var(--line);
-        border-radius: 16px;
-        color: var(--muted);
+      .item-lang {
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+        font-weight: 400;
+        margin-left: var(--space-2);
+      }
+      .item-meta {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-top: var(--space-3);
+      }
+      .item ul, .item ol {
+        margin: var(--space-2) 0;
+        padding-left: var(--space-5);
+      }
+      .item li {
+        font-size: var(--text-sm);
+        margin-bottom: var(--space-1);
+      }
+      .item table {
+        margin-top: var(--space-3);
+      }
+
+      /* -- Stat lists -- */
+      .stat-list {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: var(--space-1) var(--space-4);
+        font-size: var(--text-sm);
+      }
+      .stat-list dt {
+        color: var(--text-secondary);
+      }
+      .stat-list dd {
+        font-family: var(--font-mono);
+        font-weight: 500;
+        text-align: right;
+      }
+
+      /* -- Quick links -- */
+      .quick-links {
+        display: grid;
+        gap: var(--space-2);
+      }
+      .quick-links a {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) 0;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        text-decoration: none;
+        transition: color 120ms;
+      }
+      .quick-links a:hover {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .quick-links a::after {
+        content: '\\2192';
+        color: var(--text-tertiary);
+        transition: transform 120ms, color 120ms;
+      }
+      .quick-links a:hover::after {
+        transform: translateX(3px);
+        color: var(--accent);
+      }
+      .quick-links .link-desc {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+
+      /* -- JSON blocks / details -- */
+      .json-details {
+        margin-top: var(--space-3);
+      }
+      .json-details summary {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        cursor: pointer;
+        padding: var(--space-1) 0;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .json-details summary:hover {
+        color: var(--accent);
       }
       pre {
-        margin: 0;
+        margin: var(--space-2) 0 0;
         overflow: auto;
-        background: #201912;
-        color: #f3ecdf;
-        padding: 14px;
-        border-radius: 14px;
-        font-size: 12px;
+        background: var(--surface-code);
+        color: var(--text-on-code);
+        padding: var(--space-4);
+        border-radius: var(--radius-md);
+        font-size: var(--text-xs);
+        line-height: 1.6;
       }
-      .list {
+
+      /* -- Entry inspector -- */
+      .entry-word {
+        font-family: var(--font-jp);
+        font-size: var(--text-2xl);
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .entry-reading {
+        font-family: var(--font-jp);
+        font-size: var(--text-lg);
+        color: var(--text-secondary);
+        margin-left: var(--space-3);
+      }
+      .entry-detail {
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+      }
+      .entry-section {
+        padding: var(--space-5) 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .entry-section:last-child {
+        border-bottom: none;
+      }
+      .entry-section h3 {
+        font-family: var(--font-body);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-tertiary);
+        margin-bottom: var(--space-3);
+      }
+      .entry-definitions {
+        padding-left: var(--space-5);
+        margin: 0;
+      }
+      .entry-definitions li {
+        margin-bottom: var(--space-1);
+        font-size: var(--text-base);
+      }
+      .entry-examples {
         display: grid;
-        gap: 14px;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
       }
-      .card {
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 16px;
-        background: rgba(255,255,255,0.72);
-      }
-      .card h3 { margin-bottom: 8px; }
-      .split {
+      .entry-example-row {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 12px;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-4);
+        padding: var(--space-2) 0;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-sm);
       }
+      .entry-example-jp {
+        font-family: var(--font-jp);
+      }
+
+      /* -- Panels (used sparingly) -- */
+      .panel {
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-5);
+      }
+
+      /* -- Empty states -- */
+      .empty {
+        padding: var(--space-6) var(--space-5);
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+        text-align: left;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-md);
+      }
+      .empty a {
+        color: var(--accent);
+      }
+
+      /* -- Result display -- */
       .result {
-        margin-top: 12px;
+        margin-top: var(--space-2);
         display: none;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        padding: var(--space-3);
+        background: var(--surface-code);
+        color: var(--text-on-code);
+        border-radius: var(--radius-sm);
+        overflow: auto;
+        max-height: 300px;
       }
       .result.visible { display: block; }
-      @media (max-width: 900px) {
-        .two-col { grid-template-columns: 1fr; }
-        .hero { flex-direction: column; align-items: start; }
+
+      /* -- Loading spinner -- */
+      form[aria-busy="true"] button[type="submit"] {
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      form[aria-busy="true"] button[type="submit"]::after {
+        content: '';
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: spin 600ms linear infinite;
+        margin-left: var(--space-2);
+        vertical-align: middle;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* -- Responsive -- */
+      @media (max-width: 768px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          position: fixed;
+          left: -260px;
+          width: 260px;
+          z-index: 99;
+          transition: left 200ms;
+        }
+        .sidebar.open {
+          left: 0;
+        }
+        .mobile-toggle {
+          display: block;
+        }
+        .content {
+          padding: var(--space-7) var(--space-4) var(--space-8);
+        }
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+        .metric-strip {
+          flex-direction: column;
+          gap: var(--space-4);
+        }
+        .metric-item {
+          border-right: none;
+          padding-right: 0;
+          border-bottom: 1px solid var(--border);
+          padding-bottom: var(--space-4);
+        }
+        .metric-item:last-child {
+          border-bottom: none;
+          padding-bottom: 0;
+        }
+        .entry-example-row {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
+    <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">Menu</button>
     <div class="shell">
-      <div class="hero">
-        <div>
-          <h1>Yori Admin</h1>
-          <p>Inspect immutable releases, review AI overlay updates, and drive release operations without changing the runtime data model.</p>
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          Yori
+          <span>Dictionary Admin</span>
         </div>
         <nav>
-          <a href="/admin">Dashboard</a>
-          <a href="/admin/entry">Entry Inspector</a>
-          <a href="/admin/review">AI Review</a>
-          <a href="/admin/updates">Updates Explorer</a>
-          <a href="/admin/releases">Releases</a>
-          <a href="/admin/jobs">Jobs</a>
+          ${navHtml}
         </nav>
-      </div>
-      ${body}
+      </aside>
+      <main class="content">
+        ${body}
+      </main>
     </div>
     <script>
       async function submitJsonForm(event) {
@@ -277,6 +849,7 @@ function renderPage(title: string, body: string): string {
         if (submitter && submitter.dataset.confirm) {
           if (!window.confirm(submitter.dataset.confirm)) return;
         }
+        form.setAttribute('aria-busy', 'true');
         const formData = new FormData(form);
         const payload = {};
         for (const [key, value] of formData.entries()) {
@@ -314,6 +887,8 @@ function renderPage(title: string, body: string): string {
             result.textContent = String(error);
             result.classList.add('visible');
           }
+        } finally {
+          form.removeAttribute('aria-busy');
         }
       }
       for (const form of document.querySelectorAll('form[data-json-form="true"]')) {
@@ -329,7 +904,7 @@ function renderBadge(value: string): string {
 }
 
 function renderBatchTable(batches: UpdateBatchRecord[]): string {
-  if (batches.length === 0) return '<div class="empty">No batches yet.</div>'
+  if (batches.length === 0) return '<div class="empty">No batches recorded yet. Batches are created when you run source updates or Gemini imports from the <a href="/admin/jobs">Jobs</a> page.</div>'
   return `<table>
     <thead><tr><th>ID</th><th>Kind</th><th>Status</th><th>Actor</th><th>Created</th><th>Notes</th></tr></thead>
     <tbody>
@@ -339,8 +914,8 @@ function renderBatchTable(batches: UpdateBatchRecord[]): string {
           <td>${escapeHtml(batch.kind)}</td>
           <td>${renderBadge(batch.status)}</td>
           <td>${escapeHtml(batch.actor ?? 'system')}</td>
-          <td>${escapeHtml(batch.createdAt)}</td>
-          <td>${escapeHtml(batch.notes ?? '')}</td>
+          <td class="text-tertiary">${formatTimestamp(batch.createdAt)}</td>
+          <td class="text-sm">${escapeHtml(batch.notes ?? '')}</td>
         </tr>
       `).join('')}
     </tbody>
@@ -348,18 +923,24 @@ function renderBatchTable(batches: UpdateBatchRecord[]): string {
 }
 
 function renderReleaseTable(releases: ReleaseListItem[]): string {
-  if (releases.length === 0) return '<div class="empty">No releases found.</div>'
+  if (releases.length === 0) return '<div class="empty">No releases found. Build your first release from the form below.</div>'
   return `<table>
-    <thead><tr><th>Version</th><th>Built</th><th>Schema</th><th>Source Fingerprint</th><th>Promoted From</th><th>State</th></tr></thead>
+    <thead><tr><th>Version</th><th>Built</th><th>Schema</th><th>Fingerprint</th><th>Promoted From</th><th>State</th><th></th></tr></thead>
     <tbody>
       ${releases.map((release) => `
-        <tr>
-          <td>${escapeHtml(release.version)}</td>
-          <td>${escapeHtml(release.builtAt)}</td>
+        <tr class="${release.isActive ? 'row-active' : ''}">
+          <td><strong>${escapeHtml(release.version)}</strong></td>
+          <td class="text-tertiary">${formatTimestamp(release.builtAt)}</td>
           <td>${escapeHtml(release.schemaVersion)}</td>
-          <td><code>${escapeHtml(release.baseSourceFingerprint)}</code></td>
+          <td><code title="${escapeHtml(release.baseSourceFingerprint)}">${escapeHtml(release.baseSourceFingerprint.slice(0, 12))}&hellip;</code></td>
           <td>${escapeHtml(release.promotedFromUpdateSequence ?? 'n/a')}</td>
           <td>${release.isActive ? renderBadge('active') : renderBadge('inactive')}</td>
+          <td>${release.isActive ? '' : `
+            <form action="/admin/api/releases/${escapeHtml(release.version)}/activate" method="POST" data-json-form="true" data-reload="true" style="display:inline">
+              <button type="submit" class="secondary sm">Activate</button>
+              <div class="result" data-result></div>
+            </form>
+          `}</td>
         </tr>
       `).join('')}
     </tbody>
@@ -367,57 +948,59 @@ function renderReleaseTable(releases: ReleaseListItem[]): string {
 }
 
 function renderTranslationCards(items: ListedTranslationUpdate[]): string {
-  if (items.length === 0) return '<div class="empty">No translation updates match this view.</div>'
-  return `<div class="list">
+  if (items.length === 0) return '<div class="empty">No translation updates match this view. Translations are created during source updates or Gemini imports.</div>'
+  return `<div class="item-list">
     ${items.map((item) => `
-      <div class="card">
-        <h3>${escapeHtml(item.wordId)} <span class="muted">(${escapeHtml(item.lang)})</span></h3>
-        <div class="actions">
-          ${renderBadge(item.sourceType)}
-          ${renderBadge(item.status)}
-          ${renderBadge(item.reviewStatus)}
-          <span class="badge">${escapeHtml(`batch:${item.batchId}`)}</span>
-        </div>
-        <div class="split" style="margin-top:12px">
+      <div class="item">
+        <div class="item-header">
           <div>
-            <strong>Definitions</strong>
-            <ul>${item.definitions.map((definition) => `<li>${escapeHtml(definition)}</li>`).join('')}</ul>
+            <span class="item-word">${escapeHtml(item.wordId)}</span>
+            <span class="item-lang">${escapeHtml(item.lang)}</span>
           </div>
-          <div>
-            <strong>Sources</strong>
-            <ul>${item.sources.map((source) => `<li>${escapeHtml(source)}</li>`).join('')}</ul>
+          <div class="badge-row">
+            ${renderBadge(item.sourceType)}
+            ${renderBadge(item.status)}
+            ${renderBadge(item.reviewStatus)}
           </div>
         </div>
-        <div class="muted">Created ${escapeHtml(item.createdAt)} by batch ${item.batchId}</div>
+        <ol class="entry-definitions">
+          ${item.definitions.map((def) => `<li>${escapeHtml(def)}</li>`).join('')}
+        </ol>
+        <div class="item-meta">
+          Sources: ${escapeHtml(item.sources.join(', '))} &middot; Batch ${item.batchId} &middot; ${formatTimestamp(item.createdAt)}
+        </div>
       </div>
     `).join('')}
   </div>`
 }
 
 function renderExampleCards(items: ListedExampleUpdateSet[]): string {
-  if (items.length === 0) return '<div class="empty">No example update sets match this view.</div>'
-  return `<div class="list">
+  if (items.length === 0) return '<div class="empty">No example update sets match this view. Examples are created during Gemini imports.</div>'
+  return `<div class="item-list">
     ${items.map((item) => `
-      <div class="card">
-        <h3>${escapeHtml(item.wordId)} <span class="muted">(${escapeHtml(item.lang)})</span></h3>
-        <div class="actions">
-          ${renderBadge(item.sourceType)}
-          ${renderBadge(item.status)}
-          ${renderBadge(item.reviewStatus)}
-          <span class="badge">${escapeHtml(`batch:${item.batchId}`)}</span>
+      <div class="item">
+        <div class="item-header">
+          <div>
+            <span class="item-word">${escapeHtml(item.wordId)}</span>
+            <span class="item-lang">${escapeHtml(item.lang)}</span>
+          </div>
+          <div class="badge-row">
+            ${renderBadge(item.sourceType)}
+            ${renderBadge(item.status)}
+            ${renderBadge(item.reviewStatus)}
+          </div>
         </div>
-        <table style="margin-top:12px">
-          <thead><tr><th>Japanese</th><th>Translation</th><th>Source</th></tr></thead>
-          <tbody>
-            ${item.examples.map((example) => `
-              <tr>
-                <td>${escapeHtml(example.japanese)}</td>
-                <td>${escapeHtml(example.translation)}</td>
-                <td>${escapeHtml(example.source)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
+        <div class="entry-examples">
+          ${item.examples.map((ex) => `
+            <div class="entry-example-row">
+              <span class="entry-example-jp">${escapeHtml(ex.japanese)}</span>
+              <span>${escapeHtml(ex.translation)}</span>
+            </div>
+          `).join('')}
+        </div>
+        <div class="item-meta">
+          Batch ${item.batchId} &middot; ${formatTimestamp(item.createdAt)}
+        </div>
       </div>
     `).join('')}
   </div>`
@@ -425,35 +1008,74 @@ function renderExampleCards(items: ListedExampleUpdateSet[]): string {
 
 export function renderDashboardPage(data: AdminSummaryResponse): string {
   return renderPage('Dashboard', `
-    <div class="grid">
-      <div class="panel"><h2>Active Release</h2><div class="metric">${escapeHtml(data.activeReleaseVersion)}</div><div class="muted">mode: ${escapeHtml(data.activeReleaseMode)}</div></div>
-      <div class="panel"><h2>Pending AI Review</h2><div class="metric">${escapeHtml((data.reviewCounts['translation:pending'] ?? 0) + (data.reviewCounts['example:pending'] ?? 0))}</div></div>
-      <div class="panel"><h2>Orphaned Updates</h2><div class="metric">${escapeHtml(data.orphanedWordIdsCount)}</div></div>
-      <div class="panel"><h2>Active Reviewed AI</h2><div class="metric">${escapeHtml(data.activeReviewedAiCount)}</div></div>
+    <div class="page-header">
+      <h1>Dashboard</h1>
+      <p>Overview of releases, AI reviews, and update activity.</p>
     </div>
+
+    <div class="metric-strip">
+      <div class="metric-item">
+        <span class="metric-value">${escapeHtml(data.activeReleaseVersion)}</span>
+        <span class="metric-label">Active Release</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-value">${escapeHtml((data.reviewCounts['translation:pending'] ?? 0) + (data.reviewCounts['example:pending'] ?? 0))}</span>
+        <span class="metric-label">Pending Review</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-value">${escapeHtml(data.orphanedWordIdsCount)}</span>
+        <span class="metric-label">Orphaned Updates</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-value">${escapeHtml(data.activeReviewedAiCount)}</span>
+        <span class="metric-label">Reviewed AI</span>
+      </div>
+    </div>
+
     <div class="two-col">
       <div class="stack">
-        <div class="panel">
-          <h2>Status Counts</h2>
-          ${jsonBlock({
-            translations: data.translationCounts,
-            exampleSets: data.exampleSetCounts,
-            reviews: data.reviewCounts,
-          })}
+        <div class="section">
+          <h2>Status Breakdown</h2>
+          <h3>Translations</h3>
+          ${renderDefinitionList(data.translationCounts)}
+          <h3 style="margin-top: var(--space-4)">Example Sets</h3>
+          ${renderDefinitionList(data.exampleSetCounts)}
+          <h3 style="margin-top: var(--space-4)">Reviews</h3>
+          ${renderDefinitionList(data.reviewCounts)}
         </div>
-        <div class="panel">
+        <div class="section">
           <h2>Recent Batches</h2>
           ${renderBatchTable(data.recentBatches)}
         </div>
       </div>
       <div class="stack">
-        <div class="panel">
-          <h2>Quick Links</h2>
-          <div class="list">
-            <div class="callout">Use <a href="/admin/entry">Entry Inspector</a> to compare release, source update, AI update, and final effective lookup.</div>
-            <div class="callout">Use <a href="/admin/review">AI Review</a> to approve or reject pending AI overlays.</div>
-            <div class="callout">Use <a href="/admin/releases">Releases</a> to build, activate, and promote immutable snapshots.</div>
-            <div class="callout">Use <a href="/admin/jobs">Jobs</a> to trigger deterministic source updates or Gemini imports.</div>
+        <div class="section">
+          <h2>Quick Actions</h2>
+          <div class="quick-links">
+            <a href="/admin/entry">
+              <div>
+                <div>Entry Inspector</div>
+                <div class="link-desc">Compare release, source, AI, and effective layers</div>
+              </div>
+            </a>
+            <a href="/admin/review">
+              <div>
+                <div>AI Review Queue</div>
+                <div class="link-desc">Approve or reject pending AI translations</div>
+              </div>
+            </a>
+            <a href="/admin/releases">
+              <div>
+                <div>Release Management</div>
+                <div class="link-desc">Build, activate, and promote releases</div>
+              </div>
+            </a>
+            <a href="/admin/jobs">
+              <div>
+                <div>Jobs</div>
+                <div class="link-desc">Run source updates or Gemini imports</div>
+              </div>
+            </a>
           </div>
         </div>
       </div>
@@ -464,157 +1086,246 @@ export function renderDashboardPage(data: AdminSummaryResponse): string {
 export function renderEntryPage(data: AdminEntryInspectionResponse): string {
   const word = data.word
   return renderPage('Entry Inspector', `
-    <div class="panel">
-      <h2>Lookup an entry</h2>
-      <form method="GET" action="/admin/entry" class="inline-form">
-        <label>Word
-          <input type="text" name="word" value="${escapeHtml(data.query.word)}" placeholder="食べる" />
-        </label>
-        <label>Language
-          <select name="lang">
-            ${(['en', 'de', 'ko', 'zh-cn', 'zh-tw'] as Language[]).map((lang) => `
-              <option value="${lang}" ${data.query.lang === lang ? 'selected' : ''}>${lang}</option>
-            `).join('')}
-          </select>
-        </label>
-        <button type="submit">Inspect</button>
-      </form>
+    <div class="page-header">
+      <h1>Entry Inspector</h1>
+      <p>Look up any word and compare data across release, source, AI, and effective layers.</p>
     </div>
+
+    <form method="GET" action="/admin/entry" class="inline-form" style="margin-bottom: var(--space-6)">
+      <label>Word
+        <input type="text" name="word" value="${escapeHtml(data.query.word)}" placeholder="食べる" class="input-lg" />
+      </label>
+      <label>Language
+        <select name="lang">
+          ${(['en', 'de', 'ko', 'zh-cn', 'zh-tw'] as Language[]).map((lang) => `
+            <option value="${lang}" ${data.query.lang === lang ? 'selected' : ''}>${lang}</option>
+          `).join('')}
+        </select>
+      </label>
+      <button type="submit">Look up</button>
+    </form>
+
     ${word ? `
-      <div class="two-col">
-        <div class="stack">
-          <div class="panel">
-            <h2>Release Word</h2>
-            ${jsonBlock(word)}
-          </div>
-          <div class="panel">
-            <h2>Release Layer</h2>
-            ${jsonBlock(data.release)}
-          </div>
-          <div class="panel">
-            <h2>Source Update Layer</h2>
-            ${jsonBlock(data.sourceUpdate)}
-          </div>
-          <div class="panel">
-            <h2>AI Update Layer</h2>
-            ${jsonBlock(data.aiUpdate)}
+      <div class="entry-section" style="border-top: 2px solid var(--border); padding-top: var(--space-5)">
+        <div style="display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3)">
+          <span class="entry-word">${escapeHtml(word.word)}</span>
+          ${word.reading !== word.word ? `<span class="entry-reading">${escapeHtml(word.reading)}</span>` : ''}
+          <div class="badge-row" style="margin-left: var(--space-2)">
+            ${word.partOfSpeech.map((pos) => `<span class="badge">${escapeHtml(pos)}</span>`).join('')}
           </div>
         </div>
-        <div class="stack">
-          <div class="panel">
-            <h2>Effective Lookup</h2>
-            ${jsonBlock(data.effective)}
-          </div>
-          <div class="panel">
-            <h2>Precedence Notes</h2>
-            <div class="callout">Release provides the base word record. Source updates override AI. Pending or rejected AI entries remain visible here but do not affect the effective lookup.</div>
-          </div>
-        </div>
+        ${word.frequency ? `<div class="entry-detail">Frequency rank: ${escapeHtml(word.frequency)}</div>` : ''}
       </div>
-    ` : `<div class="panel empty">No matching release word found for this query.</div>`}
+
+      ${data.effective ? `
+        <div class="entry-section">
+          <h3>Effective Lookup</h3>
+          <p class="text-sm text-muted" style="margin-bottom: var(--space-3)">What users see — merged from all layers.</p>
+          <ol class="entry-definitions">
+            ${data.effective.definitions.map((def) => `<li>${escapeHtml(def)}</li>`).join('')}
+          </ol>
+          ${data.effective.examples.length > 0 ? `
+            <div class="entry-examples" style="margin-top: var(--space-4)">
+              ${data.effective.examples.map((ex) => `
+                <div class="entry-example-row">
+                  <span class="entry-example-jp">${escapeHtml(ex.japanese)}</span>
+                  <span>${escapeHtml(ex.translation)}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+          ${jsonBlock(data.effective)}
+        </div>
+      ` : ''}
+
+      <div class="entry-section">
+        <h3>Release Layer</h3>
+        ${data.release ? `
+          <ol class="entry-definitions">
+            ${data.release.definitions.map((def) => `<li>${escapeHtml(def)}</li>`).join('')}
+          </ol>
+          ${data.release.examples.length > 0 ? `
+            <div class="entry-examples" style="margin-top: var(--space-3)">
+              ${data.release.examples.map((ex) => `
+                <div class="entry-example-row">
+                  <span class="entry-example-jp">${escapeHtml(ex.japanese)}</span>
+                  <span>${escapeHtml(ex.translation)}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+          <div class="item-meta">Sources: ${escapeHtml(data.release.sources.join(', '))}</div>
+          ${jsonBlock(data.release)}
+        ` : '<div class="text-muted text-sm">No release data for this entry.</div>'}
+      </div>
+
+      <div class="entry-section">
+        <h3>Source Update Layer</h3>
+        ${data.sourceUpdate.translation ? `
+          <div class="badge-row" style="margin-bottom: var(--space-2)">${renderBadge(data.sourceUpdate.translation.status)} ${renderBadge(data.sourceUpdate.translation.reviewStatus)}</div>
+          <ol class="entry-definitions">
+            ${data.sourceUpdate.translation.definitions.map((def) => `<li>${escapeHtml(def)}</li>`).join('')}
+          </ol>
+          ${jsonBlock(data.sourceUpdate)}
+        ` : '<div class="text-muted text-sm">No source updates for this entry.</div>'}
+      </div>
+
+      <div class="entry-section">
+        <h3>AI Update Layer</h3>
+        ${data.aiUpdate.translation ? `
+          <div class="badge-row" style="margin-bottom: var(--space-2)">${renderBadge(data.aiUpdate.translation.status)} ${renderBadge(data.aiUpdate.translation.reviewStatus)} ${renderBadge(data.aiUpdate.translation.sourceType)}</div>
+          <ol class="entry-definitions">
+            ${data.aiUpdate.translation.definitions.map((def) => `<li>${escapeHtml(def)}</li>`).join('')}
+          </ol>
+          ${jsonBlock(data.aiUpdate)}
+        ` : '<div class="text-muted text-sm">No AI updates for this entry.</div>'}
+      </div>
+    ` : data.query.word ? `
+      <div class="empty" style="margin-top: var(--space-5)">
+        No entry found for <strong class="text-jp">${escapeHtml(data.query.word)}</strong> in <strong>${escapeHtml(data.query.lang)}</strong>.
+        Try a different reading or check that the word exists in the release.
+      </div>
+    ` : ''}
   `)
 }
 
 export function renderReviewPage(data: AdminReviewQueueResponse): string {
+  const totalPending = data.translations.length + data.exampleSets.length
   return renderPage('AI Review Queue', `
-    <div class="panel">
-      <h2>Pending AI Reviews</h2>
-      <div class="muted">Active release: ${escapeHtml(data.releaseVersion)}</div>
-      <p class="muted">Only approved AI updates become visible to lookup. Source updates remain automatically effective.</p>
+    <div class="page-header">
+      <h1>AI Review</h1>
+      <p>
+        ${totalPending > 0
+          ? `${totalPending} item${totalPending === 1 ? '' : 's'} pending review.`
+          : 'All caught up.'
+        }
+        Only approved AI updates become visible in lookups. Source updates are effective automatically.
+      </p>
+      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Release: ${escapeHtml(data.releaseVersion)}</div>
     </div>
-    <div class="two-col">
-      <div class="panel">
-        <h2>Translation Candidates</h2>
-        ${data.translations.length === 0 ? '<div class="empty">No pending AI translation reviews.</div>' : data.translations.map((item) => `
-          <div class="card">
-            <h3>${escapeHtml(item.wordId)} <span class="muted">(${escapeHtml(item.lang)})</span></h3>
-            <div class="actions">${renderBadge(item.status)} ${renderBadge(item.reviewStatus)} ${renderBadge(item.sourceType)}</div>
-            <ul>${item.definitions.map((definition) => `<li>${escapeHtml(definition)}</li>`).join('')}</ul>
-            <div class="muted">Sources: ${escapeHtml(item.sources.join(', '))}</div>
-            <form action="/admin/api/review/translation/${item.id}/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form" style="margin-top:12px">
-              <button type="submit">Approve</button>
-              <button type="submit" class="secondary" formaction="/admin/api/review/translation/${item.id}/reject">Reject</button>
-              <div class="result" data-result></div>
-            </form>
-          </div>
-        `).join('')}
-      </div>
-      <div class="panel">
-        <h2>Example Set Candidates</h2>
-        ${data.exampleSets.length === 0 ? '<div class="empty">No pending AI example reviews.</div>' : data.exampleSets.map((item) => `
-          <div class="card">
-            <h3>${escapeHtml(item.wordId)} <span class="muted">(${escapeHtml(item.lang)})</span></h3>
-            <div class="actions">${renderBadge(item.status)} ${renderBadge(item.reviewStatus)} ${renderBadge(item.sourceType)}</div>
-            <table style="margin-top:12px">
-              <thead><tr><th>Japanese</th><th>Translation</th></tr></thead>
-              <tbody>
-                ${item.examples.map((example) => `
-                  <tr><td>${escapeHtml(example.japanese)}</td><td>${escapeHtml(example.translation)}</td></tr>
+
+    <div class="section">
+      <h2>Translation Candidates</h2>
+      ${data.translations.length === 0
+        ? '<div class="empty">No pending AI translations. New candidates appear after a <a href="/admin/jobs">Gemini import</a>.</div>'
+        : `<div class="item-list">
+          ${data.translations.map((item) => `
+            <div class="item">
+              <div class="item-header">
+                <div>
+                  <span class="item-word">${escapeHtml(item.wordId)}</span>
+                  <span class="item-lang">${escapeHtml(item.lang)}</span>
+                </div>
+                <div class="badge-row">
+                  ${renderBadge(item.status)}
+                  ${renderBadge(item.reviewStatus)}
+                  ${renderBadge(item.sourceType)}
+                </div>
+              </div>
+              <ol class="entry-definitions">
+                ${item.definitions.map((def) => `<li>${escapeHtml(def)}</li>`).join('')}
+              </ol>
+              <div class="item-meta">Sources: ${escapeHtml(item.sources.join(', '))}</div>
+              <form action="/admin/api/review/translation/${item.id}/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form" style="margin-top: var(--space-3)">
+                <div class="btn-group">
+                  <button type="submit">Approve</button>
+                  <button type="submit" class="secondary" formaction="/admin/api/review/translation/${item.id}/reject" data-confirm="Reject this AI translation?">Reject</button>
+                </div>
+                <div class="result" data-result></div>
+              </form>
+            </div>
+          `).join('')}
+        </div>`
+      }
+    </div>
+
+    <div class="section">
+      <h2>Example Set Candidates</h2>
+      ${data.exampleSets.length === 0
+        ? '<div class="empty">No pending AI example sets. New candidates appear after a <a href="/admin/jobs">Gemini import</a>.</div>'
+        : `<div class="item-list">
+          ${data.exampleSets.map((item) => `
+            <div class="item">
+              <div class="item-header">
+                <div>
+                  <span class="item-word">${escapeHtml(item.wordId)}</span>
+                  <span class="item-lang">${escapeHtml(item.lang)}</span>
+                </div>
+                <div class="badge-row">
+                  ${renderBadge(item.status)}
+                  ${renderBadge(item.reviewStatus)}
+                  ${renderBadge(item.sourceType)}
+                </div>
+              </div>
+              <div class="entry-examples">
+                ${item.examples.map((ex) => `
+                  <div class="entry-example-row">
+                    <span class="entry-example-jp">${escapeHtml(ex.japanese)}</span>
+                    <span>${escapeHtml(ex.translation)}</span>
+                  </div>
                 `).join('')}
-              </tbody>
-            </table>
-            <form action="/admin/api/review/example-set/${item.id}/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form" style="margin-top:12px">
-              <button type="submit">Approve</button>
-              <button type="submit" class="secondary" formaction="/admin/api/review/example-set/${item.id}/reject">Reject</button>
-              <div class="result" data-result></div>
-            </form>
-          </div>
-        `).join('')}
-      </div>
+              </div>
+              <form action="/admin/api/review/example-set/${item.id}/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form" style="margin-top: var(--space-3)">
+                <div class="btn-group">
+                  <button type="submit">Approve</button>
+                  <button type="submit" class="secondary" formaction="/admin/api/review/example-set/${item.id}/reject" data-confirm="Reject this AI example set?">Reject</button>
+                </div>
+                <div class="result" data-result></div>
+              </form>
+            </div>
+          `).join('')}
+        </div>`
+      }
     </div>
   `)
 }
 
 export function renderReleasesPage(data: AdminReleaseListResponse): string {
   return renderPage('Releases', `
+    <div class="page-header">
+      <h1>Releases</h1>
+      <p>Build immutable snapshots, promote updates, and manage which release is active.</p>
+      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Active: ${escapeHtml(data.activeReleaseVersion)}</div>
+    </div>
+
+    <div class="section">
+      <h2>Release Inventory</h2>
+      ${renderReleaseTable(data.releases)}
+    </div>
+
     <div class="two-col">
-      <div class="stack">
-        <div class="panel">
-          <h2>Build New Release</h2>
-          <form action="/admin/api/releases/build" method="POST" data-json-form="true" data-reload="true">
-            <label>Version override
-              <input type="text" name="version" placeholder="optional" />
-            </label>
-            <label>
-              <select name="activate">
-                <option value="true">Build and activate</option>
-                <option value="false">Build only</option>
-              </select>
-            </label>
-            <button type="submit">Build release</button>
-            <div class="result" data-result></div>
-          </form>
-        </div>
-        <div class="panel">
-          <h2>Promote Active Updates</h2>
-          <form action="/admin/api/releases/promote" method="POST" data-json-form="true" data-reload="true">
-            <label>Version override
-              <input type="text" name="version" placeholder="optional" />
-            </label>
-            <label>
-              <select name="activate">
-                <option value="true">Promote and activate</option>
-                <option value="false">Promote only</option>
-              </select>
-            </label>
-            <button type="submit" data-confirm="Promote current effective updates into a new release?">Promote release</button>
-            <div class="result" data-result></div>
-          </form>
-        </div>
+      <div class="panel">
+        <h2>Build New Release</h2>
+        <form action="/admin/api/releases/build" method="POST" data-json-form="true" data-reload="true">
+          <label>Version override
+            <input type="text" name="version" placeholder="auto-generated if empty" />
+          </label>
+          <label>Mode
+            <select name="activate">
+              <option value="true">Build and activate</option>
+              <option value="false">Build only</option>
+            </select>
+          </label>
+          <button type="submit">Build release</button>
+          <div class="result" data-result></div>
+        </form>
       </div>
       <div class="panel">
-        <h2>Release Inventory</h2>
-        <div class="muted">Active release: ${escapeHtml(data.activeReleaseVersion)}</div>
-        ${renderReleaseTable(data.releases)}
-        <div class="list" style="margin-top:16px">
-          ${data.releases.map((release) => release.isActive ? '' : `
-            <form action="/admin/api/releases/${escapeHtml(release.version)}/activate" method="POST" data-json-form="true" data-reload="true" class="inline-form">
-              <span>${escapeHtml(release.version)}</span>
-              <button type="submit" class="secondary">Activate</button>
-              <div class="result" data-result></div>
-            </form>
-          `).join('')}
-        </div>
+        <h2>Promote Updates</h2>
+        <p class="text-sm text-muted" style="margin-bottom: var(--space-3)">Bake current effective updates into a new release.</p>
+        <form action="/admin/api/releases/promote" method="POST" data-json-form="true" data-reload="true">
+          <label>Version override
+            <input type="text" name="version" placeholder="auto-generated if empty" />
+          </label>
+          <label>Mode
+            <select name="activate">
+              <option value="true">Promote and activate</option>
+              <option value="false">Promote only</option>
+            </select>
+          </label>
+          <button type="submit" data-confirm="Promote current effective updates into a new release?">Promote release</button>
+          <div class="result" data-result></div>
+        </form>
       </div>
     </div>
   `)
@@ -625,27 +1336,34 @@ export function renderJobsPage(
   batchDetail: AdminBatchDetailResponse | null
 ): string {
   return renderPage('Jobs', `
-    <div class="two-col">
-      <div class="stack">
-        <div class="panel">
-          <h2>Run Deterministic Source Update</h2>
-          <form action="/admin/api/jobs/source-update" method="POST" data-json-form="true">
-            <label>Languages
-              <input type="text" name="langs" placeholder="en,de,ko,zh-cn,zh-tw" />
-            </label>
-            <label>
-              <select name="dryRun">
-                <option value="false">Write updates</option>
-                <option value="true">Dry run</option>
-              </select>
-            </label>
-            <button type="submit">Run source update</button>
-            <div class="result" data-result></div>
-          </form>
-        </div>
-        <div class="panel">
-          <h2>Run Gemini Import</h2>
-          <form action="/admin/api/jobs/gemini-import" method="POST" data-json-form="true">
+    <div class="page-header">
+      <h1>Jobs</h1>
+      <p>Trigger source updates or Gemini AI imports, and inspect batch history.</p>
+    </div>
+
+    <div class="two-col" style="margin-bottom: var(--space-7)">
+      <div class="panel">
+        <h2>Source Update</h2>
+        <p class="text-sm text-muted" style="margin-bottom: var(--space-3)">Run deterministic updates from upstream data sources.</p>
+        <form action="/admin/api/jobs/source-update" method="POST" data-json-form="true">
+          <label>Languages
+            <input type="text" name="langs" placeholder="en,de,ko,zh-cn,zh-tw" />
+          </label>
+          <label>Mode
+            <select name="dryRun">
+              <option value="false">Write updates</option>
+              <option value="true">Dry run</option>
+            </select>
+          </label>
+          <button type="submit">Run source update</button>
+          <div class="result" data-result></div>
+        </form>
+      </div>
+      <div class="panel">
+        <h2>Gemini Import</h2>
+        <p class="text-sm text-muted" style="margin-bottom: var(--space-3)">Generate AI translations and examples via Gemini.</p>
+        <form action="/admin/api/jobs/gemini-import" method="POST" data-json-form="true">
+          <div class="form-grid">
             <label>Languages
               <input type="text" name="langs" value="de,ko,zh-cn,zh-tw" />
             </label>
@@ -661,7 +1379,7 @@ export function renderJobsPage(
             <label>Min frequency
               <input type="text" name="minFrequency" value="10000" />
             </label>
-            <label>
+            <label>Scope
               <select name="commonOnly">
                 <option value="true">Common only</option>
                 <option value="false">All entries</option>
@@ -670,57 +1388,105 @@ export function renderJobsPage(
             <label>Max cost USD
               <input type="text" name="maxCostUsd" value="2" />
             </label>
-            <label>
+            <label>Mode
               <select name="dryRun">
                 <option value="true">Dry run</option>
                 <option value="false">Write pending reviews</option>
               </select>
             </label>
-            <button type="submit">Run Gemini import</button>
-            <div class="result" data-result></div>
-          </form>
-        </div>
-      </div>
-      <div class="stack">
-        <div class="panel">
-          <h2>Recent Batches</h2>
-          ${renderBatchTable(batches)}
-        </div>
-        ${batchDetail ? `
-          <div class="panel">
-            <h2>Batch ${batchDetail.batch?.id ?? 'n/a'} Detail</h2>
-            ${jsonBlock(batchDetail.batch)}
-            <h3 style="margin-top:16px">Translation updates</h3>
-            ${renderTranslationCards(batchDetail.translations)}
-            <h3 style="margin-top:16px">Example update sets</h3>
-            ${renderExampleCards(batchDetail.exampleSets)}
           </div>
-        ` : ''}
+          <button type="submit">Run Gemini import</button>
+          <div class="result" data-result></div>
+        </form>
       </div>
     </div>
+
+    <div class="section">
+      <h2>Batch History</h2>
+      ${renderBatchTable(batches)}
+    </div>
+
+    ${batchDetail ? `
+      <div class="section">
+        <h2>Batch ${batchDetail.batch?.id ?? 'n/a'} Detail</h2>
+        ${batchDetail.batch ? `
+          <dl class="stat-list" style="max-width: 400px; margin-bottom: var(--space-4)">
+            <dt>Kind</dt><dd>${escapeHtml(batchDetail.batch.kind)}</dd>
+            <dt>Status</dt><dd>${escapeHtml(batchDetail.batch.status)}</dd>
+            <dt>Actor</dt><dd>${escapeHtml(batchDetail.batch.actor ?? 'system')}</dd>
+            <dt>Created</dt><dd>${formatTimestamp(batchDetail.batch.createdAt)}</dd>
+            ${batchDetail.batch.completedAt ? `<dt>Completed</dt><dd>${formatTimestamp(batchDetail.batch.completedAt)}</dd>` : ''}
+            ${batchDetail.batch.errorMessage ? `<dt>Error</dt><dd style="color: var(--negative)">${escapeHtml(batchDetail.batch.errorMessage)}</dd>` : ''}
+          </dl>
+          ${jsonBlock(batchDetail.batch.inputManifest, 'View input manifest')}
+        ` : ''}
+
+        ${batchDetail.translations.length > 0 ? `
+          <h3 style="margin-top: var(--space-5)">Translation Updates</h3>
+          ${renderTranslationCards(batchDetail.translations)}
+        ` : ''}
+
+        ${batchDetail.exampleSets.length > 0 ? `
+          <h3 style="margin-top: var(--space-5)">Example Update Sets</h3>
+          ${renderExampleCards(batchDetail.exampleSets)}
+        ` : ''}
+      </div>
+    ` : ''}
   `)
 }
 
 export function renderUpdatesPage(data: AdminUpdatesResponse): string {
+  const currentFilters = {
+    lang: null as string | null,
+    sourceType: null as string | null,
+    status: null as string | null,
+    reviewStatus: null as string | null,
+  }
+  // Extract current filters from the URL via the data
+  // We detect applied filters by checking if data has specific subsets
+  // The filter bar will use URL params which are re-parsed by the route handler
   return renderPage('Updates Explorer', `
-    <div class="panel">
-      <h2>Updates Explorer</h2>
-      <div class="muted">Active release: ${escapeHtml(data.releaseVersion)}</div>
-      <div class="callout" style="margin-top:12px">Use query params such as <code>?lang=zh-tw&amp;sourceType=ai&amp;reviewStatus=pending</code> to narrow the view.</div>
+    <div class="page-header">
+      <h1>Updates</h1>
+      <p>Browse all translation and example updates across source and AI layers.</p>
+      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Release: ${escapeHtml(data.releaseVersion)}</div>
     </div>
+
+    ${renderFilterBar(currentFilters)}
+
     <div class="two-col">
-      <div class="panel">
+      <div class="section">
         <h2>Translation Updates</h2>
         ${renderTranslationCards(data.translations)}
       </div>
-      <div class="panel">
+      <div class="section">
         <h2>Example Update Sets</h2>
         ${renderExampleCards(data.exampleSets)}
       </div>
     </div>
-    <div class="panel" style="margin-top:16px">
-      <h2>Verification Snapshot</h2>
-      ${jsonBlock(data.verification)}
+
+    <div class="section" style="margin-top: var(--space-5)">
+      <h2>Verification Summary</h2>
+      <div class="two-col">
+        <div>
+          <h3>Translations</h3>
+          ${renderDefinitionList(data.verification.translationCounts)}
+          <h3 style="margin-top: var(--space-4)">Example Sets</h3>
+          ${renderDefinitionList(data.verification.exampleSetCounts)}
+        </div>
+        <div>
+          <h3>Reviews</h3>
+          ${renderDefinitionList(data.verification.reviewCounts)}
+          <h3 style="margin-top: var(--space-4)">Stats</h3>
+          <dl class="stat-list">
+            <dt>Active reviewed AI</dt><dd>${escapeHtml(data.verification.activeReviewedAiCount)}</dd>
+            <dt>Orphaned word IDs</dt><dd>${escapeHtml(data.verification.orphanedWordIds.length)}</dd>
+          </dl>
+          ${data.verification.orphanedWordIds.length > 0 ? `
+            ${jsonBlock(data.verification.orphanedWordIds, 'View orphaned word IDs')}
+          ` : ''}
+        </div>
+      </div>
     </div>
   `)
 }
