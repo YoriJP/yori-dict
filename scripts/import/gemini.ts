@@ -37,7 +37,7 @@ import {
   requireActiveReleaseConfig,
   type ReleaseSnapshot,
 } from '../../src/storage'
-import { initUpdatesDatabase, insertTranslationUpdate, insertUpdateBatch } from '../../src/update-store'
+import { finalizeUpdateBatch, initUpdatesDatabase, insertTranslationUpdate, insertUpdateBatch } from '../../src/update-store'
 import { applyActiveUpdatesToSnapshot, loadSnapshotFromReleaseDb } from '../release/lib'
 
 type TargetLang = 'en' | 'de' | 'ko' | 'zh-cn' | 'zh-tw'
@@ -67,6 +67,10 @@ export interface CliOptions {
   inputPricePer1M: number | null
   outputPricePer1M: number | null
   dryRun: boolean
+}
+
+export interface GeminiRunOptions extends CliOptions {
+  actor?: string | null
 }
 
 interface PromptItem {
@@ -266,8 +270,8 @@ export function normalizeModelName(value: string): string {
   return trimmed.startsWith('models/') ? trimmed.slice('models/'.length) : trimmed
 }
 
-export function parseArgs(args: string[]): CliOptions {
-  const opts: CliOptions = {
+export function defaultCliOptions(): CliOptions {
+  return {
     langs: [...ALL_LANGS],
     seedLang: 'en',
     outputMode: 'updates-db',
@@ -291,6 +295,10 @@ export function parseArgs(args: string[]): CliOptions {
     outputPricePer1M: null,
     dryRun: false,
   }
+}
+
+export function parseArgs(args: string[]): CliOptions {
+  const opts: CliOptions = defaultCliOptions()
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -1075,6 +1083,7 @@ async function processLanguage(
             sources: ['ai'],
             sourceType: 'ai',
             batchId: updateBatchId,
+            reviewStatus: 'pending',
           })
           updatedEntries++
           addedDefinitions += defs.length
@@ -1165,8 +1174,11 @@ async function loadSeedFile(seedLang: SeedLang): Promise<LangFile | null> {
   return loadLang(path, seedLang)
 }
 
-async function main(): Promise<void> {
-  const opts = parseArgs(process.argv.slice(2))
+export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
+  totals: RunTotals
+  languages: LanguageReport[]
+  reportFile: string | null
+}> {
   const pricing = resolvePricing(opts)
   const filters = buildSelectionFilters(opts)
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null
@@ -1212,136 +1224,159 @@ async function main(): Promise<void> {
   let updatesDb: Database | null = null
   let updateBatchId: number | null = null
 
-  if (opts.outputMode === 'updates-db') {
-    const activeRelease = requireActiveReleaseConfig()
-    const releaseDb = new Database(activeRelease.dbPath, { readonly: true })
-    updatesDb = initUpdatesDatabase()
+  try {
+    if (opts.outputMode === 'updates-db') {
+      const activeRelease = requireActiveReleaseConfig()
+      const releaseDb = new Database(activeRelease.dbPath, { readonly: true })
+      updatesDb = initUpdatesDatabase()
 
-    const releaseSnapshot = loadSnapshotFromReleaseDb(releaseDb)
-    const effectiveSnapshot = applyActiveUpdatesToSnapshot(releaseSnapshot, updatesDb)
+      const releaseSnapshot = loadSnapshotFromReleaseDb(releaseDb)
+      const effectiveSnapshot = applyActiveUpdatesToSnapshot(releaseSnapshot, updatesDb)
 
-    masterKeys = Array.from(releaseSnapshot.words.keys())
-    coreEntries = buildCoreEntriesFromSnapshot(releaseSnapshot)
-    seedFile = opts.seedLang === 'none'
-      ? null
-      : buildLangViewFromSnapshot(effectiveSnapshot, opts.seedLang)
+      masterKeys = Array.from(releaseSnapshot.words.keys())
+      coreEntries = buildCoreEntriesFromSnapshot(releaseSnapshot)
+      seedFile = opts.seedLang === 'none'
+        ? null
+        : buildLangViewFromSnapshot(effectiveSnapshot, opts.seedLang)
 
-    for (const lang of opts.langs) {
-      targetViews.set(lang, buildLangViewFromSnapshot(effectiveSnapshot, lang))
+      for (const lang of opts.langs) {
+        targetViews.set(lang, buildLangViewFromSnapshot(effectiveSnapshot, lang))
+      }
+
+      if (!opts.dryRun) {
+        updateBatchId = insertUpdateBatch(updatesDb, {
+          kind: 'ai_import',
+          inputManifest: {
+            langs: opts.langs,
+            seedLang: opts.seedLang,
+            model: opts.model,
+            outputMode: opts.outputMode,
+          },
+          notes: 'Gemini glossary backfill',
+          actor: opts.actor ?? null,
+        })
+      }
+
+      releaseDb.close()
+    } else {
+      const masterPath = `${LANG_DIR}/en.json`
+      if (!existsSync(masterPath)) {
+        throw new Error(`Master language file not found: ${masterPath}`)
+      }
+      if (!existsSync(CORE_PATH)) {
+        throw new Error(`Core metadata file not found: ${CORE_PATH}`)
+      }
+
+      console.log('Loading master key list: en')
+      const masterFile = await loadLang(masterPath, 'en')
+      masterKeys = Object.keys(masterFile.entries)
+      const core = await loadCore(CORE_PATH)
+      coreEntries = core.entries
+      seedFile = opts.seedLang === 'en'
+        ? masterFile
+        : await loadSeedFile(opts.seedLang)
+
+      for (const lang of opts.langs) {
+        targetViews.set(lang, await loadLang(`${LANG_DIR}/${lang}.json`, lang))
+      }
     }
 
-    if (!opts.dryRun) {
-      updateBatchId = insertUpdateBatch(updatesDb, {
-        kind: 'ai_import',
-        inputManifest: {
+    console.log(`Master key count: ${masterKeys.length.toLocaleString()}`)
+
+    const totals = makeEmptyTotals()
+    const languages: LanguageReport[] = []
+
+    for (const lang of opts.langs) {
+      const report = await processLanguage(
+        lang,
+        opts,
+        masterKeys,
+        seedFile,
+        targetViews.get(lang) ?? {
+          version: '2.0.0',
+          lang,
+          updatedAt: new Date().toISOString(),
+          stats: { entries: 0, withExamples: 0, sources: {} },
+          entries: {},
+        },
+        coreEntries,
+        filters,
+        pricing,
+        client,
+        totals,
+        updatesDb,
+        updateBatchId
+      )
+      languages.push(report)
+
+      if (report.stoppedReason === 'budget') {
+        console.log('\nGlobal budget limit reached; skipping remaining languages.')
+        break
+      }
+
+      if (report.stoppedReason === 'max-input-tokens') {
+        console.log('\nStopped due to --max-input-tokens; adjust batch size or token cap to continue.')
+        break
+      }
+    }
+
+    if (opts.reportFile) {
+      const report: RunReport = {
+        generatedAt: new Date().toISOString(),
+        model: opts.model,
+        dryRun: opts.dryRun,
+        pricing,
+        options: {
           langs: opts.langs,
           seedLang: opts.seedLang,
-          model: opts.model,
           outputMode: opts.outputMode,
+          batchSize: opts.batchSize,
+          maxDefs: opts.maxDefs,
+          saveEvery: opts.saveEvery,
+          limit: opts.limit,
+          offset: opts.offset,
+          retries: opts.retries,
+          minDelayMs: opts.minDelayMs,
+          temperature: opts.temperature,
+          commonOnly: opts.commonOnly,
+          minFrequency: opts.minFrequency,
+          jlptMax: opts.jlptMax,
+          excludeRegex: opts.excludeRegex,
+          maxInputTokens: opts.maxInputTokens,
+          maxCostUsd: opts.maxCostUsd,
+          reportFile: opts.reportFile,
         },
-        notes: 'Gemini glossary backfill',
-      })
+        totals,
+        languages,
+      }
+      await writeReport(opts.reportFile, report)
+      console.log(`Report written: ${opts.reportFile}`)
     }
 
-    releaseDb.close()
-  } else {
-    const masterPath = `${LANG_DIR}/en.json`
-    if (!existsSync(masterPath)) {
-      throw new Error(`Master language file not found: ${masterPath}`)
-    }
-    if (!existsSync(CORE_PATH)) {
-      throw new Error(`Core metadata file not found: ${CORE_PATH}`)
+    if (updatesDb && updateBatchId !== null) {
+      finalizeUpdateBatch(updatesDb, updateBatchId, 'succeeded')
     }
 
-    console.log('Loading master key list: en')
-    const masterFile = await loadLang(masterPath, 'en')
-    masterKeys = Object.keys(masterFile.entries)
-    const core = await loadCore(CORE_PATH)
-    coreEntries = core.entries
-    seedFile = opts.seedLang === 'en'
-      ? masterFile
-      : await loadSeedFile(opts.seedLang)
-
-    for (const lang of opts.langs) {
-      targetViews.set(lang, await loadLang(`${LANG_DIR}/${lang}.json`, lang))
-    }
-  }
-
-  console.log(`Master key count: ${masterKeys.length.toLocaleString()}`)
-
-  const totals = makeEmptyTotals()
-  const languages: LanguageReport[] = []
-
-  for (const lang of opts.langs) {
-    const report = await processLanguage(
-      lang,
-      opts,
-      masterKeys,
-      seedFile,
-      targetViews.get(lang) ?? {
-        version: '2.0.0',
-        lang,
-        updatedAt: new Date().toISOString(),
-        stats: { entries: 0, withExamples: 0, sources: {} },
-        entries: {},
-      },
-      coreEntries,
-      filters,
-      pricing,
-      client,
-      totals,
-      updatesDb,
-      updateBatchId
-    )
-    languages.push(report)
-
-    if (report.stoppedReason === 'budget') {
-      console.log('\nGlobal budget limit reached; skipping remaining languages.')
-      break
-    }
-
-    if (report.stoppedReason === 'max-input-tokens') {
-      console.log('\nStopped due to --max-input-tokens; adjust batch size or token cap to continue.')
-      break
-    }
-  }
-
-  if (opts.reportFile) {
-    const report: RunReport = {
-      generatedAt: new Date().toISOString(),
-      model: opts.model,
-      dryRun: opts.dryRun,
-      pricing,
-      options: {
-        langs: opts.langs,
-        seedLang: opts.seedLang,
-        outputMode: opts.outputMode,
-        batchSize: opts.batchSize,
-        maxDefs: opts.maxDefs,
-        saveEvery: opts.saveEvery,
-        limit: opts.limit,
-        offset: opts.offset,
-        retries: opts.retries,
-        minDelayMs: opts.minDelayMs,
-        temperature: opts.temperature,
-        commonOnly: opts.commonOnly,
-        minFrequency: opts.minFrequency,
-        jlptMax: opts.jlptMax,
-        excludeRegex: opts.excludeRegex,
-        maxInputTokens: opts.maxInputTokens,
-        maxCostUsd: opts.maxCostUsd,
-        reportFile: opts.reportFile,
-      },
+    console.log('\n=== Done ===')
+    return {
       totals,
       languages,
+      reportFile: opts.reportFile,
     }
-    await writeReport(opts.reportFile, report)
-    console.log(`Report written: ${opts.reportFile}`)
+  } catch (error) {
+    if (updatesDb && updateBatchId !== null) {
+      const message = error instanceof Error ? error.message : String(error)
+      finalizeUpdateBatch(updatesDb, updateBatchId, 'failed', message)
+    }
+    throw error
+  } finally {
+    updatesDb?.close()
   }
+}
 
-  updatesDb?.close()
-
-  console.log('\n=== Done ===')
+async function main(): Promise<void> {
+  const opts = parseArgs(process.argv.slice(2))
+  await runGeminiImport(opts)
 }
 
 if (import.meta.main) {

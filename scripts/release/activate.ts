@@ -1,10 +1,4 @@
-import { existsSync } from 'fs'
-import {
-  getReleaseDbPath,
-  getReleaseManifestPath,
-  readReleaseManifest,
-  writeCurrentReleasePointer,
-} from '../../src/storage'
+import { activateRelease } from '../../src/release-service'
 
 interface ActivateOptions {
   version: string
@@ -46,25 +40,8 @@ Usage:
 
 async function main(argv = process.argv.slice(2)): Promise<void> {
   const options = parseArgs(argv)
-  const dbPath = getReleaseDbPath(options.version)
-  const manifestPath = getReleaseManifestPath(options.version)
-
-  if (!existsSync(dbPath)) {
-    throw new Error(`Release DB not found: ${dbPath}`)
-  }
-  if (!existsSync(manifestPath)) {
-    throw new Error(`Release manifest not found: ${manifestPath}`)
-  }
-
-  readReleaseManifest(manifestPath)
-  writeCurrentReleasePointer({
-    version: options.version,
-    dbPath,
-    manifestPath,
-    activatedAt: new Date().toISOString(),
-  })
-
-  console.log(`Activated release: ${options.version}`)
+  const result = activateRelease(options.version)
+  console.log(`Activated release: ${result.version}`)
 }
 
 if (import.meta.main) {
@@ -73,4 +50,3 @@ if (import.meta.main) {
     process.exit(1)
   })
 }
-

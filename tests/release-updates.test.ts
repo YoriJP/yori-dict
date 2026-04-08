@@ -6,7 +6,15 @@ import { Database } from 'bun:sqlite'
 import { closeDb, lookupWord } from '../src/db'
 import { createEmptySnapshot, type ReleaseSnapshot, writeReleaseManifest, type ReleaseManifest } from '../src/storage'
 import { writeReleaseSnapshotToDb, loadSnapshotFromReleaseDb, applyActiveUpdatesToSnapshot } from '../scripts/release/lib'
-import { initUpdatesDatabase, insertExampleUpdateSet, insertTranslationUpdate, insertUpdateBatch, markAllActiveUpdatesPromoted } from '../src/update-store'
+import {
+  approveExampleUpdateSet,
+  approveTranslationUpdate,
+  initUpdatesDatabase,
+  insertExampleUpdateSet,
+  insertTranslationUpdate,
+  insertUpdateBatch,
+  markAllActiveUpdatesPromoted,
+} from '../src/update-store'
 
 const tempPaths: string[] = []
 
@@ -57,7 +65,7 @@ afterEach(() => {
 })
 
 describe('release overlay flow', () => {
-  test('lookup overlays AI and source updates on top of immutable release data', () => {
+  test('lookup only uses approved AI updates and still lets source override them', () => {
     const dir = makeTempDir()
     const releaseDbPath = join(dir, 'release.sqlite')
     const promotedDbPath = join(dir, 'promoted.sqlite')
@@ -89,15 +97,16 @@ describe('release overlay flow', () => {
       inputManifest: { test: true },
       notes: 'AI backfill',
     })
-    insertTranslationUpdate(updatesDb, {
+    const translationUpdateId = insertTranslationUpdate(updatesDb, {
       wordId: '食べる:たべる',
       lang: 'en',
       definitions: ['to consume food'],
       sources: ['ai'],
       sourceType: 'ai',
       batchId,
+      reviewStatus: 'pending',
     })
-    insertExampleUpdateSet(updatesDb, {
+    const exampleSetId = insertExampleUpdateSet(updatesDb, {
       wordId: '食べる:たべる',
       lang: 'en',
       examples: [{
@@ -107,7 +116,21 @@ describe('release overlay flow', () => {
       }],
       sourceType: 'ai',
       batchId,
+      reviewStatus: 'pending',
     })
+    updatesDb.close()
+
+    closeDb()
+    result = lookupWord('食べる', 'en')
+    expect(result?.definitions).toEqual(['to eat'])
+    expect(result?.examples).toEqual([{
+      japanese: '毎朝食べます',
+      translation: 'I eat every morning',
+    }])
+
+    updatesDb = initUpdatesDatabase(updatesDbPath)
+    approveTranslationUpdate(updatesDb, translationUpdateId, 'tester')
+    approveExampleUpdateSet(updatesDb, exampleSetId, 'tester')
     updatesDb.close()
 
     closeDb()
@@ -167,4 +190,3 @@ describe('release overlay flow', () => {
     expect(exampleRows).toHaveLength(0)
   })
 })
-

@@ -11,6 +11,8 @@ export const LEGACY_DB_PATH = process.env.DATABASE_PATH || './dict.sqlite'
 
 export type UpdateSourceType = 'source' | 'ai'
 export type UpdateStatus = 'active' | 'superseded' | 'promoted'
+export type ReviewStatus = 'not_required' | 'pending' | 'approved' | 'rejected'
+export type UpdateBatchStatus = 'running' | 'succeeded' | 'failed'
 
 export interface ReleaseManifest {
   version: string
@@ -64,6 +66,10 @@ export interface ReleaseSnapshot {
   words: Map<string, ReleaseWordRecord>
   translations: Map<string, ReleaseTranslationRecord>
   examples: Map<string, ReleaseExampleRecord[]>
+}
+
+interface TableInfoRow {
+  name: string
 }
 
 export function makeTranslationKey(wordId: string, lang: string): string {
@@ -140,7 +146,11 @@ export function createUpdatesSchema(db: Database): void {
       kind TEXT NOT NULL,
       created_at TEXT NOT NULL,
       input_manifest_json TEXT NOT NULL,
-      notes TEXT
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'succeeded',
+      completed_at TEXT,
+      error_message TEXT,
+      actor TEXT
     );
 
     CREATE TABLE IF NOT EXISTS translation_updates (
@@ -155,6 +165,10 @@ export function createUpdatesSchema(db: Database): void {
       updated_at TEXT NOT NULL,
       batch_id INTEGER NOT NULL,
       supersedes_update_id INTEGER,
+      review_status TEXT NOT NULL DEFAULT 'not_required',
+      reviewed_at TEXT,
+      reviewed_by TEXT,
+      review_notes TEXT,
       FOREIGN KEY (batch_id) REFERENCES update_batches(id)
     );
 
@@ -175,6 +189,10 @@ export function createUpdatesSchema(db: Database): void {
       updated_at TEXT NOT NULL,
       batch_id INTEGER NOT NULL,
       supersedes_set_id INTEGER,
+      review_status TEXT NOT NULL DEFAULT 'not_required',
+      reviewed_at TEXT,
+      reviewed_by TEXT,
+      review_notes TEXT,
       FOREIGN KEY (batch_id) REFERENCES update_batches(id)
     );
 
@@ -203,6 +221,90 @@ export function createUpdatesSchema(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_example_updates_lookup
       ON example_updates(word_id, lang, status, set_id);
+
+    CREATE TABLE IF NOT EXISTS admin_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+  `)
+
+  ensureUpdatesSchemaCompatibility(db)
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_translation_updates_review_lookup
+      ON translation_updates(status, source_type, review_status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_example_update_sets_review_lookup
+      ON example_update_sets(status, source_type, review_status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_update_batches_status
+      ON update_batches(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_admin_actions_created_at
+      ON admin_actions(created_at);
+  `)
+}
+
+function hasColumn(db: Database, tableName: string, columnName: string): boolean {
+  const rows = db.query<TableInfoRow, []>(`PRAGMA table_info(${tableName})`).all()
+  return rows.some((row) => row.name === columnName)
+}
+
+function ensureColumn(db: Database, tableName: string, columnName: string, definition: string): void {
+  if (!hasColumn(db, tableName, columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
+  }
+}
+
+function ensureUpdatesSchemaCompatibility(db: Database): void {
+  ensureColumn(db, 'update_batches', 'status', `TEXT NOT NULL DEFAULT 'succeeded'`)
+  ensureColumn(db, 'update_batches', 'completed_at', 'TEXT')
+  ensureColumn(db, 'update_batches', 'error_message', 'TEXT')
+  ensureColumn(db, 'update_batches', 'actor', 'TEXT')
+
+  ensureColumn(db, 'translation_updates', 'review_status', `TEXT NOT NULL DEFAULT 'not_required'`)
+  ensureColumn(db, 'translation_updates', 'reviewed_at', 'TEXT')
+  ensureColumn(db, 'translation_updates', 'reviewed_by', 'TEXT')
+  ensureColumn(db, 'translation_updates', 'review_notes', 'TEXT')
+
+  ensureColumn(db, 'example_update_sets', 'review_status', `TEXT NOT NULL DEFAULT 'not_required'`)
+  ensureColumn(db, 'example_update_sets', 'reviewed_at', 'TEXT')
+  ensureColumn(db, 'example_update_sets', 'reviewed_by', 'TEXT')
+  ensureColumn(db, 'example_update_sets', 'review_notes', 'TEXT')
+
+  db.exec(`
+    UPDATE translation_updates
+    SET review_status = CASE
+      WHEN source_type = 'ai' THEN 'approved'
+      ELSE 'not_required'
+    END
+    WHERE review_status IS NULL OR review_status = ''
+  `)
+
+  db.exec(`
+    UPDATE example_update_sets
+    SET review_status = CASE
+      WHEN source_type = 'ai' THEN 'approved'
+      ELSE 'not_required'
+    END
+    WHERE review_status IS NULL OR review_status = ''
+  `)
+
+  db.exec(`
+    UPDATE update_batches
+    SET status = 'succeeded'
+    WHERE status IS NULL OR status = ''
+  `)
+
+  db.exec(`
+    UPDATE update_batches
+    SET completed_at = created_at
+    WHERE completed_at IS NULL AND status = 'succeeded'
   `)
 }
 
@@ -310,4 +412,3 @@ export function requireActiveReleaseConfig(): ActiveReleaseConfig {
   }
   return config
 }
-
