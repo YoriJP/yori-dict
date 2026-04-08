@@ -166,6 +166,22 @@ Useful flags:
 - `--max-cost-usd <n>` stops before the next batch would exceed the estimated spend
 - `--report-file <path>` writes a JSON report with filters, token usage, and estimated cost
 
+### Open the Admin UI
+
+```bash
+export ADMIN_TOKEN="change-me"
+bun run dev
+```
+
+Then open `http://localhost:3000/admin` and sign in with Basic Auth using any username plus the `ADMIN_TOKEN` as the password.
+
+The admin UI is intended for internal operations and lets you:
+
+- inspect release/source/AI/effective views for a single entry
+- review pending AI translations and examples before they affect lookup
+- build, activate, and promote immutable releases
+- trigger deterministic source updates and Gemini imports
+
 ### Inspect one entry from the command line
 
 ```bash
