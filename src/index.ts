@@ -4,6 +4,7 @@ import { apiReference } from '@scalar/hono-api-reference'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { lookupWord, initSchema } from './db'
+import adminRoutes from './admin/routes'
 import {
   SUPPORTED_LANGUAGES,
   normalizeLanguage,
@@ -34,6 +35,8 @@ app.get('/docs', apiReference({ url: '/openapi.yaml' }))
 app.get('/health', (c) => {
   return c.json({ status: 'ok' })
 })
+
+app.route('/', adminRoutes)
 
 // Main lookup endpoint
 app.get('/v1/lookup', (c) => {
