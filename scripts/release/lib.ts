@@ -307,11 +307,14 @@ export function applyActiveUpdatesToSnapshot(snapshot: ReleaseSnapshot, updatesD
 
   const translationUpdates = buildTranslationMapFromUpdates(updatesDb)
   for (const [key, value] of translationUpdates) {
+    if (!next.words.has(value.wordId)) continue
     next.translations.set(key, value)
   }
 
   const exampleUpdates = buildExampleMapFromUpdates(updatesDb)
   for (const [key, value] of exampleUpdates) {
+    const [wordId] = key.split('\u0000')
+    if (!next.words.has(wordId)) continue
     next.examples.set(key, value)
   }
 

@@ -199,6 +199,86 @@ describe('release overlay flow', () => {
     }
   })
 
+  test('promote skips orphaned active updates instead of failing the release build', () => {
+    const dir = makeTempDir()
+    const originalCwd = process.cwd()
+    const releaseDbPath = join(dir, 'release.sqlite')
+    const updatesDbPath = join(dir, 'updates.sqlite')
+    const manifestPath = join(dir, 'manifest.json')
+    process.chdir(dir)
+
+    try {
+      writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+      writeReleaseManifest('test-release', {
+        version: 'test-release',
+        builtAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        baseSourceFingerprint: 'test',
+        releaseDbPath,
+        promotedFromUpdateSequence: null,
+      })
+
+      process.env.RELEASE_DB_PATH = releaseDbPath
+      process.env.RELEASE_VERSION = 'test-release'
+      process.env.RELEASE_MANIFEST_PATH = manifestPath
+      process.env.UPDATES_DATABASE_PATH = updatesDbPath
+
+      const updatesDb = initUpdatesDatabase(updatesDbPath)
+      const batchId = insertUpdateBatch(updatesDb, {
+        kind: 'source_import',
+        inputManifest: { test: 'orphaned' },
+        notes: 'orphaned updates should be ignored during promote',
+      })
+
+      insertTranslationUpdate(updatesDb, {
+        wordId: '幽霊語:ゆうれいご',
+        lang: 'en',
+        definitions: ['ghost entry'],
+        sources: ['manual-test'],
+        sourceType: 'source',
+        batchId,
+      })
+      insertExampleUpdateSet(updatesDb, {
+        wordId: '幽霊語:ゆうれいご',
+        lang: 'en',
+        examples: [{
+          japanese: '幽霊語を使う',
+          translation: 'use a ghost entry',
+          source: 'manual-test',
+        }],
+        sourceType: 'source',
+        batchId,
+      })
+      updatesDb.close()
+
+      const result = promoteRelease({ version: 'promoted-release', activate: false })
+
+      const promotedDb = new Database(result.dbPath, { readonly: true })
+      const orphanedTranslation = promotedDb.query<{ count: number }, []>(`
+        SELECT COUNT(*) AS count
+        FROM translations
+        WHERE word_id = '幽霊語:ゆうれいご'
+      `).get()
+      const orphanedExamples = promotedDb.query<{ count: number }, []>(`
+        SELECT COUNT(*) AS count
+        FROM examples
+        WHERE word_id = '幽霊語:ゆうれいご'
+      `).get()
+      const preservedTranslation = promotedDb.query<{ definitions: string }, []>(`
+        SELECT definitions
+        FROM translations
+        WHERE word_id = '食べる:たべる' AND lang = 'en'
+      `).get()
+      promotedDb.close()
+
+      expect(orphanedTranslation?.count).toBe(0)
+      expect(orphanedExamples?.count).toBe(0)
+      expect(JSON.parse(preservedTranslation?.definitions ?? '[]')).toEqual(['to eat'])
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
+
   test('lookup only uses approved AI updates and still lets source override them', () => {
     const dir = makeTempDir()
     const releaseDbPath = join(dir, 'release.sqlite')
