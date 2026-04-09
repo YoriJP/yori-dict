@@ -8,6 +8,9 @@ info:
 
     **Deduplication:** `definitions` are deduplicated across sources (JMdict, Kaikki, Wiktionary, Wadoku).
     `examples` are deduplicated by `(japanese, translation)` pair.
+
+    This spec also documents the internal `/admin/api/*` control plane used by the Admin UI.
+    Admin endpoints require `ADMIN_TOKEN` authentication and are intended for internal operations.
   license:
     name: CC-BY-SA-4.0
 servers:
@@ -19,6 +22,7 @@ tags:
   - name: Health
   - name: Dictionary
   - name: Docs
+  - name: Admin
 paths:
   /openapi.yaml:
     get:
@@ -172,8 +176,820 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 error: Internal server error
+  /admin/api/summary:
+    get:
+      tags:
+        - Admin
+      summary: Admin dashboard summary
+      description: Returns release, review, update, and batch summary data for the admin dashboard.
+      operationId: getAdminSummary
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      responses:
+        '200':
+          description: Admin summary payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSummaryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/releases:
+    get:
+      tags:
+        - Admin
+      summary: List releases
+      description: Returns release inventory and identifies the active release.
+      operationId: getAdminReleaseList
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      responses:
+        '200':
+          description: Release inventory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReleaseListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/releases/{version}:
+    get:
+      tags:
+        - Admin
+      summary: Get one release
+      operationId: getAdminRelease
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: One release record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseListItem'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '404':
+          description: Release not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/releases/build:
+    post:
+      tags:
+        - Admin
+      summary: Build a release from snapshot data
+      description: |
+        Builds a release from the current checked-in snapshot (`data/core.json` and `data/lang/*.json`).
+        This path does not bake overlay updates into the immutable release.
+      operationId: buildAdminRelease
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReleaseBuildRequest'
+      responses:
+        '200':
+          description: Release build result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseActionResult'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/new-word:
+    post:
+      tags:
+        - Admin
+      summary: Create a new word in snapshot data
+      description: |
+        Writes a new canonical entry into snapshot JSON. The new word is not visible to runtime lookup
+        until a new release is built and activated.
+      operationId: createAdminNewWord
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNewWordFormData'
+      responses:
+        '200':
+          description: Word created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNewWordResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNewWordResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '409':
+          description: Duplicate or conflicting word
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNewWordResponse'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/new-word/build-release:
+    post:
+      tags:
+        - Admin
+      summary: Build a release after creating a new word
+      description: |
+        Validates that `createdWordId` exists in the current snapshot, then builds a release from the full
+        current snapshot. This endpoint does not bake current overlay updates into the immutable release;
+        use `/admin/api/releases/promote` for that workflow.
+      operationId: buildAdminReleaseForNewWord
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNewWordBuildReleaseRequest'
+      responses:
+        '200':
+          description: Release build result for the newly created word
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminNewWordBuildReleaseResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/releases/{version}/activate:
+    post:
+      tags:
+        - Admin
+      summary: Activate an existing release
+      operationId: activateAdminRelease
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Release activation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseActionResult'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/releases/promote:
+    post:
+      tags:
+        - Admin
+      summary: Promote effective updates into a new release
+      description: |
+        Builds a new release from the current effective state: active release base plus effective overlay
+        updates (`source` updates and `approved` AI updates). Included updates are then marked `promoted`.
+      operationId: promoteAdminRelease
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReleasePromoteRequest'
+      responses:
+        '200':
+          description: Release promotion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseActionResult'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/entries:
+    get:
+      tags:
+        - Admin
+      summary: Inspect an entry across release and update layers
+      operationId: inspectAdminEntry
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: word
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: lang
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+      responses:
+        '200':
+          description: Entry inspection payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminEntryInspectionResponse'
+        '400':
+          description: Missing word
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/updates:
+    get:
+      tags:
+        - Admin
+      summary: List updates across source and AI layers
+      operationId: listAdminUpdates
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: lang
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+        - name: sourceType
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/UpdateSourceType'
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: reviewStatus
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ReviewStatus'
+      responses:
+        '200':
+          description: Update explorer payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUpdatesResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/ai:
+    get:
+      tags:
+        - Admin
+      summary: Get legacy pending AI review lists
+      description: |
+        Legacy compatibility endpoint that returns flat pending translation/example-set lists.
+        Prefer `/admin/api/review/queue` and `/admin/api/review/batches/{id}/summary` for the current
+        queue-and-batch review workflow.
+      operationId: getAdminAiReviewQueue
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: lang
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+      responses:
+        '200':
+          description: Pending AI translations and example sets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReviewQueueResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/queue:
+    get:
+      tags:
+        - Admin
+      summary: Get AI review queue summary and paginated review units
+      operationId: getAdminReviewQueue
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: batchId
+          in: query
+          required: false
+          schema:
+            type: integer
+            nullable: true
+        - name: lang
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+        - name: risk
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ReviewRiskLevel'
+        - name: shape
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ReviewUnitShape'
+        - name: hasSourceConflict
+          in: query
+          required: false
+          schema:
+            type: boolean
+            nullable: true
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Queue summary plus paginated review units
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReviewQueueResponseV2'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/batches/{id}/summary:
+    get:
+      tags:
+        - Admin
+      summary: Get review summary for one AI batch
+      operationId: getAdminReviewBatchSummary
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Batch review summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReviewBatchSummaryResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/translation/{id}/approve:
+    post:
+      tags:
+        - Admin
+      summary: Approve one AI translation update
+      operationId: approveAdminTranslationReview
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewActionRequest'
+      responses:
+        '200':
+          description: Updated translation review state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedTranslationUpdate'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '404':
+          description: Translation update not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/translation/{id}/reject:
+    post:
+      tags:
+        - Admin
+      summary: Reject one AI translation update
+      operationId: rejectAdminTranslationReview
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewActionRequest'
+      responses:
+        '200':
+          description: Updated translation review state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedTranslationUpdate'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '404':
+          description: Translation update not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/example-set/{id}/approve:
+    post:
+      tags:
+        - Admin
+      summary: Approve one AI example set
+      operationId: approveAdminExampleSetReview
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewActionRequest'
+      responses:
+        '200':
+          description: Updated example set review state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedExampleUpdateSet'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '404':
+          description: Example update set not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/units/approve:
+    post:
+      tags:
+        - Admin
+      summary: Bulk approve AI review units
+      description: |
+        Approves one or more review units in a single batch/single language scope. By default, units with
+        active source conflicts are blocked unless `overrideSourceConflict` is true.
+      operationId: approveAdminReviewUnits
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkReviewActionRequest'
+      responses:
+        '200':
+          description: Bulk review action result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '400':
+          description: Invalid request, blocked unit selection, or queue constraint violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/units/reject:
+    post:
+      tags:
+        - Admin
+      summary: Bulk reject AI review units
+      operationId: rejectAdminReviewUnits
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkReviewActionRequest'
+      responses:
+        '200':
+          description: Bulk review action result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '400':
+          description: Invalid request or queue constraint violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/example-set/{id}/reject:
+    post:
+      tags:
+        - Admin
+      summary: Reject one AI example set
+      operationId: rejectAdminExampleSetReview
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminReviewActionRequest'
+      responses:
+        '200':
+          description: Updated example set review state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedExampleUpdateSet'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '404':
+          description: Example update set not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/jobs/source-update:
+    post:
+      tags:
+        - Admin
+      summary: Run deterministic source update
+      operationId: runAdminSourceUpdate
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSourceUpdateJobRequest'
+      responses:
+        '200':
+          description: Source update job result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSourceUpdateJobResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/jobs/gemini-import:
+    post:
+      tags:
+        - Admin
+      summary: Run Gemini import
+      operationId: runAdminGeminiImport
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminGeminiImportRequest'
+      responses:
+        '200':
+          description: Gemini import result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminGeminiImportResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/batches/{id}:
+    get:
+      tags:
+        - Admin
+      summary: Get one batch detail
+      operationId: getAdminBatchDetail
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Batch detail payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminBatchDetailResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
 components:
+  responses:
+    UnauthorizedAdmin:
+      description: Admin authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Unauthorized
+    AdminDisabled:
+      description: Admin UI is disabled because no admin token is configured
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Admin UI is disabled. Set ADMIN_TOKEN to enable /admin routes.
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    bearerAuth:
+      type: http
+      scheme: bearer
+    adminTokenHeader:
+      type: apiKey
+      in: header
+      name: x-admin-token
   schemas:
+    LanguageCode:
+      type: string
+      enum:
+        - en
+        - de
+        - ko
+        - zh-cn
+        - zh-tw
+    UpdateSourceType:
+      type: string
+      enum:
+        - source
+        - ai
+    ReviewStatus:
+      type: string
+      enum:
+        - not_required
+        - pending
+        - approved
+        - rejected
+    UpdateStatus:
+      type: string
+      enum:
+        - active
+        - superseded
+        - promoted
+    UpdateBatchStatus:
+      type: string
+      enum:
+        - running
+        - succeeded
+        - failed
+    SeedLanguage:
+      type: string
+      enum:
+        - en
+        - de
+        - ko
+        - zh-cn
+        - zh-tw
+        - none
     HealthResponse:
       type: object
       required:
@@ -258,3 +1074,1029 @@ components:
       properties:
         error:
           type: string
+    ReleaseActionResult:
+      type: object
+      required:
+        - version
+        - dbPath
+        - manifestPath
+        - activated
+      properties:
+        version:
+          type: string
+        dbPath:
+          type: string
+        manifestPath:
+          type: string
+        activated:
+          type: boolean
+    ReleaseListItem:
+      type: object
+      required:
+        - version
+        - dbPath
+        - manifestPath
+        - builtAt
+        - schemaVersion
+        - baseSourceFingerprint
+        - promotedFromUpdateSequence
+        - isActive
+      properties:
+        version:
+          type: string
+        dbPath:
+          type: string
+        manifestPath:
+          type: string
+        builtAt:
+          type: string
+          format: date-time
+        schemaVersion:
+          type: string
+        baseSourceFingerprint:
+          type: string
+        promotedFromUpdateSequence:
+          type: integer
+          nullable: true
+        isActive:
+          type: boolean
+    UpdateBatchRecord:
+      type: object
+      required:
+        - id
+        - kind
+        - createdAt
+        - inputManifest
+        - notes
+        - status
+        - completedAt
+        - errorMessage
+        - actor
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum:
+            - source_import
+            - ai_import
+        createdAt:
+          type: string
+          format: date-time
+        inputManifest:
+          type: object
+          additionalProperties: true
+        notes:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/UpdateBatchStatus'
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        actor:
+          type: string
+          nullable: true
+    ReviewMetadata:
+      type: object
+      required:
+        - reviewStatus
+        - reviewedAt
+        - reviewedBy
+        - reviewNotes
+      properties:
+        reviewStatus:
+          $ref: '#/components/schemas/ReviewStatus'
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewedBy:
+          type: string
+          nullable: true
+        reviewNotes:
+          type: string
+          nullable: true
+    ReleaseExampleRecord:
+      type: object
+      required:
+        - wordId
+        - lang
+        - japanese
+        - translation
+        - source
+      properties:
+        wordId:
+          type: string
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        japanese:
+          type: string
+        translation:
+          type: string
+        source:
+          type: string
+    DetailedTranslationUpdate:
+      allOf:
+        - $ref: '#/components/schemas/ReviewMetadata'
+        - type: object
+          required:
+            - id
+            - wordId
+            - lang
+            - definitions
+            - sources
+            - sourceType
+            - status
+            - createdAt
+            - updatedAt
+            - batchId
+            - supersedesUpdateId
+          properties:
+            id:
+              type: integer
+            wordId:
+              type: string
+            lang:
+              $ref: '#/components/schemas/LanguageCode'
+            definitions:
+              type: array
+              items:
+                type: string
+            sources:
+              type: array
+              items:
+                type: string
+            sourceType:
+              $ref: '#/components/schemas/UpdateSourceType'
+            status:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            batchId:
+              type: integer
+            supersedesUpdateId:
+              type: integer
+              nullable: true
+    DetailedExampleUpdateSet:
+      allOf:
+        - $ref: '#/components/schemas/ReviewMetadata'
+        - type: object
+          required:
+            - id
+            - wordId
+            - lang
+            - sourceType
+            - status
+            - createdAt
+            - updatedAt
+            - batchId
+            - supersedesSetId
+            - examples
+          properties:
+            id:
+              type: integer
+            wordId:
+              type: string
+            lang:
+              $ref: '#/components/schemas/LanguageCode'
+            sourceType:
+              $ref: '#/components/schemas/UpdateSourceType'
+            status:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            batchId:
+              type: integer
+            supersedesSetId:
+              type: integer
+              nullable: true
+            examples:
+              type: array
+              items:
+                $ref: '#/components/schemas/ReleaseExampleRecord'
+    ListedTranslationUpdate:
+      allOf:
+        - $ref: '#/components/schemas/DetailedTranslationUpdate'
+        - type: object
+          required:
+            - batch
+          properties:
+            batch:
+              allOf:
+                - $ref: '#/components/schemas/UpdateBatchRecord'
+              nullable: true
+    ListedExampleUpdateSet:
+      allOf:
+        - $ref: '#/components/schemas/DetailedExampleUpdateSet'
+        - type: object
+          required:
+            - batch
+          properties:
+            batch:
+              allOf:
+                - $ref: '#/components/schemas/UpdateBatchRecord'
+              nullable: true
+    UpdateVerificationSummary:
+      type: object
+      required:
+        - translationCounts
+        - exampleSetCounts
+        - reviewCounts
+        - orphanedWordIds
+        - activeReviewedAiCount
+      properties:
+        translationCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        exampleSetCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        reviewCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        orphanedWordIds:
+          type: array
+          items:
+            type: string
+        activeReviewedAiCount:
+          type: integer
+    AdminSummaryResponse:
+      type: object
+      required:
+        - activeReleaseVersion
+        - activeReleaseMode
+        - translationCounts
+        - exampleSetCounts
+        - reviewCounts
+        - orphanedWordIdsCount
+        - activeReviewedAiCount
+        - recentBatches
+      properties:
+        activeReleaseVersion:
+          type: string
+        activeReleaseMode:
+          type: string
+        translationCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        exampleSetCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        reviewCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        orphanedWordIdsCount:
+          type: integer
+        activeReviewedAiCount:
+          type: integer
+        recentBatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/UpdateBatchRecord'
+    AdminReleaseListResponse:
+      type: object
+      required:
+        - activeReleaseVersion
+        - releases
+      properties:
+        activeReleaseVersion:
+          type: string
+        releases:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseListItem'
+    EntryInspectionQuery:
+      type: object
+      required:
+        - word
+        - lang
+      properties:
+        word:
+          type: string
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+    EntryWordSummary:
+      type: object
+      required:
+        - wordId
+        - word
+        - reading
+        - partOfSpeech
+        - frequency
+      properties:
+        wordId:
+          type: string
+        word:
+          type: string
+        reading:
+          type: string
+        partOfSpeech:
+          type: array
+          items:
+            type: string
+        frequency:
+          type: integer
+          nullable: true
+    EntryReleaseLayer:
+      type: object
+      required:
+        - definitions
+        - sources
+        - examples
+      properties:
+        definitions:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            type: object
+            required:
+              - japanese
+              - translation
+              - source
+            properties:
+              japanese:
+                type: string
+              translation:
+                type: string
+              source:
+                type: string
+    EntryUpdateLayer:
+      type: object
+      required:
+        - translation
+        - examples
+      properties:
+        translation:
+          allOf:
+            - $ref: '#/components/schemas/DetailedTranslationUpdate'
+          nullable: true
+        examples:
+          allOf:
+            - $ref: '#/components/schemas/DetailedExampleUpdateSet'
+          nullable: true
+    AdminEntryInspectionResponse:
+      type: object
+      required:
+        - releaseVersion
+        - query
+        - word
+        - release
+        - sourceUpdate
+        - aiUpdate
+        - effective
+      properties:
+        releaseVersion:
+          type: string
+        query:
+          $ref: '#/components/schemas/EntryInspectionQuery'
+        word:
+          allOf:
+            - $ref: '#/components/schemas/EntryWordSummary'
+          nullable: true
+        release:
+          allOf:
+            - $ref: '#/components/schemas/EntryReleaseLayer'
+          nullable: true
+        sourceUpdate:
+          $ref: '#/components/schemas/EntryUpdateLayer'
+        aiUpdate:
+          $ref: '#/components/schemas/EntryUpdateLayer'
+        effective:
+          allOf:
+            - $ref: '#/components/schemas/LookupResponse'
+          nullable: true
+    AdminReviewQueueResponse:
+      type: object
+      required:
+        - releaseVersion
+        - translations
+        - exampleSets
+      properties:
+        releaseVersion:
+          type: string
+        translations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListedTranslationUpdate'
+        exampleSets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListedExampleUpdateSet'
+    ReviewRiskLevel:
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+    ReviewUnitShape:
+      type: string
+      enum:
+        - translation-only
+        - examples-only
+    ReviewUnitFlags:
+      type: object
+      required:
+        - hasSourceConflict
+        - isSuperseded
+        - hasTranslation
+        - hasExamples
+        - isTranslationOnly
+        - isExamplesOnly
+      properties:
+        hasSourceConflict:
+          type: boolean
+        isSuperseded:
+          type: boolean
+        hasTranslation:
+          type: boolean
+        hasExamples:
+          type: boolean
+        isTranslationOnly:
+          type: boolean
+        isExamplesOnly:
+          type: boolean
+    ReviewUnitReleaseValue:
+      type: object
+      required:
+        - definitions
+        - sources
+        - examples
+      properties:
+        definitions:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseExampleRecord'
+    ReviewQueueSummaryRecentBatch:
+      type: object
+      required:
+        - batchId
+        - batch
+        - pendingUnits
+        - sourceConflictCount
+        - byLanguage
+      properties:
+        batchId:
+          type: integer
+        batch:
+          allOf:
+            - $ref: '#/components/schemas/UpdateBatchRecord'
+          nullable: true
+        pendingUnits:
+          type: integer
+        sourceConflictCount:
+          type: integer
+        byLanguage:
+          type: object
+          additionalProperties:
+            type: integer
+    ReviewQueueSummary:
+      type: object
+      required:
+        - pendingUnits
+        - byLanguage
+        - byRisk
+        - sourceConflictCount
+        - recentBatches
+      properties:
+        pendingUnits:
+          type: integer
+        byLanguage:
+          type: object
+          additionalProperties:
+            type: integer
+        byRisk:
+          type: object
+          additionalProperties:
+            type: integer
+        sourceConflictCount:
+          type: integer
+        recentBatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewQueueSummaryRecentBatch'
+    ReviewQueueAppliedFilters:
+      type: object
+      required:
+        - batchId
+        - lang
+        - risk
+        - shape
+        - hasSourceConflict
+        - limit
+      properties:
+        batchId:
+          type: integer
+          nullable: true
+        lang:
+          allOf:
+            - $ref: '#/components/schemas/LanguageCode'
+          nullable: true
+        risk:
+          allOf:
+            - $ref: '#/components/schemas/ReviewRiskLevel'
+          nullable: true
+        shape:
+          allOf:
+            - $ref: '#/components/schemas/ReviewUnitShape'
+          nullable: true
+        hasSourceConflict:
+          type: boolean
+          nullable: true
+        limit:
+          type: integer
+    ReviewUnit:
+      type: object
+      required:
+        - unitId
+        - wordId
+        - lang
+        - batchId
+        - batch
+        - word
+        - translation
+        - exampleSet
+        - release
+        - sourceUpdate
+        - effectivePreview
+        - flags
+        - riskLevel
+      properties:
+        unitId:
+          type: string
+        wordId:
+          type: string
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        batchId:
+          type: integer
+        batch:
+          allOf:
+            - $ref: '#/components/schemas/UpdateBatchRecord'
+          nullable: true
+        word:
+          allOf:
+            - $ref: '#/components/schemas/ReleaseWordRecord'
+          nullable: true
+        translation:
+          allOf:
+            - $ref: '#/components/schemas/ListedTranslationUpdate'
+          nullable: true
+        exampleSet:
+          allOf:
+            - $ref: '#/components/schemas/ListedExampleUpdateSet'
+          nullable: true
+        release:
+          allOf:
+            - $ref: '#/components/schemas/ReviewUnitReleaseValue'
+          nullable: true
+        sourceUpdate:
+          $ref: '#/components/schemas/EntryUpdateLayer'
+        effectivePreview:
+          allOf:
+            - $ref: '#/components/schemas/ReviewUnitReleaseValue'
+          nullable: true
+        flags:
+          $ref: '#/components/schemas/ReviewUnitFlags'
+        riskLevel:
+          $ref: '#/components/schemas/ReviewRiskLevel'
+    AdminReviewQueueResponseV2:
+      type: object
+      required:
+        - releaseVersion
+        - summary
+        - items
+        - nextCursor
+        - filters
+      properties:
+        releaseVersion:
+          type: string
+        summary:
+          $ref: '#/components/schemas/ReviewQueueSummary'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewUnit'
+        nextCursor:
+          type: string
+          nullable: true
+        filters:
+          $ref: '#/components/schemas/ReviewQueueAppliedFilters'
+    AdminReviewBatchSummaryResponse:
+      type: object
+      required:
+        - releaseVersion
+        - batch
+        - pendingUnits
+        - byLanguage
+        - byRisk
+        - sourceConflictCount
+        - translationOnlyCount
+        - examplesOnlyCount
+      properties:
+        releaseVersion:
+          type: string
+        batch:
+          allOf:
+            - $ref: '#/components/schemas/UpdateBatchRecord'
+          nullable: true
+        pendingUnits:
+          type: integer
+        byLanguage:
+          type: object
+          additionalProperties:
+            type: integer
+        byRisk:
+          type: object
+          additionalProperties:
+            type: integer
+        sourceConflictCount:
+          type: integer
+        translationOnlyCount:
+          type: integer
+        examplesOnlyCount:
+          type: integer
+    AdminBatchDetailResponse:
+      type: object
+      required:
+        - releaseVersion
+        - batch
+        - translations
+        - exampleSets
+      properties:
+        releaseVersion:
+          type: string
+        batch:
+          allOf:
+            - $ref: '#/components/schemas/UpdateBatchRecord'
+          nullable: true
+        translations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListedTranslationUpdate'
+        exampleSets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListedExampleUpdateSet'
+    AdminUpdatesResponse:
+      type: object
+      required:
+        - releaseVersion
+        - translations
+        - exampleSets
+        - verification
+      properties:
+        releaseVersion:
+          type: string
+        translations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListedTranslationUpdate'
+        exampleSets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListedExampleUpdateSet'
+        verification:
+          $ref: '#/components/schemas/UpdateVerificationSummary'
+    AdminReviewActionRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          nullable: true
+    BulkReviewActionRequest:
+      type: object
+      required:
+        - unitIds
+      properties:
+        unitIds:
+          oneOf:
+            - type: string
+              description: Comma-delimited review unit ids
+            - type: array
+              items:
+                type: string
+        notes:
+          type: string
+          nullable: true
+        overrideSourceConflict:
+          type: boolean
+          default: false
+    BulkReviewActionResponse:
+      type: object
+      required:
+        - ok
+        - action
+        - affected
+      properties:
+        ok:
+          type: boolean
+        action:
+          type: string
+          enum:
+            - approved
+            - rejected
+        affected:
+          type: object
+          required:
+            - units
+            - translations
+            - exampleSets
+          properties:
+            units:
+              type: integer
+            translations:
+              type: integer
+            exampleSets:
+              type: integer
+        blockedUnitIds:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+    AdminReleaseBuildRequest:
+      type: object
+      properties:
+        version:
+          type: string
+          nullable: true
+        activate:
+          type: boolean
+          default: true
+    AdminReleasePromoteRequest:
+      type: object
+      properties:
+        version:
+          type: string
+          nullable: true
+        activate:
+          type: boolean
+          default: true
+    AdminNewWordBuildReleaseRequest:
+      type: object
+      properties:
+        createdWordId:
+          type: string
+          nullable: true
+        activate:
+          type: boolean
+          default: true
+    AdminNewWordBuildReleaseResponse:
+      allOf:
+        - $ref: '#/components/schemas/ReleaseActionResult'
+        - type: object
+          required:
+            - createdWordId
+          properties:
+            createdWordId:
+              type: string
+              nullable: true
+    SimilarManualWordEntry:
+      type: object
+      required:
+        - wordId
+        - word
+        - reading
+        - match
+      properties:
+        wordId:
+          type: string
+        word:
+          type: string
+        reading:
+          type: string
+        match:
+          type: string
+          enum:
+            - word
+            - reading
+    AdminNewWordExampleInput:
+      type: object
+      required:
+        - japanese
+        - translation
+      properties:
+        japanese:
+          type: string
+        translation:
+          type: string
+    AdminNewWordTranslationInput:
+      type: object
+      required:
+        - lang
+        - definitions
+      properties:
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        definitions:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminNewWordExampleInput'
+    AdminNewWordFormData:
+      type: object
+      required:
+        - word
+        - reading
+        - translations
+      properties:
+        word:
+          type: string
+        reading:
+          type: string
+        partOfSpeech:
+          type: array
+          items:
+            type: string
+        common:
+          type: boolean
+        jlpt:
+          type: integer
+          nullable: true
+        translations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminNewWordTranslationInput'
+    AdminNewWordNextActions:
+      type: object
+      required:
+        - buildReleaseUrl
+        - entryInspectorUrl
+        - releasesUrl
+      properties:
+        buildReleaseUrl:
+          type: string
+        entryInspectorUrl:
+          type: string
+        releasesUrl:
+          type: string
+    AdminNewWordResponse:
+      type: object
+      required:
+        - created
+        - releaseVersion
+        - activeReleaseContainsWord
+        - fieldErrors
+        - warnings
+        - similarEntries
+      properties:
+        created:
+          type: boolean
+        wordId:
+          type: string
+        snapshotFiles:
+          type: array
+          items:
+            type: string
+        releaseVersion:
+          type: string
+        activeReleaseContainsWord:
+          type: boolean
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        similarEntries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimilarManualWordEntry'
+        conflictWordId:
+          type: string
+          nullable: true
+        nextActions:
+          allOf:
+            - $ref: '#/components/schemas/AdminNewWordNextActions'
+          nullable: true
+    LanguageSelector:
+      oneOf:
+        - type: string
+          description: Comma-separated list such as `en,de,ko`
+        - type: array
+          items:
+            $ref: '#/components/schemas/LanguageCode'
+    AdminSourceUpdateJobRequest:
+      type: object
+      properties:
+        langs:
+          $ref: '#/components/schemas/LanguageSelector'
+        dryRun:
+          type: boolean
+          default: false
+    AdminSourceUpdateJobResponse:
+      type: object
+      required:
+        - langs
+        - translationChanges
+        - exampleChanges
+        - batchId
+        - dryRun
+        - outputPath
+      properties:
+        langs:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageCode'
+        translationChanges:
+          type: integer
+        exampleChanges:
+          type: integer
+        batchId:
+          type: integer
+          nullable: true
+        dryRun:
+          type: boolean
+        outputPath:
+          type: string
+    AdminGeminiImportRequest:
+      type: object
+      properties:
+        langs:
+          $ref: '#/components/schemas/LanguageSelector'
+        seedLang:
+          $ref: '#/components/schemas/SeedLanguage'
+        model:
+          type: string
+        limit:
+          type: integer
+          nullable: true
+        minFrequency:
+          type: integer
+          nullable: true
+        jlptMax:
+          type: integer
+          nullable: true
+        maxCostUsd:
+          type: number
+          nullable: true
+        commonOnly:
+          type: boolean
+        dryRun:
+          type: boolean
+          default: true
+    GeminiImportTotals:
+      type: object
+      additionalProperties: true
+      description: Aggregate Gemini import token, request, and cost totals.
+    GeminiImportLanguageReport:
+      type: object
+      additionalProperties: true
+      description: Per-language Gemini import report row.
+    AdminGeminiImportResponse:
+      type: object
+      required:
+        - totals
+        - languages
+        - reportFile
+      properties:
+        totals:
+          $ref: '#/components/schemas/GeminiImportTotals'
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeminiImportLanguageReport'
+        reportFile:
+          type: string
+          nullable: true

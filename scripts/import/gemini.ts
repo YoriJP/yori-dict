@@ -16,6 +16,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai'
+import { Database } from 'bun:sqlite'
 import { existsSync } from 'fs'
 import { mkdir } from 'fs/promises'
 import { dirname } from 'path'
@@ -32,13 +33,21 @@ import {
   type LangEntry,
   type LangFile,
 } from './base'
+import {
+  requireActiveReleaseConfig,
+  type ReleaseSnapshot,
+} from '../../src/storage'
+import { finalizeUpdateBatch, initUpdatesDatabase, insertTranslationUpdate, insertUpdateBatch } from '../../src/update-store'
+import { applyActiveUpdatesToSnapshot, loadSnapshotFromReleaseDb } from '../release/lib'
 
 type TargetLang = 'en' | 'de' | 'ko' | 'zh-cn' | 'zh-tw'
 type SeedLang = TargetLang | 'none'
+type OutputMode = 'json' | 'updates-db'
 
 export interface CliOptions {
   langs: TargetLang[]
   seedLang: SeedLang
+  outputMode: OutputMode
   model: string
   batchSize: number
   maxDefs: number
@@ -58,6 +67,10 @@ export interface CliOptions {
   inputPricePer1M: number | null
   outputPricePer1M: number | null
   dryRun: boolean
+}
+
+export interface GeminiRunOptions extends CliOptions {
+  actor?: string | null
 }
 
 interface PromptItem {
@@ -142,6 +155,7 @@ interface RunReport {
   options: {
     langs: TargetLang[]
     seedLang: SeedLang
+    outputMode: OutputMode
     batchSize: number
     maxDefs: number
     saveEvery: number
@@ -256,10 +270,11 @@ export function normalizeModelName(value: string): string {
   return trimmed.startsWith('models/') ? trimmed.slice('models/'.length) : trimmed
 }
 
-export function parseArgs(args: string[]): CliOptions {
-  const opts: CliOptions = {
+export function defaultCliOptions(): CliOptions {
+  return {
     langs: [...ALL_LANGS],
     seedLang: 'en',
+    outputMode: 'updates-db',
     model: 'gemini-3.1-flash-lite-preview',
     batchSize: 20,
     maxDefs: 3,
@@ -280,6 +295,10 @@ export function parseArgs(args: string[]): CliOptions {
     outputPricePer1M: null,
     dryRun: false,
   }
+}
+
+export function parseArgs(args: string[]): CliOptions {
+  const opts: CliOptions = defaultCliOptions()
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -290,6 +309,12 @@ export function parseArgs(args: string[]): CliOptions {
       i++
     } else if (arg === '--seed-lang' && next) {
       opts.seedLang = parseSeedLang(next)
+      i++
+    } else if (arg === '--output-mode' && next) {
+      if (next !== 'json' && next !== 'updates-db') {
+        throw new Error(`Unsupported --output-mode: ${next}`)
+      }
+      opts.outputMode = next
       i++
     } else if (arg === '--model' && next) {
       opts.model = normalizeModelName(next)
@@ -375,6 +400,7 @@ Usage:
 Options:
   --langs <list>             Comma-separated targets (default: en,de,ko,zh-cn,zh-tw)
   --seed-lang <lang>         Master key/definition source language (default: en, use "none" to disable)
+  --output-mode <mode>       json | updates-db (default: updates-db)
   --model <name>             Gemini model for SDK calls (default: gemini-3.1-flash-lite-preview)
   --batch-size <n>           Entries per API call (default: 20)
   --max-defs <n>             Max generated definitions per entry (default: 3)
@@ -398,6 +424,7 @@ Options:
 
 Examples:
   bun run import:gemini --langs zh-tw --common-only --min-frequency 10000 --limit 5000
+  bun run import:gemini --output-mode json --langs zh-tw --limit 500
   bun run import:gemini --langs de --jlpt-max 3 --max-cost-usd 2 --report-file reports/gemini-de.json
   bun run import:gemini --dry-run --exclude-regex '^[\\p{P}\\p{S}]+$'
 `)
@@ -421,6 +448,55 @@ export function buildSelectionFilters(opts: CliOptions): SelectionFilters {
     jlptMax: opts.jlptMax,
     excludePattern,
   }
+}
+
+function buildCoreEntriesFromSnapshot(snapshot: ReleaseSnapshot): Record<string, CoreEntry> {
+  const entries: Record<string, CoreEntry> = {}
+  for (const [key, word] of snapshot.words) {
+    entries[key] = {
+      word: word.word,
+      reading: word.reading,
+      partOfSpeech: word.partOfSpeech,
+      common: word.common,
+      jlpt: word.jlpt.length > 0 ? word.jlpt[0] ?? null : null,
+      frequency: word.frequency,
+    }
+  }
+  return entries
+}
+
+function buildLangViewFromSnapshot(snapshot: ReleaseSnapshot, lang: TargetLang): LangFile {
+  const langFile: LangFile = {
+    version: '2.0.0',
+    lang,
+    updatedAt: new Date().toISOString(),
+    stats: {
+      entries: 0,
+      withExamples: 0,
+      sources: {},
+    },
+    entries: {},
+  }
+
+  for (const [key, translation] of snapshot.translations) {
+    const [, translationLang] = key.split('\u0000')
+    if (translationLang !== lang) continue
+
+    const examples = snapshot.examples.get(key) ?? []
+    langFile.entries[translation.wordId] = {
+      definitions: translation.definitions,
+      examples: examples.map((example) => ({
+        ja: example.japanese,
+        text: example.translation,
+        source: example.source,
+      })),
+      _defSources: Object.fromEntries(
+        translation.definitions.map((definition) => [definition, [...translation.sources]])
+      ),
+    }
+  }
+
+  return langFile
 }
 
 function matchesExcludePattern(pattern: RegExp | null, key: string): boolean {
@@ -830,14 +906,16 @@ async function processLanguage(
   opts: CliOptions,
   masterKeys: string[],
   seedFile: LangFile | null,
+  target: LangFile,
   coreEntries: Record<string, CoreEntry>,
   filters: SelectionFilters,
   pricing: PricingConfig | null,
   client: GoogleGenAI | null,
-  globalTotals: RunTotals
+  globalTotals: RunTotals,
+  updatesDb: Database | null,
+  updateBatchId: number | null
 ): Promise<LanguageReport> {
   const langPath = `${LANG_DIR}/${lang}.json`
-  const target = await loadLang(langPath, lang)
   const selection = collectMissingKeys(masterKeys, target, coreEntries, filters, opts.offset, opts.limit)
 
   console.log(`\n=== ${lang} ===`)
@@ -994,18 +1072,35 @@ async function processLanguage(
         const defs = result.get(key) ?? []
         if (defs.length === 0) continue
 
-        const entry = ensureEntry(target, key)
-        const before = entry.definitions.length
-
-        for (const def of defs) {
-          addLangDefinition(entry, def, 'ai')
-        }
-
-        const delta = entry.definitions.length - before
-        if (delta > 0) {
+        if (opts.outputMode === 'updates-db') {
+          if (!updatesDb || updateBatchId === null) {
+            throw new Error('Updates DB is not initialized for updates-db output mode')
+          }
+          insertTranslationUpdate(updatesDb, {
+            wordId: key,
+            lang,
+            definitions: defs,
+            sources: ['ai'],
+            sourceType: 'ai',
+            batchId: updateBatchId,
+            reviewStatus: 'pending',
+          })
           updatedEntries++
-          addedDefinitions += delta
-          hasUnsavedChanges = true
+          addedDefinitions += defs.length
+        } else {
+          const entry = ensureEntry(target, key)
+          const before = entry.definitions.length
+
+          for (const def of defs) {
+            addLangDefinition(entry, def, 'ai')
+          }
+
+          const delta = entry.definitions.length - before
+          if (delta > 0) {
+            updatedEntries++
+            addedDefinitions += delta
+            hasUnsavedChanges = true
+          }
         }
       }
     } catch (error) {
@@ -1018,14 +1113,14 @@ async function processLanguage(
       await sleep(opts.minDelayMs)
     }
 
-    if (hasUnsavedChanges && batches % opts.saveEvery === 0) {
+    if (opts.outputMode === 'json' && hasUnsavedChanges && batches % opts.saveEvery === 0) {
       await saveLang(langPath, target)
       hasUnsavedChanges = false
     }
   }
 
   console.log('')
-  if (hasUnsavedChanges) {
+  if (opts.outputMode === 'json' && hasUnsavedChanges) {
     await saveLang(langPath, target)
   }
 
@@ -1039,7 +1134,9 @@ async function processLanguage(
       console.log(`Estimated spend: $${roundCurrency(localTotals.estimatedCostUsd)}`)
     }
   }
-  if (updatedEntries > 0) {
+  if (opts.outputMode === 'updates-db' && updatedEntries > 0) {
+    console.log(`Saved updates to: ${process.env.UPDATES_DATABASE_PATH || './updates.sqlite'}`)
+  } else if (updatedEntries > 0) {
     console.log(`Saved: ${langPath}`)
   } else {
     console.log('No file changes written.')
@@ -1077,8 +1174,11 @@ async function loadSeedFile(seedLang: SeedLang): Promise<LangFile | null> {
   return loadLang(path, seedLang)
 }
 
-async function main(): Promise<void> {
-  const opts = parseArgs(process.argv.slice(2))
+export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
+  totals: RunTotals
+  languages: LanguageReport[]
+  reportFile: string | null
+}> {
   const pricing = resolvePricing(opts)
   const filters = buildSelectionFilters(opts)
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null
@@ -1089,6 +1189,7 @@ async function main(): Promise<void> {
   console.log('=== [AI] Gemini Definition Backfill ===')
   console.log(`Languages: ${opts.langs.join(', ')}`)
   console.log(`Seed language: ${opts.seedLang}`)
+  console.log(`Output mode: ${opts.outputMode}`)
   console.log(`Model: ${opts.model}`)
   console.log(`Batch size: ${opts.batchSize}`)
   console.log(`Max definitions per entry: ${opts.maxDefs}`)
@@ -1116,85 +1217,166 @@ async function main(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true })
   await mkdir(LANG_DIR, { recursive: true })
 
-  const masterPath = `${LANG_DIR}/en.json`
-  if (!existsSync(masterPath)) {
-    throw new Error(`Master language file not found: ${masterPath}`)
-  }
-  if (!existsSync(CORE_PATH)) {
-    throw new Error(`Core metadata file not found: ${CORE_PATH}`)
-  }
+  let masterKeys: string[] = []
+  let coreEntries: Record<string, CoreEntry> = {}
+  let seedFile: LangFile | null = null
+  const targetViews = new Map<TargetLang, LangFile>()
+  let updatesDb: Database | null = null
+  let updateBatchId: number | null = null
 
-  console.log('Loading master key list: en')
-  const masterFile = await loadLang(masterPath, 'en')
-  const masterKeys = Object.keys(masterFile.entries)
-  const core = await loadCore(CORE_PATH)
-  const seedFile = opts.seedLang === 'en'
-    ? masterFile
-    : await loadSeedFile(opts.seedLang)
+  try {
+    if (opts.outputMode === 'updates-db') {
+      const activeRelease = requireActiveReleaseConfig()
+      const releaseDb = new Database(activeRelease.dbPath, { readonly: true })
+      updatesDb = initUpdatesDatabase()
 
-  console.log(`Master key count: ${masterKeys.length.toLocaleString()}`)
+      const releaseSnapshot = loadSnapshotFromReleaseDb(releaseDb)
+      const effectiveSnapshot = applyActiveUpdatesToSnapshot(releaseSnapshot, updatesDb)
 
-  const totals = makeEmptyTotals()
-  const languages: LanguageReport[] = []
+      masterKeys = Array.from(releaseSnapshot.words.keys())
+      coreEntries = buildCoreEntriesFromSnapshot(releaseSnapshot)
+      seedFile = opts.seedLang === 'none'
+        ? null
+        : buildLangViewFromSnapshot(effectiveSnapshot, opts.seedLang)
 
-  for (const lang of opts.langs) {
-    const report = await processLanguage(
-      lang,
-      opts,
-      masterKeys,
-      seedFile,
-      core.entries,
-      filters,
-      pricing,
-      client,
-      totals
-    )
-    languages.push(report)
+      for (const lang of opts.langs) {
+        targetViews.set(lang, buildLangViewFromSnapshot(effectiveSnapshot, lang))
+      }
 
-    if (report.stoppedReason === 'budget') {
-      console.log('\nGlobal budget limit reached; skipping remaining languages.')
-      break
+      if (!opts.dryRun) {
+        updateBatchId = insertUpdateBatch(updatesDb, {
+          kind: 'ai_import',
+          inputManifest: {
+            langs: opts.langs,
+            seedLang: opts.seedLang,
+            model: opts.model,
+            outputMode: opts.outputMode,
+          },
+          notes: 'Gemini glossary backfill',
+          actor: opts.actor ?? null,
+        })
+      }
+
+      releaseDb.close()
+    } else {
+      const masterPath = `${LANG_DIR}/en.json`
+      if (!existsSync(masterPath)) {
+        throw new Error(`Master language file not found: ${masterPath}`)
+      }
+      if (!existsSync(CORE_PATH)) {
+        throw new Error(`Core metadata file not found: ${CORE_PATH}`)
+      }
+
+      console.log('Loading master key list: en')
+      const masterFile = await loadLang(masterPath, 'en')
+      masterKeys = Object.keys(masterFile.entries)
+      const core = await loadCore(CORE_PATH)
+      coreEntries = core.entries
+      seedFile = opts.seedLang === 'en'
+        ? masterFile
+        : await loadSeedFile(opts.seedLang)
+
+      for (const lang of opts.langs) {
+        targetViews.set(lang, await loadLang(`${LANG_DIR}/${lang}.json`, lang))
+      }
     }
 
-    if (report.stoppedReason === 'max-input-tokens') {
-      console.log('\nStopped due to --max-input-tokens; adjust batch size or token cap to continue.')
-      break
-    }
-  }
+    console.log(`Master key count: ${masterKeys.length.toLocaleString()}`)
 
-  if (opts.reportFile) {
-    const report: RunReport = {
-      generatedAt: new Date().toISOString(),
-      model: opts.model,
-      dryRun: opts.dryRun,
-      pricing,
-      options: {
-        langs: opts.langs,
-        seedLang: opts.seedLang,
-        batchSize: opts.batchSize,
-        maxDefs: opts.maxDefs,
-        saveEvery: opts.saveEvery,
-        limit: opts.limit,
-        offset: opts.offset,
-        retries: opts.retries,
-        minDelayMs: opts.minDelayMs,
-        temperature: opts.temperature,
-        commonOnly: opts.commonOnly,
-        minFrequency: opts.minFrequency,
-        jlptMax: opts.jlptMax,
-        excludeRegex: opts.excludeRegex,
-        maxInputTokens: opts.maxInputTokens,
-        maxCostUsd: opts.maxCostUsd,
-        reportFile: opts.reportFile,
-      },
+    const totals = makeEmptyTotals()
+    const languages: LanguageReport[] = []
+
+    for (const lang of opts.langs) {
+      const report = await processLanguage(
+        lang,
+        opts,
+        masterKeys,
+        seedFile,
+        targetViews.get(lang) ?? {
+          version: '2.0.0',
+          lang,
+          updatedAt: new Date().toISOString(),
+          stats: { entries: 0, withExamples: 0, sources: {} },
+          entries: {},
+        },
+        coreEntries,
+        filters,
+        pricing,
+        client,
+        totals,
+        updatesDb,
+        updateBatchId
+      )
+      languages.push(report)
+
+      if (report.stoppedReason === 'budget') {
+        console.log('\nGlobal budget limit reached; skipping remaining languages.')
+        break
+      }
+
+      if (report.stoppedReason === 'max-input-tokens') {
+        console.log('\nStopped due to --max-input-tokens; adjust batch size or token cap to continue.')
+        break
+      }
+    }
+
+    if (opts.reportFile) {
+      const report: RunReport = {
+        generatedAt: new Date().toISOString(),
+        model: opts.model,
+        dryRun: opts.dryRun,
+        pricing,
+        options: {
+          langs: opts.langs,
+          seedLang: opts.seedLang,
+          outputMode: opts.outputMode,
+          batchSize: opts.batchSize,
+          maxDefs: opts.maxDefs,
+          saveEvery: opts.saveEvery,
+          limit: opts.limit,
+          offset: opts.offset,
+          retries: opts.retries,
+          minDelayMs: opts.minDelayMs,
+          temperature: opts.temperature,
+          commonOnly: opts.commonOnly,
+          minFrequency: opts.minFrequency,
+          jlptMax: opts.jlptMax,
+          excludeRegex: opts.excludeRegex,
+          maxInputTokens: opts.maxInputTokens,
+          maxCostUsd: opts.maxCostUsd,
+          reportFile: opts.reportFile,
+        },
+        totals,
+        languages,
+      }
+      await writeReport(opts.reportFile, report)
+      console.log(`Report written: ${opts.reportFile}`)
+    }
+
+    if (updatesDb && updateBatchId !== null) {
+      finalizeUpdateBatch(updatesDb, updateBatchId, 'succeeded')
+    }
+
+    console.log('\n=== Done ===')
+    return {
       totals,
       languages,
+      reportFile: opts.reportFile,
     }
-    await writeReport(opts.reportFile, report)
-    console.log(`Report written: ${opts.reportFile}`)
+  } catch (error) {
+    if (updatesDb && updateBatchId !== null) {
+      const message = error instanceof Error ? error.message : String(error)
+      finalizeUpdateBatch(updatesDb, updateBatchId, 'failed', message)
+    }
+    throw error
+  } finally {
+    updatesDb?.close()
   }
+}
 
-  console.log('\n=== Done ===')
+async function main(): Promise<void> {
+  const opts = parseArgs(process.argv.slice(2))
+  await runGeminiImport(opts)
 }
 
 if (import.meta.main) {

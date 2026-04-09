@@ -1,10 +1,41 @@
-import { describe, test, expect } from 'bun:test'
-import app from '../src/index'
+import { afterAll, beforeAll, describe, test, expect } from 'bun:test'
+import { closeDb } from '../src/db'
+
+let app: { fetch: (request: Request) => Response | Promise<Response> }
+let originalReleaseDbPath: string | undefined
+let originalReleaseVersion: string | undefined
+let originalReleaseManifestPath: string | undefined
 
 // Helper to make requests to the app
 async function request(path: string): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`))
 }
+
+beforeAll(async () => {
+  originalReleaseDbPath = process.env.RELEASE_DB_PATH
+  originalReleaseVersion = process.env.RELEASE_VERSION
+  originalReleaseManifestPath = process.env.RELEASE_MANIFEST_PATH
+
+  process.env.RELEASE_DB_PATH = './dict.sqlite'
+  process.env.RELEASE_VERSION = 'api-test'
+  delete process.env.RELEASE_MANIFEST_PATH
+
+  const module = await import('../src/index')
+  app = module.default
+})
+
+afterAll(() => {
+  closeDb()
+
+  if (originalReleaseDbPath === undefined) delete process.env.RELEASE_DB_PATH
+  else process.env.RELEASE_DB_PATH = originalReleaseDbPath
+
+  if (originalReleaseVersion === undefined) delete process.env.RELEASE_VERSION
+  else process.env.RELEASE_VERSION = originalReleaseVersion
+
+  if (originalReleaseManifestPath === undefined) delete process.env.RELEASE_MANIFEST_PATH
+  else process.env.RELEASE_MANIFEST_PATH = originalReleaseManifestPath
+})
 
 describe('Health Check', () => {
   test('GET /health returns ok', async () => {

@@ -3,8 +3,10 @@ node_modules/
 
 # Database (built from JSON during Docker build)
 dict.sqlite
+updates.sqlite
 *.sqlite-wal
 *.sqlite-shm
+releases/
 
 # Downloaded source data (re-fetchable via import scripts)
 data/cache/

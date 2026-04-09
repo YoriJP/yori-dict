@@ -64,9 +64,10 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 ## Project Status
 
 - **Checked-in snapshots** live under `data/core.json` and `data/lang/*.json`
-- **Deterministic rebuilds** are supported with `bun run rebuild:all`
+- **Deterministic rebuilds** are supported with `bun run rebuild:all`, which now builds a candidate release without changing the active release pointer
 - **Rebuild verification** is built in via `bun run verify:rebuild`
-- **AI backfill** exists as an opt-in path via `import:gemini`, but it is intentionally excluded from the reproducible pipeline
+- **Runtime data** now comes from an immutable active release DB plus an overlay `updates.sqlite`
+- **AI backfill** exists as an opt-in path via `import:gemini`, and now writes incremental updates by default instead of mutating `data/lang/*.json`
 
 
 ## Quick Start
@@ -83,9 +84,9 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 
 | Goal | Recommended commands | When to use it |
 |------|----------------------|----------------|
-| Run the API quickly | `bun run data:pull` → `bun run build:db` → `bun run dev` | You want the checked-in snapshot with minimal setup |
-| Rebuild from source | `bun run rebuild:all` → `bun run verify:rebuild` | You are changing importers, snapshots, or build logic |
-| Backfill missing definitions | `bun run import:gemini ...` | You explicitly want non-deterministic AI-generated definitions |
+| Run the API quickly | `bun run data:pull` → `bun run build:db` → `bun run dev` | You want to build and activate a new immutable release from the checked-in snapshot |
+| Rebuild from source | `bun run rebuild:all` → `bun run release:activate --version <version>` | You are preparing a new candidate release from deterministic inputs |
+| Backfill missing definitions | `bun run import:gemini ...` | You want AI-generated candidates written into the overlay review queue, then approved before they affect lookup |
 
 ### Install & Run
 
@@ -97,12 +98,13 @@ bun install
 
 # Option A: Use existing data (fastest)
 bun run data:pull    # Download from Git LFS
-bun run build:db     # Build SQLite (~10s)
+bun run build:db     # Build and activate a new immutable release (~10s)
 bun run dev          # Start server
 
 # Option B: Build from scratch (fresh data)
-bun run rebuild:all  # base imports + deterministic enrichment + build:db
+bun run rebuild:all  # base imports + deterministic enrichment + candidate release build
 bun run verify:rebuild  # optional: rebuild in a temp worktree and compare outputs
+bun run release:activate --version <version>  # activate the candidate release when you are ready
 # Optional: AI backfill for missing definitions (SDK-based, not included in rebuild:all)
 # bun run import:gemini --langs de,ko,zh-cn,zh-tw --limit 5000
 bun run dev
@@ -133,6 +135,7 @@ bun run dev
 
 ```bash
 bun run rebuild:all
+bun run release:activate --version <version>
 bun run verify:rebuild
 ```
 
@@ -149,7 +152,7 @@ bun run build:db
 # Preview only high-value missing entries
 bun run import:gemini --dry-run --langs zh-tw --common-only --min-frequency 10000 --jlpt-max 3 --limit 100
 
-# Real run with a spend cap and JSON report
+# Real run with a spend cap and JSON report, writing to updates.sqlite
 bun run import:gemini --langs zh-tw --common-only --min-frequency 10000 --limit 5000 --max-cost-usd 2 --report-file reports/gemini-zh-tw.json
 ```
 
@@ -162,6 +165,33 @@ Useful flags:
 - `--max-input-tokens <n>` stops before a batch prompt gets too large
 - `--max-cost-usd <n>` stops before the next batch would exceed the estimated spend
 - `--report-file <path>` writes a JSON report with filters, token usage, and estimated cost
+
+### Open the Admin UI
+
+```bash
+export ADMIN_TOKEN="change-me"
+bun run dev
+```
+
+Then open `http://localhost:3000/admin` and sign in with Basic Auth using any username plus the `ADMIN_TOKEN` as the password.
+
+The admin UI is intended for internal operations and lets you:
+
+- inspect release/source/AI/effective views for a single entry
+- review pending AI translations and examples in a queue and batch workflow before they affect lookup
+- create new words in snapshot data, then build a release from the current snapshot to publish them
+- build, activate, and promote immutable releases with separate snapshot-vs-overlay semantics
+- trigger deterministic source updates and Gemini imports
+
+Important release semantics:
+
+- `new-word/build-release` and `release:build` publish the current checked-in snapshot
+- they do not bake current overlay updates into the immutable release
+- `release:promote` is the path that bakes current effective source/approved-AI overlay data into a new release and marks those updates as `promoted`
+
+Full internal manual:
+
+- [Admin Operations Manual (繁中 / English / 日本語)](docs/admin-operations-manual.md)
 
 ### Inspect one entry from the command line
 
@@ -181,6 +211,13 @@ http://localhost:3000/docs
 ```
 
 The spec is also available as a raw file at `GET /openapi.yaml` and in the repo at [`openapi.yaml`](openapi.yaml).
+
+The OpenAPI spec covers:
+
+- public lookup and health endpoints
+- internal `/admin/api/*` control-plane endpoints used by the admin UI
+
+Admin API operations require `ADMIN_TOKEN` authentication and are intended for internal use.
 
 
 ### `GET /v1/lookup`
@@ -276,29 +313,26 @@ Returns `{"status": "ok"}` when the server is running.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        DATA PIPELINE                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
-│   │   IMPORT     │    │   BUILD      │    │   SERVE      │     │
-│   │              │    │              │    │              │     │
-│   │ JMdict JSON  │───▶│ data/core.json    │──▶│ dict.sqlite │  │
-│   │ KRDICT JSON  │    │ data/lang/en.json │   │             │  │
-│   │ Kaikki JSONL │    │ data/lang/de.json │   │ ~167MiB     │  │
-│   │ Tatoeba TSV  │    │ data/lang/ko.json │   │             │  │
-│   │ Wiktionary   │    │ data/lang/zh-*    │   │ ~1ms lookup │  │
-│   │ Wadoku/JLPT  │    │                   │   │             │  │
-│   │ Gemini SDK*  │    │                   │   │             │  │
-│   └──────────────┘    │ ~186MiB total JSON │   └─────────────┘  │
-│         ▲                    ▲                   ▲              │
-│         │                    │                   │              │
-│    ┌────┴────┐          ┌────┴────┐        ┌────┴────┐         │
-│    │ Scripts │          │ Scripts │        │   API   │         │
-│    │ import/*│          │build-db │        │  Hono   │         │
-│    └─────────┘          └─────────┘        └─────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                            DATA PIPELINE                                  │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  IMPORTERS                SNAPSHOT                 RELEASES       SERVE    │
+│  ─────────                ────────                 ────────       ─────    │
+│  JMdict JSON   ───────▶   data/core.json    ───▶  releases/v1/   active    │
+│  KRDICT JSON             data/lang/en.json        dict.sqlite     release   │
+│  Kaikki JSONL            data/lang/de.json        manifest.json     │       │
+│  Tatoeba TSV             data/lang/ko.json        releases/v2/      │       │
+│  Wiktionary              data/lang/zh-*           dict.sqlite       ▼       │
+│  Wadoku/JLPT             add / new-word writes                     Hono API │
+│  Gemini SDK*             snapshot first                           +         │
+│                                                                updates.sqlite│
+│                                                                            │
+│  release:build -> create candidate immutable release                       │
+│  release:activate -> switch runtime pointer (or env-pinned override)       │
+│  release:promote -> bake current effective overlay into a new release      │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 `*` Optional post-processing step for missing definitions only; not part of `rebuild:all`.
@@ -413,7 +447,7 @@ CREATE TABLE examples (
 );
 ```
 
-The server runs `initSchema()` on startup so an empty SQLite file gets minimal tables; **`bun run build:db`** is what populates a database that fully matches this layout (including `frequency` on `words`).
+The server runs `initSchema()` on startup so it can open the active release DB and `updates.sqlite`. **`bun run build:db`** now builds and activates a new immutable release under `releases/<version>/`; it no longer rewrites a single shared `dict.sqlite` runtime file.
 
 
 ## Development
@@ -423,8 +457,13 @@ The server runs `initSchema()` on startup so an empty SQLite file gets minimal t
 ```
 yori-dict/
 ├── src/
+│   ├── admin/            # Internal admin routes, services, and views
 │   ├── index.ts          # Hono API server
-│   ├── db.ts             # SQLite queries
+│   ├── db.ts             # Runtime lookup against active release + updates overlay
+│   ├── release-service.ts # Build / activate / promote release orchestration
+│   ├── storage.ts        # Release metadata and schema helpers
+│   ├── update-store.ts   # updates.sqlite read/write helpers
+│   ├── manual-word-service.ts
 │   ├── types.ts          # TypeScript types
 │   └── conjugator.ts     # Verb conjugation engine
 ├── sdk/                  # Generated TypeScript client (do not edit manually)
@@ -454,7 +493,14 @@ yori-dict/
 │   │   └── wiktionary.ts
 │   ├── audit/
 │   │   └── kanji-vocab-gaps.ts
-│   ├── build-db.ts           # JSON → SQLite compiler
+│   ├── build-db.ts           # Convenience wrapper for release:build --activate
+│   ├── release/
+│   │   ├── build.ts
+│   │   ├── activate.ts
+│   │   ├── promote.ts
+│   │   └── lib.ts
+│   ├── update/
+│   │   └── source.ts
 │   ├── pull-data.ts          # Git LFS materializer
 │   ├── verify-dict.ts
 │   ├── cleanup-dict.ts       # Dedup / fix artifacts on a single JSON file
@@ -482,7 +528,8 @@ yori-dict/
 │   └── cache/            # Downloaded raw data (gitignored)
 ├── openapi.yaml
 ├── openapi-ts.config.ts
-└── dict.sqlite           # Built database (gitignored)
+├── releases/             # Immutable release snapshots (gitignored)
+└── updates.sqlite        # Incremental overlay updates (gitignored)
 ```
 
 ### Available Scripts
@@ -492,8 +539,11 @@ yori-dict/
 | `bun run dev` | Start dev server with hot reload |
 | `bun run start` | Start production server |
 | `bun run test` | Run test suite |
-| `bun run rebuild:all` | Full deterministic rebuild: base imports + enrichment + build:db |
-| `bun run verify:rebuild` | Rebuild in a temporary worktree and compare normalized JSON + SQLite outputs against the checked-in snapshot |
+| `bun run rebuild:all` | Full deterministic rebuild: base imports + enrichment + candidate release build |
+| `bun run release:build` | Build a versioned immutable release under `releases/<version>/` |
+| `bun run release:activate --version <version>` | Point the runtime at an existing release |
+| `bun run release:promote` | Merge active overlay updates into a new release |
+| `bun run verify:rebuild` | Rebuild in a temporary worktree and compare normalized JSON outputs, plus `dict.sqlite` when both trees have one |
 | `bun run import:base` | Run all base importers (jmdict + kaikki + krdict, `--mode replace`) |
 | `bun run import:enrichment` | Run deterministic enrichment importers (jlpt, tatoeba, wadoku, wiktionary, jmdict-examples, jitendex, kowiktionary-ko, cedict, frequency, zhja) |
 | `bun run import:jmdict --lang en,de` | Import JMdict base dictionary |
@@ -502,7 +552,10 @@ yori-dict/
 | `bun run import:kaikki` | Import Chinese definitions from Kaikki (zhwiktionary) |
 | `bun run import:kowiktionary-ko` | Fill Korean gaps from kowiktionary fallback data |
 | `bun run import:krdict` | Import Korean translations from KRDICT (NIKL) |
-| `bun run import:gemini` | Optional Gemini SDK backfill for missing definitions |
+| `bun run import:gemini` | Optional Gemini SDK backfill for missing definitions, writing pending AI review candidates to `updates.sqlite` by default |
+| `bun run update:ai` | Alias for Gemini backfill in `updates-db` mode |
+| `bun run update:source` | Diff deterministic `data/lang/*.json` against the active release and write source updates |
+| `bun run verify:updates` | Validate overlay updates against the active release |
 | `bun run sync:zh-cn-from-tw` | Merge zh-cn from zh-tw (OpenCC tw→cn); use `--apply` to write |
 | `bun run import:jlpt` | Import JLPT N5-N1 levels |
 | `bun run import:cedict` | Import CC-CEDICT Chinese character forms (zh-cn, zh-tw) |
@@ -511,7 +564,7 @@ yori-dict/
 | `bun run import:tatoeba` | Import example sentences (all languages) |
 | `bun run import:wadoku` | Import Wadoku German definitions |
 | `bun run import:wiktionary` | Import Wiktionary definitions |
-| `bun run build:db` | Build SQLite from JSON files |
+| `bun run build:db` | Build and activate a new immutable release from JSON files |
 | `bun run audit:kanji-vocab-gaps` | Report missing / thin kanji-bearing vocabulary by supported language |
 | `bun run verify:dict <path>` | Check dictionary for duplicates and artifacts |
 | `bun run cleanup:dict <path>` | Fix duplicates and artifacts (add `--apply` to write) |
@@ -521,14 +574,19 @@ yori-dict/
 
 `bun run audit:kanji-vocab-gaps --limit 250` writes per-language JSON reports under `data/reports/kanji-vocab-gaps/` so you can prioritize high-frequency kanji-bearing vocabulary that is missing, thin, or only backed by a weak fallback source.
 
-`bun run verify:rebuild` creates a temporary Git worktree, copies `data/cache/`, reruns the full deterministic pipeline, then compares normalized JSON and SQLite outputs. The JSON comparison ignores order-only differences in `definitions`, `examples`, and `_defSources` so the check stays focused on real data drift.
+`bun run verify:rebuild` creates a temporary Git worktree, copies `data/cache/`, reruns the full deterministic pipeline, then compares normalized JSON outputs. If both the current tree and the worktree also have `dict.sqlite`, it compares SQLite dumps too. The JSON comparison ignores order-only differences in `definitions`, `examples`, and `_defSources` so the check stays focused on real data drift.
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
-| `DATABASE_PATH` | `./dict.sqlite` | SQLite database path |
+| `ADMIN_TOKEN` | unset | Enables `/admin` routes and acts as the admin password/token |
+| `RELEASE_DB_PATH` | unset | Explicit runtime override for the active release DB path |
+| `RELEASE_VERSION` | unset | Optional label for an env-pinned runtime release |
+| `RELEASE_MANIFEST_PATH` | unset | Optional manifest path for an env-pinned runtime release |
+| `UPDATES_DATABASE_PATH` | `./updates.sqlite` | Overlay updates database path |
+| `DATABASE_PATH` | `./dict.sqlite` | Legacy fallback DB path when no managed or env-selected release exists |
 | `GEMINI_API_KEY` | unset | Gemini API key for `import:gemini` |
 | `GOOGLE_API_KEY` | unset | Alternative env var accepted by `@google/genai` / `import:gemini` |
 
@@ -597,6 +655,7 @@ For importer or snapshot work, prefer:
 
 ```bash
 bun run rebuild:all
+bun run release:activate --version <version>
 bun run verify:rebuild
 ```
 
@@ -679,6 +738,7 @@ See `.github/workflows/railway-deployment.yml`
 1. Set build command: `bun run build:db`
 2. Set start command: `bun run start`
 3. Ensure Git LFS files are pulled during build
+4. Persist both `releases/` and `updates.sqlite` if the deployment filesystem is not ephemeral
 
 
 ## Troubleshooting
@@ -739,7 +799,8 @@ bun run build:db
 
 Check the database:
 ```bash
-sqlite3 dict.sqlite "SELECT * FROM words WHERE word = '食べる'"
+ACTIVE_DB="$(jq -r '.dbPath' releases/current.json)"
+sqlite3 "$ACTIVE_DB" "SELECT * FROM words WHERE word = '食べる'"
 ```
 
 If missing, re-import:
@@ -808,7 +869,7 @@ Imports are split into three stages:
 - `bun run import:zhja`       → `data/lang/zh-cn.json`, `data/lang/zh-tw.json` (user-supplied ZIPs)
 
 **Optional AI backfill** — fills entries that still have missing definitions after deterministic imports:
-- `bun run import:gemini --langs de,ko,zh-cn,zh-tw` → writes `ai`-sourced definitions into `data/lang/*.json`
+- `bun run import:gemini --langs de,ko,zh-cn,zh-tw` → writes pending `ai`-sourced updates into `updates.sqlite`
 
 > **Note:** `import:gemini` is intentionally not included in `import:enrichment` or `rebuild:all`. It is API-backed, rate-limited, cost-bearing, and non-deterministic. It uses the official `@google/genai` SDK and requires `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
@@ -852,7 +913,8 @@ Use `--dup-samples <n>` to control how many conflict examples are shown in `ask`
 ```bash
 bun run import:base        # run all base importers (--mode replace)
 bun run import:enrichment  # run deterministic enrichment importers only
-bun run rebuild:all        # base + deterministic enrichment + build:db
+bun run rebuild:all        # base + deterministic enrichment + candidate release build
+bun run release:activate --version <version>
 bun run verify:rebuild     # rebuild in a temp worktree and compare outputs
 # optional afterwards:
 # GEMINI_API_KEY=... bun run import:gemini --langs de,ko,zh-cn,zh-tw

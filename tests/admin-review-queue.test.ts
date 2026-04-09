@@ -1,0 +1,325 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { Hono } from 'hono'
+import { closeDb, lookupWord } from '../src/db'
+import type { ReleaseSnapshot } from '../src/storage'
+import { createEmptySnapshot, writeReleaseManifest } from '../src/storage'
+import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
+import {
+  initUpdatesDatabase,
+  insertExampleUpdateSet,
+  insertTranslationUpdate,
+  insertUpdateBatch,
+} from '../src/update-store'
+import adminRoutes from '../src/admin/routes'
+
+let tempDir = ''
+let app: { fetch: (request: Request) => Promise<Response> }
+
+function makeSnapshot(): ReleaseSnapshot {
+  const snapshot = createEmptySnapshot()
+  snapshot.words.set('食べる:たべる', {
+    id: '食べる:たべる',
+    word: '食べる',
+    reading: 'たべる',
+    partOfSpeech: ['ichidan verb'],
+    common: true,
+    jlpt: [5],
+    frequency: 10,
+  })
+  snapshot.words.set('飲む:のむ', {
+    id: '飲む:のむ',
+    word: '飲む',
+    reading: 'のむ',
+    partOfSpeech: ['godan verb'],
+    common: true,
+    jlpt: [5],
+    frequency: 20,
+  })
+  snapshot.translations.set('食べる:たべる\u0000en', {
+    wordId: '食べる:たべる',
+    lang: 'en',
+    definitions: ['to eat'],
+    sources: ['seed'],
+  })
+  snapshot.examples.set('食べる:たべる\u0000en', [{
+    wordId: '食べる:たべる',
+    lang: 'en',
+    japanese: '毎朝食べます',
+    translation: 'I eat every morning',
+    source: 'seed',
+  }])
+  snapshot.translations.set('飲む:のむ\u0000en', {
+    wordId: '飲む:のむ',
+    lang: 'en',
+    definitions: ['to drink'],
+    sources: ['seed'],
+  })
+  snapshot.examples.set('飲む:のむ\u0000en', [{
+    wordId: '飲む:のむ',
+    lang: 'en',
+    japanese: '水を飲む',
+    translation: 'drink water',
+    source: 'seed',
+  }])
+  snapshot.translations.set('食べる:たべる\u0000de', {
+    wordId: '食べる:たべる',
+    lang: 'de',
+    definitions: ['essen'],
+    sources: ['seed'],
+  })
+  return snapshot
+}
+
+function basicAuth(token: string): string {
+  return `Basic ${Buffer.from(`admin:${token}`).toString('base64')}`
+}
+
+async function request(path: string, init?: RequestInit): Promise<Response> {
+  return app.fetch(new Request(`http://localhost${path}`, init))
+}
+
+beforeEach(async () => {
+  tempDir = mkdtempSync(join(tmpdir(), 'yori-admin-review-'))
+  const releaseDbPath = join(tempDir, 'release.sqlite')
+  const updatesDbPath = join(tempDir, 'updates.sqlite')
+  const manifestPath = join(tempDir, 'manifest.json')
+
+  writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+  writeReleaseManifest('admin-review-release', {
+    version: 'admin-review-release',
+    builtAt: new Date().toISOString(),
+    schemaVersion: '1.0.0',
+    baseSourceFingerprint: 'admin-review',
+    releaseDbPath,
+    promotedFromUpdateSequence: null,
+  })
+
+  process.env.RELEASE_DB_PATH = releaseDbPath
+  process.env.RELEASE_VERSION = 'admin-review-release'
+  process.env.RELEASE_MANIFEST_PATH = manifestPath
+  process.env.UPDATES_DATABASE_PATH = updatesDbPath
+  process.env.ADMIN_TOKEN = 'secret-token'
+
+  const updatesDb = initUpdatesDatabase(updatesDbPath)
+  const batchOne = insertUpdateBatch(updatesDb, {
+    kind: 'ai_import',
+    inputManifest: { name: 'batch-one' },
+    notes: 'primary AI batch',
+  })
+  insertTranslationUpdate(updatesDb, {
+    wordId: '食べる:たべる',
+    lang: 'en',
+    definitions: ['to consume food'],
+    sources: ['ai'],
+    sourceType: 'ai',
+    batchId: batchOne,
+    reviewStatus: 'pending',
+  })
+  insertExampleUpdateSet(updatesDb, {
+    wordId: '食べる:たべる',
+    lang: 'en',
+    examples: [{
+      japanese: 'パンを食べる',
+      translation: 'eat bread',
+      source: 'ai',
+    }],
+    sourceType: 'ai',
+    batchId: batchOne,
+    reviewStatus: 'pending',
+  })
+  insertTranslationUpdate(updatesDb, {
+    wordId: '飲む:のむ',
+    lang: 'en',
+    definitions: ['to sip'],
+    sources: ['ai'],
+    sourceType: 'ai',
+    batchId: batchOne,
+    reviewStatus: 'pending',
+  })
+  const batchTwo = insertUpdateBatch(updatesDb, {
+    kind: 'ai_import',
+    inputManifest: { name: 'batch-two' },
+    notes: 'secondary AI batch',
+  })
+  insertExampleUpdateSet(updatesDb, {
+    wordId: '食べる:たべる',
+    lang: 'de',
+    examples: [{
+      japanese: '寿司を食べる',
+      translation: 'Sushi essen',
+      source: 'ai',
+    }],
+    sourceType: 'ai',
+    batchId: batchTwo,
+    reviewStatus: 'pending',
+  })
+  const sourceBatch = insertUpdateBatch(updatesDb, {
+    kind: 'source_import',
+    inputManifest: { name: 'source-batch' },
+    notes: 'source examples',
+  })
+  insertExampleUpdateSet(updatesDb, {
+    wordId: '飲む:のむ',
+    lang: 'en',
+    examples: [{
+      japanese: 'お茶を飲む',
+      translation: 'drink tea',
+      source: 'source',
+    }],
+    sourceType: 'source',
+    batchId: sourceBatch,
+  })
+  updatesDb.close()
+
+  const hono = new Hono()
+  hono.route('/', adminRoutes)
+  app = { fetch: hono.fetch }
+})
+
+afterEach(() => {
+  closeDb()
+  delete process.env.RELEASE_DB_PATH
+  delete process.env.RELEASE_VERSION
+  delete process.env.RELEASE_MANIFEST_PATH
+  delete process.env.UPDATES_DATABASE_PATH
+  delete process.env.ADMIN_TOKEN
+  if (tempDir) rmSync(tempDir, { recursive: true, force: true })
+})
+
+describe('bulk AI review queue', () => {
+  test('queue api aggregates review units and exposes batch summaries', async () => {
+    const res = await request('/admin/api/review/queue', {
+      headers: { authorization: basicAuth('secret-token') },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.summary.pendingUnits).toBe(3)
+    expect(body.summary.recentBatches[0].pendingUnits).toBe(1)
+    expect(body.summary.recentBatches[1].pendingUnits).toBe(2)
+    expect(body.items).toHaveLength(3)
+
+    const pairUnit = body.items.find((item: { unitId: string }) => item.unitId === '食べる:たべる|en|1')
+    expect(pairUnit.translation).not.toBeNull()
+    expect(pairUnit.exampleSet).not.toBeNull()
+
+    const conflictUnit = body.items.find((item: { unitId: string }) => item.unitId === '飲む:のむ|en|1')
+    expect(conflictUnit.flags.hasSourceConflict).toBe(true)
+
+    const batchSummaryRes = await request('/admin/api/review/batches/1/summary', {
+      headers: { authorization: basicAuth('secret-token') },
+    })
+    expect(batchSummaryRes.status).toBe(200)
+    const batchSummary = await batchSummaryRes.json()
+    expect(batchSummary.pendingUnits).toBe(2)
+    expect(batchSummary.translationOnlyCount).toBe(1)
+    expect(batchSummary.examplesOnlyCount).toBe(0)
+  })
+
+  test('bulk approve updates effective lookup for a review unit', async () => {
+    const approveRes = await request('/admin/api/review/units/approve', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        unitIds: ['食べる:たべる|en|1'],
+        notes: 'approved in bulk',
+      }),
+    })
+
+    expect(approveRes.status).toBe(200)
+    closeDb()
+    const result = lookupWord('食べる', 'en')
+    expect(result?.definitions).toEqual(['to consume food'])
+    expect(result?.examples).toEqual([{
+      japanese: 'パンを食べる',
+      translation: 'eat bread',
+    }])
+  })
+
+  test('bulk approve blocks source-conflicted units unless override is set', async () => {
+    const blockedRes = await request('/admin/api/review/units/approve', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        unitIds: ['飲む:のむ|en|1'],
+      }),
+    })
+    expect(blockedRes.status).toBe(400)
+    const blocked = await blockedRes.json()
+    expect(blocked.blockedUnitIds).toEqual(['飲む:のむ|en|1'])
+
+    const overrideRes = await request('/admin/api/review/units/approve', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        unitIds: ['飲む:のむ|en|1'],
+        overrideSourceConflict: true,
+      }),
+    })
+    expect(overrideRes.status).toBe(200)
+  })
+
+  test('bulk review accepts comma-delimited unitIds payloads', async () => {
+    const res = await request('/admin/api/review/units/approve', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        unitIds: '食べる:たべる|en|1,飲む:のむ|en|1',
+        overrideSourceConflict: true,
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.affected.units).toBe(2)
+  })
+
+  test('bulk review rejects mixed batch or language selections', async () => {
+    const mixedRes = await request('/admin/api/review/units/reject', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        unitIds: ['飲む:のむ|en|1', '食べる:たべる|de|2'],
+      }),
+    })
+    expect(mixedRes.status).toBe(400)
+    const mixed = await mixedRes.json()
+    expect(mixed.error).toContain('multiple batches')
+  })
+
+  test('review pages render queue dashboard and batch actions', async () => {
+    const dashboardRes = await request('/admin/review', {
+      headers: { authorization: basicAuth('secret-token') },
+    })
+    expect(dashboardRes.status).toBe(200)
+    const dashboardHtml = await dashboardRes.text()
+    expect(dashboardHtml.includes('Queue Summary')).toBe(true)
+    expect(dashboardHtml.includes('/admin/review/batch/1')).toBe(true)
+    expect(dashboardHtml.includes('Override source conflict')).toBe(true)
+
+    const batchRes = await request('/admin/review/batch/1', {
+      headers: { authorization: basicAuth('secret-token') },
+    })
+    expect(batchRes.status).toBe(200)
+    const batchHtml = await batchRes.text()
+    expect(batchHtml.includes('Approve selected')).toBe(true)
+    expect(batchHtml.includes('Select all visible')).toBe(true)
+  })
+})
