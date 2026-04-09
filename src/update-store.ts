@@ -853,13 +853,22 @@ export function rejectExampleUpdateSet(
 }
 
 export function markAllActiveUpdatesPromoted(db: Database): void {
+  markActiveUpdatesPromotedThroughBatch(db, null)
+}
+
+export function markActiveUpdatesPromotedThroughBatch(
+  db: Database,
+  maxBatchId: number | null
+): void {
   const now = new Date().toISOString()
+  const batchClause = maxBatchId === null ? '' : `AND batch_id <= ${Number(maxBatchId)}`
   const transaction = db.transaction(() => {
     db.prepare(`
       UPDATE translation_updates
       SET status = 'promoted', updated_at = ?1
       WHERE status = 'active'
         AND (source_type = 'source' OR review_status = 'approved')
+        ${batchClause}
     `).run(now)
 
     db.prepare(`
@@ -867,6 +876,7 @@ export function markAllActiveUpdatesPromoted(db: Database): void {
       SET status = 'promoted', updated_at = ?1
       WHERE status = 'active'
         AND (source_type = 'source' OR review_status = 'approved')
+        ${batchClause}
     `).run(now)
 
     db.prepare(`

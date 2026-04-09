@@ -12,7 +12,12 @@ import {
   writeCurrentReleasePointer,
   writeReleaseManifest,
 } from './storage'
-import { initUpdatesDatabase, markAllActiveUpdatesPromoted, recordAdminAction } from './update-store'
+import {
+  initUpdatesDatabase,
+  markActiveUpdatesPromotedThroughBatch,
+  markAllActiveUpdatesPromoted,
+  recordAdminAction,
+} from './update-store'
 import {
   applyActiveUpdatesToSnapshot,
   collectSnapshotSourceFiles,
@@ -198,13 +203,19 @@ export function activateRelease(version: string, actor?: string | null): Release
     throw new Error(`Release manifest not found: ${manifestPath}`)
   }
 
-  readReleaseManifest(manifestPath)
+  const manifest = readReleaseManifest(manifestPath)
   writeCurrentReleasePointer({
     version,
     dbPath,
     manifestPath,
     activatedAt: new Date().toISOString(),
   })
+
+  if (manifest.promotedFromUpdateSequence !== null) {
+    const updatesDb = initUpdatesDatabase()
+    markActiveUpdatesPromotedThroughBatch(updatesDb, manifest.promotedFromUpdateSequence)
+    updatesDb.close()
+  }
 
   maybeRecordAdminAction('release.activate', version, actor)
 
