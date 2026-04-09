@@ -12,15 +12,21 @@ interface ExampleLookupRow {
 
 let releaseDb: Database | null = null
 let updatesDb: Database | null = null
+let releaseDbPath: string | null = null
 
 /**
  * Get release database connection.
  */
 export function getReleaseDb(): Database {
-  if (!releaseDb) {
-    const config = requireActiveReleaseConfig()
+  const config = requireActiveReleaseConfig()
+
+  if (!releaseDb || releaseDbPath !== config.dbPath) {
+    if (releaseDb) {
+      releaseDb.close()
+    }
     releaseDb = new Database(config.dbPath, { readonly: true })
     releaseDb.exec('PRAGMA foreign_keys = ON')
+    releaseDbPath = config.dbPath
   }
   return releaseDb
 }
@@ -149,6 +155,7 @@ export function closeDb(): void {
   if (releaseDb) {
     releaseDb.close()
     releaseDb = null
+    releaseDbPath = null
   }
   if (updatesDb) {
     updatesDb.close()
