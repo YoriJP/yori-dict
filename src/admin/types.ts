@@ -8,6 +8,7 @@ import type {
   UpdateVerificationSummary,
 } from '../update-store'
 import type { ReleaseListItem } from '../release-service'
+import type { ReleaseWordRecord } from '../storage'
 
 export interface AdminSummaryResponse {
   activeReleaseVersion: string
@@ -57,6 +58,130 @@ export interface AdminReviewQueueResponse {
   releaseVersion: string
   translations: ListedTranslationUpdate[]
   exampleSets: ListedExampleUpdateSet[]
+}
+
+export type ReviewRiskLevel = 'low' | 'medium' | 'high'
+export type ReviewUnitShape = 'translation-only' | 'examples-only'
+
+export interface ReviewUnitFlags {
+  hasSourceConflict: boolean
+  isSuperseded: boolean
+  hasTranslation: boolean
+  hasExamples: boolean
+  isTranslationOnly: boolean
+  isExamplesOnly: boolean
+}
+
+export interface ReviewUnitReleaseValue {
+  definitions: string[]
+  sources: string[]
+  examples: Array<{
+    japanese: string
+    translation: string
+    source: string
+  }>
+}
+
+export interface ReviewUnit {
+  unitId: string
+  wordId: string
+  lang: Language
+  batchId: number
+  batch: UpdateBatchRecord | null
+  word: ReleaseWordRecord | null
+  translation: ListedTranslationUpdate | null
+  exampleSet: ListedExampleUpdateSet | null
+  release: ReviewUnitReleaseValue | null
+  sourceUpdate: {
+    translation: DetailedTranslationUpdate | null
+    examples: DetailedExampleUpdateSet | null
+  }
+  effectivePreview: ReviewUnitReleaseValue | null
+  flags: ReviewUnitFlags
+  riskLevel: ReviewRiskLevel
+}
+
+export interface ReviewQueueSummaryRecentBatch {
+  batchId: number
+  batch: UpdateBatchRecord | null
+  pendingUnits: number
+  sourceConflictCount: number
+  byLanguage: Record<string, number>
+}
+
+export interface ReviewQueueSummary {
+  pendingUnits: number
+  byLanguage: Record<string, number>
+  byRisk: Record<ReviewRiskLevel, number>
+  sourceConflictCount: number
+  recentBatches: ReviewQueueSummaryRecentBatch[]
+}
+
+export interface ReviewQueueFilters {
+  batchId?: number | null
+  lang?: Language | null
+  risk?: ReviewRiskLevel | null
+  shape?: ReviewUnitShape | null
+  hasSourceConflict?: boolean | null
+  cursor?: string | null
+  limit?: number | null
+}
+
+export interface AdminReviewQueueResponseV2 {
+  releaseVersion: string
+  summary: ReviewQueueSummary
+  items: ReviewUnit[]
+  nextCursor: string | null
+  filters: {
+    batchId: number | null
+    lang: Language | null
+    risk: ReviewRiskLevel | null
+    shape: ReviewUnitShape | null
+    hasSourceConflict: boolean | null
+    limit: number
+  }
+}
+
+export interface AdminReviewBatchSummaryResponse {
+  releaseVersion: string
+  batch: UpdateBatchRecord | null
+  pendingUnits: number
+  byLanguage: Record<string, number>
+  byRisk: Record<ReviewRiskLevel, number>
+  sourceConflictCount: number
+  translationOnlyCount: number
+  examplesOnlyCount: number
+}
+
+export interface AdminReviewBatchPageResponse {
+  releaseVersion: string
+  summary: AdminReviewBatchSummaryResponse
+  items: ReviewUnit[]
+  nextCursor: string | null
+  filters: {
+    risk: ReviewRiskLevel | null
+    shape: ReviewUnitShape | null
+    hasSourceConflict: boolean | null
+    limit: number
+  }
+}
+
+export interface BulkReviewActionRequest {
+  unitIds: string[]
+  notes?: string | null
+  overrideSourceConflict?: boolean
+}
+
+export interface BulkReviewActionResponse {
+  ok: boolean
+  action: 'approved' | 'rejected'
+  affected: {
+    units: number
+    translations: number
+    exampleSets: number
+  }
+  blockedUnitIds?: string[]
+  error?: string
 }
 
 export interface AdminReleaseListResponse {

@@ -5,14 +5,19 @@ import { lookupWord } from '../db'
 import { requireActiveReleaseConfig, type ReleaseExampleRecord, type ReleaseTranslationRecord, type ReleaseWordRecord } from '../storage'
 import { createManualWordInSnapshot, type ManualWordInput } from '../manual-word-service'
 import {
+  applyBulkReviewStatus,
   approveExampleUpdateSet,
   approveTranslationUpdate,
+  getActiveExampleUpdateSetBySourceType,
   getActiveExampleUpdate,
+  getActiveTranslationUpdateBySourceType,
   getActiveTranslationUpdate,
   getLatestExampleUpdateSetBySourceType,
   getLatestTranslationUpdateBySourceType,
   getUpdateBatch,
   initUpdatesDatabase,
+  listPendingAiExampleUpdateSets,
+  listPendingAiTranslationUpdates,
   listExampleUpdateSets,
   listTranslationUpdates,
   listUpdateBatches,
@@ -24,12 +29,24 @@ import {
 import type {
   AdminBatchDetailResponse,
   AdminEntryInspectionResponse,
+  AdminReviewBatchPageResponse,
+  AdminReviewBatchSummaryResponse,
+  AdminReviewQueueResponseV2,
   AdminNewWordFormData,
   AdminNewWordResponse,
   AdminReleaseListResponse,
   AdminReviewQueueResponse,
   AdminSummaryResponse,
   AdminUpdatesResponse,
+  BulkReviewActionRequest,
+  BulkReviewActionResponse,
+  ReviewQueueFilters,
+  ReviewQueueSummary,
+  ReviewRiskLevel,
+  ReviewUnit,
+  ReviewUnitFlags,
+  ReviewUnitReleaseValue,
+  ReviewUnitShape,
 } from './types'
 import { runSourceUpdate } from '../../scripts/update/source'
 import { defaultCliOptions, runGeminiImport, type GeminiRunOptions } from '../../scripts/import/gemini'
@@ -78,6 +95,17 @@ function findReleaseWord(db: Database, word: string): ReleaseWordRecord | null {
       END DESC
     LIMIT 1
   `).get(word)
+
+  return row ? mapReleaseWord(row) : null
+}
+
+function getReleaseWordById(db: Database, wordId: string): ReleaseWordRecord | null {
+  const row = db.query<WordRow, [string]>(`
+    SELECT *
+    FROM words
+    WHERE id = ?1
+    LIMIT 1
+  `).get(wordId)
 
   return row ? mapReleaseWord(row) : null
 }
@@ -135,6 +163,322 @@ function logReviewAction(
     targetKind: 'update',
     targetId,
     notes,
+  })
+}
+
+function makeReviewUnitId(wordId: string, lang: Language, batchId: number): string {
+  return `${wordId}|${lang}|${batchId}`
+}
+
+function parseReviewUnitId(unitId: string): { wordId: string; lang: Language; batchId: number } | null {
+  const [wordId, langRaw, batchIdRaw] = unitId.split('|')
+  const batchId = Number(batchIdRaw)
+  const lang = langRaw as Language
+  if (!wordId || !lang || !Number.isFinite(batchId)) return null
+  return { wordId, lang, batchId }
+}
+
+function compareReviewUnitOrder(
+  left: Pick<ReviewUnit, 'batchId' | 'wordId' | 'lang'>,
+  right: Pick<ReviewUnit, 'batchId' | 'wordId' | 'lang'>
+): number {
+  if (left.batchId !== right.batchId) return right.batchId - left.batchId
+  if (left.wordId !== right.wordId) return left.wordId.localeCompare(right.wordId)
+  return left.lang.localeCompare(right.lang)
+}
+
+function toReviewReleaseValue(
+  translation: ReleaseTranslationRecord | null,
+  examples: ReleaseExampleRecord[]
+): ReviewUnitReleaseValue | null {
+  if (!translation && examples.length === 0) return null
+  return {
+    definitions: translation?.definitions ?? [],
+    sources: translation?.sources ?? [],
+    examples: examples.map((example) => ({
+      japanese: example.japanese,
+      translation: example.translation,
+      source: example.source,
+    })),
+  }
+}
+
+function getReleaseLayer(
+  releaseDb: Database,
+  wordId: string,
+  lang: Language
+): ReviewUnitReleaseValue | null {
+  return toReviewReleaseValue(
+    getReleaseTranslation(releaseDb, wordId, lang),
+    getReleaseExamples(releaseDb, wordId, lang),
+  )
+}
+
+function definitionsTotalLength(definitions: string[]): number {
+  return definitions.reduce((total, item) => total + item.length, 0)
+}
+
+function pickEffectivePreview(
+  release: ReviewUnitReleaseValue | null,
+  sourceUpdate: {
+    translation: ReturnType<typeof getActiveTranslationUpdateBySourceType>
+    examples: ReturnType<typeof getActiveExampleUpdateSetBySourceType>
+  },
+  translation: ReviewUnit['translation'],
+  exampleSet: ReviewUnit['exampleSet']
+): ReviewUnitReleaseValue | null {
+  const definitions = sourceUpdate.translation?.definitions
+    ?? translation?.definitions
+    ?? release?.definitions
+    ?? []
+  const sources = sourceUpdate.translation?.sources
+    ?? translation?.sources
+    ?? release?.sources
+    ?? []
+  const examples = sourceUpdate.examples?.examples
+    ?? exampleSet?.examples
+    ?? release?.examples
+    ?? []
+
+  if (definitions.length === 0 && examples.length === 0) return null
+
+  return {
+    definitions,
+    sources,
+    examples: examples.map((example) => ({
+      japanese: example.japanese,
+      translation: example.translation,
+      source: example.source,
+    })),
+  }
+}
+
+function computeRiskLevel(input: {
+  word: ReleaseWordRecord | null
+  release: ReviewUnitReleaseValue | null
+  sourceUpdate: {
+    translation: ReturnType<typeof getActiveTranslationUpdateBySourceType>
+    examples: ReturnType<typeof getActiveExampleUpdateSetBySourceType>
+  }
+  translation: ReviewUnit['translation']
+  exampleSet: ReviewUnit['exampleSet']
+  flags: ReviewUnitFlags
+}): ReviewRiskLevel {
+  if (input.flags.hasSourceConflict) return 'high'
+
+  const baselineDefinitions = input.sourceUpdate.translation?.definitions
+    ?? input.release?.definitions
+    ?? []
+  const baselineExamples = input.sourceUpdate.examples?.examples
+    ?? input.release?.examples
+    ?? []
+
+  const hasHighFrequencySignal = Boolean(
+    input.word?.common
+    || (input.word?.frequency !== null && input.word?.frequency !== undefined && input.word.frequency <= 5000)
+  )
+
+  if (input.translation) {
+    const definitionDelta = Math.abs(input.translation.definitions.length - baselineDefinitions.length)
+    const baselineChars = definitionsTotalLength(baselineDefinitions)
+    const candidateChars = definitionsTotalLength(input.translation.definitions)
+
+    if (definitionDelta > 2) return 'high'
+    if (baselineChars > 0 && candidateChars > baselineChars * 2) return 'high'
+    if (hasHighFrequencySignal && JSON.stringify(input.translation.definitions) !== JSON.stringify(baselineDefinitions)) {
+      return 'high'
+    }
+  }
+
+  if (input.flags.isTranslationOnly || input.flags.isExamplesOnly) return 'medium'
+
+  if (input.exampleSet) {
+    const exampleDelta = Math.abs(input.exampleSet.examples.length - baselineExamples.length)
+    if (exampleDelta >= 2) return 'medium'
+  }
+
+  if (input.translation && JSON.stringify(input.translation.definitions) !== JSON.stringify(baselineDefinitions)) {
+    return 'medium'
+  }
+
+  return 'low'
+}
+
+function buildReviewQueueSummary(releaseVersion: string, units: ReviewUnit[]): {
+  releaseVersion: string
+  summary: ReviewQueueSummary
+} {
+  const byLanguage: Record<string, number> = {}
+  const byRisk: Record<ReviewRiskLevel, number> = { low: 0, medium: 0, high: 0 }
+  const batches = new Map<number, ReviewQueueSummary['recentBatches'][number]>()
+  let sourceConflictCount = 0
+
+  for (const unit of units) {
+    byLanguage[unit.lang] = (byLanguage[unit.lang] || 0) + 1
+    byRisk[unit.riskLevel] += 1
+    if (unit.flags.hasSourceConflict) sourceConflictCount += 1
+
+    const existing = batches.get(unit.batchId)
+    if (existing) {
+      existing.pendingUnits += 1
+      existing.byLanguage[unit.lang] = (existing.byLanguage[unit.lang] || 0) + 1
+      if (unit.flags.hasSourceConflict) existing.sourceConflictCount += 1
+      continue
+    }
+
+    batches.set(unit.batchId, {
+      batchId: unit.batchId,
+      batch: unit.batch,
+      pendingUnits: 1,
+      sourceConflictCount: unit.flags.hasSourceConflict ? 1 : 0,
+      byLanguage: { [unit.lang]: 1 },
+    })
+  }
+
+  return {
+    releaseVersion,
+    summary: {
+      pendingUnits: units.length,
+      byLanguage,
+      byRisk,
+      sourceConflictCount,
+      recentBatches: [...batches.values()]
+        .sort((left, right) => right.batchId - left.batchId)
+        .slice(0, 10),
+    },
+  }
+}
+
+function paginateReviewUnits(
+  units: ReviewUnit[],
+  filters: ReviewQueueFilters
+): { items: ReviewUnit[]; nextCursor: string | null; limit: number } {
+  const limit = Math.max(1, Math.min(filters.limit ?? 50, 200))
+  const sorted = [...units].sort(compareReviewUnitOrder)
+  const cursor = filters.cursor ? parseReviewUnitId(filters.cursor) : null
+  const startIndex = cursor
+    ? sorted.findIndex((unit) => compareReviewUnitOrder(unit, cursor) > 0)
+    : 0
+  const normalizedStartIndex = startIndex >= 0 ? startIndex : 0
+  const items = sorted.slice(normalizedStartIndex, normalizedStartIndex + limit)
+  const nextCursor = normalizedStartIndex + limit < sorted.length
+    ? items[items.length - 1]?.unitId ?? null
+    : null
+
+  return { items, nextCursor, limit }
+}
+
+function buildReviewUnits(
+  releaseDb: Database,
+  updatesDb: Database,
+  filters: Pick<ReviewQueueFilters, 'batchId' | 'lang' | 'risk' | 'shape' | 'hasSourceConflict'>
+): ReviewUnit[] {
+  const translations = listPendingAiTranslationUpdates(updatesDb, {
+    batchId: filters.batchId ?? null,
+    lang: filters.lang ?? null,
+  })
+  const exampleSets = listPendingAiExampleUpdateSets(updatesDb, {
+    batchId: filters.batchId ?? null,
+    lang: filters.lang ?? null,
+  })
+
+  const map = new Map<string, ReviewUnit>()
+
+  for (const item of translations) {
+    const unitId = makeReviewUnitId(item.wordId, item.lang as Language, item.batchId)
+    const current = map.get(unitId)
+    map.set(unitId, {
+      unitId,
+      wordId: item.wordId,
+      lang: item.lang as Language,
+      batchId: item.batchId,
+      batch: item.batch,
+      word: current?.word ?? getReleaseWordById(releaseDb, item.wordId),
+      translation: item,
+      exampleSet: current?.exampleSet ?? null,
+      release: current?.release ?? getReleaseLayer(releaseDb, item.wordId, item.lang as Language),
+      sourceUpdate: current?.sourceUpdate ?? {
+        translation: getActiveTranslationUpdateBySourceType(updatesDb, item.wordId, item.lang, 'source'),
+        examples: getActiveExampleUpdateSetBySourceType(updatesDb, item.wordId, item.lang, 'source'),
+      },
+      effectivePreview: current?.effectivePreview ?? null,
+      flags: current?.flags ?? {
+        hasSourceConflict: false,
+        isSuperseded: false,
+        hasTranslation: true,
+        hasExamples: false,
+        isTranslationOnly: true,
+        isExamplesOnly: false,
+      },
+      riskLevel: current?.riskLevel ?? 'medium',
+    })
+  }
+
+  for (const item of exampleSets) {
+    const unitId = makeReviewUnitId(item.wordId, item.lang as Language, item.batchId)
+    const current = map.get(unitId)
+    map.set(unitId, {
+      unitId,
+      wordId: item.wordId,
+      lang: item.lang as Language,
+      batchId: item.batchId,
+      batch: item.batch,
+      word: current?.word ?? getReleaseWordById(releaseDb, item.wordId),
+      translation: current?.translation ?? null,
+      exampleSet: item,
+      release: current?.release ?? getReleaseLayer(releaseDb, item.wordId, item.lang as Language),
+      sourceUpdate: current?.sourceUpdate ?? {
+        translation: getActiveTranslationUpdateBySourceType(updatesDb, item.wordId, item.lang, 'source'),
+        examples: getActiveExampleUpdateSetBySourceType(updatesDb, item.wordId, item.lang, 'source'),
+      },
+      effectivePreview: current?.effectivePreview ?? null,
+      flags: current?.flags ?? {
+        hasSourceConflict: false,
+        isSuperseded: false,
+        hasTranslation: false,
+        hasExamples: true,
+        isTranslationOnly: false,
+        isExamplesOnly: true,
+      },
+      riskLevel: current?.riskLevel ?? 'medium',
+    })
+  }
+
+  const units = [...map.values()].map((unit) => {
+    const flags: ReviewUnitFlags = {
+      hasSourceConflict: Boolean(unit.sourceUpdate.translation || unit.sourceUpdate.examples),
+      isSuperseded: Boolean(unit.translation && unit.translation.status !== 'active')
+        || Boolean(unit.exampleSet && unit.exampleSet.status !== 'active'),
+      hasTranslation: Boolean(unit.translation),
+      hasExamples: Boolean(unit.exampleSet),
+      isTranslationOnly: Boolean(unit.translation) && !unit.exampleSet,
+      isExamplesOnly: Boolean(unit.exampleSet) && !unit.translation,
+    }
+    const riskLevel = computeRiskLevel({
+      word: unit.word,
+      release: unit.release,
+      sourceUpdate: unit.sourceUpdate,
+      translation: unit.translation,
+      exampleSet: unit.exampleSet,
+      flags,
+    })
+
+    return {
+      ...unit,
+      effectivePreview: pickEffectivePreview(unit.release, unit.sourceUpdate, unit.translation, unit.exampleSet),
+      flags,
+      riskLevel,
+    }
+  })
+
+  return units.filter((unit) => {
+    if (filters.risk && unit.riskLevel !== filters.risk) return false
+    if (filters.shape === 'translation-only' && !unit.flags.isTranslationOnly) return false
+    if (filters.shape === 'examples-only' && !unit.flags.isExamplesOnly) return false
+    if (filters.hasSourceConflict !== null && filters.hasSourceConflict !== undefined) {
+      return unit.flags.hasSourceConflict === filters.hasSourceConflict
+    }
+    return true
   })
 }
 
@@ -204,6 +548,108 @@ export function inspectEntry(word: string, lang: Language): AdminEntryInspection
   return response
 }
 
+export function getReviewQueue(filters: ReviewQueueFilters = {}): AdminReviewQueueResponseV2 {
+  const { db: releaseDb, version } = openReleaseDb()
+  const updatesDb = initUpdatesDatabase()
+  const units = buildReviewUnits(releaseDb, updatesDb, {
+    batchId: filters.batchId ?? null,
+    lang: filters.lang ?? null,
+    risk: filters.risk ?? null,
+    shape: filters.shape ?? null,
+    hasSourceConflict: filters.hasSourceConflict ?? null,
+  })
+  const summary = buildReviewQueueSummary(version, units)
+  const page = paginateReviewUnits(units, filters)
+
+  releaseDb.close()
+  updatesDb.close()
+
+  return {
+    releaseVersion: version,
+    summary: summary.summary,
+    items: page.items,
+    nextCursor: page.nextCursor,
+    filters: {
+      batchId: filters.batchId ?? null,
+      lang: filters.lang ?? null,
+      risk: filters.risk ?? null,
+      shape: filters.shape ?? null,
+      hasSourceConflict: filters.hasSourceConflict ?? null,
+      limit: page.limit,
+    },
+  }
+}
+
+export function getReviewBatchSummary(batchId: number): AdminReviewBatchSummaryResponse {
+  const { db: releaseDb, version } = openReleaseDb()
+  const updatesDb = initUpdatesDatabase()
+  const units = buildReviewUnits(releaseDb, updatesDb, {
+    batchId,
+    lang: null,
+    risk: null,
+    shape: null,
+    hasSourceConflict: null,
+  })
+
+  const byLanguage: Record<string, number> = {}
+  const byRisk: Record<ReviewRiskLevel, number> = { low: 0, medium: 0, high: 0 }
+  let sourceConflictCount = 0
+  let translationOnlyCount = 0
+  let examplesOnlyCount = 0
+
+  for (const unit of units) {
+    byLanguage[unit.lang] = (byLanguage[unit.lang] || 0) + 1
+    byRisk[unit.riskLevel] += 1
+    if (unit.flags.hasSourceConflict) sourceConflictCount += 1
+    if (unit.flags.isTranslationOnly) translationOnlyCount += 1
+    if (unit.flags.isExamplesOnly) examplesOnlyCount += 1
+  }
+
+  const response: AdminReviewBatchSummaryResponse = {
+    releaseVersion: version,
+    batch: getUpdateBatch(updatesDb, batchId),
+    pendingUnits: units.length,
+    byLanguage,
+    byRisk,
+    sourceConflictCount,
+    translationOnlyCount,
+    examplesOnlyCount,
+  }
+
+  releaseDb.close()
+  updatesDb.close()
+  return response
+}
+
+export function getReviewBatchPage(
+  batchId: number,
+  filters: Omit<ReviewQueueFilters, 'batchId' | 'lang'>
+): AdminReviewBatchPageResponse {
+  const queue = getReviewQueue({
+    batchId,
+    lang: null,
+    risk: filters.risk ?? null,
+    shape: filters.shape ?? null,
+    hasSourceConflict: filters.hasSourceConflict ?? null,
+    cursor: filters.cursor ?? null,
+    limit: filters.limit ?? null,
+  })
+  const summary = getReviewBatchSummary(batchId)
+
+  return {
+    releaseVersion: queue.releaseVersion,
+    summary,
+    items: queue.items,
+    nextCursor: queue.nextCursor,
+    filters: {
+      risk: queue.filters.risk,
+      shape: queue.filters.shape,
+      hasSourceConflict: queue.filters.hasSourceConflict,
+      limit: queue.filters.limit,
+    },
+  }
+}
+
 export function getAiReviewQueue(lang?: Language | null): AdminReviewQueueResponse {
   const { db: releaseDb, version } = openReleaseDb()
   const updatesDb = initUpdatesDatabase()
@@ -227,6 +673,134 @@ export function getAiReviewQueue(lang?: Language | null): AdminReviewQueueRespon
   releaseDb.close()
   updatesDb.close()
   return response
+}
+
+export function applyBulkReviewAction(
+  action: 'approved' | 'rejected',
+  input: BulkReviewActionRequest,
+  actor: string
+): BulkReviewActionResponse {
+  const { db: releaseDb } = openReleaseDb()
+  const updatesDb = initUpdatesDatabase()
+  const requestedUnitIds = [...new Set(input.unitIds.map((item) => item.trim()).filter(Boolean))]
+
+  if (requestedUnitIds.length === 0) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action,
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      error: 'At least one review unit is required.',
+    }
+  }
+
+  const units = buildReviewUnits(releaseDb, updatesDb, {
+    batchId: null,
+    lang: null,
+    risk: null,
+    shape: null,
+    hasSourceConflict: null,
+  }).filter((unit) => requestedUnitIds.includes(unit.unitId))
+
+  if (units.length !== requestedUnitIds.length) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action,
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      error: 'Some review units could not be found in the pending queue.',
+    }
+  }
+
+  const batchIds = new Set(units.map((unit) => unit.batchId))
+  const langs = new Set(units.map((unit) => unit.lang))
+  if (batchIds.size > 1) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action,
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      error: 'Bulk review cannot span multiple batches.',
+    }
+  }
+  if (langs.size > 1) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action,
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      error: 'Bulk review cannot span multiple languages.',
+    }
+  }
+
+  const blockedUnitIds = action === 'approved' && !input.overrideSourceConflict
+    ? units.filter((unit) => unit.flags.hasSourceConflict).map((unit) => unit.unitId)
+    : []
+  if (blockedUnitIds.length > 0) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action,
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      blockedUnitIds,
+      error: 'Some selected units have active source conflicts.',
+    }
+  }
+
+  const translationIds = units.flatMap((unit) => unit.translation ? [unit.translation.id] : [])
+  const exampleSetIds = units.flatMap((unit) => unit.exampleSet ? [unit.exampleSet.id] : [])
+  const mutation = applyBulkReviewStatus(updatesDb, {
+    translationIds,
+    exampleSetIds,
+    reviewStatus: action,
+    actor,
+    notes: input.notes ?? null,
+  })
+
+  recordAdminAction(updatesDb, {
+    actor,
+    action: action === 'approved' ? 'review.units.approve' : 'review.units.reject',
+    targetKind: 'review-unit-bulk',
+    targetId: requestedUnitIds.join(','),
+    notes: input.notes ?? null,
+  })
+
+  for (const id of mutation.translationIds) {
+    logReviewAction(
+      updatesDb,
+      actor,
+      action === 'approved' ? 'review.translation.approve' : 'review.translation.reject',
+      String(id),
+      input.notes ?? null,
+    )
+  }
+  for (const id of mutation.exampleSetIds) {
+    logReviewAction(
+      updatesDb,
+      actor,
+      action === 'approved' ? 'review.example-set.approve' : 'review.example-set.reject',
+      String(id),
+      input.notes ?? null,
+    )
+  }
+
+  releaseDb.close()
+  updatesDb.close()
+
+  return {
+    ok: true,
+    action,
+    affected: {
+      units: units.length,
+      translations: mutation.translationIds.length,
+      exampleSets: mutation.exampleSetIds.length,
+    },
+  }
 }
 
 export function getAdminReleaseList(): AdminReleaseListResponse {

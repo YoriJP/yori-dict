@@ -2,10 +2,17 @@ import type {
   AdminBatchDetailResponse,
   AdminEntryInspectionResponse,
   AdminNewWordResponse,
+  AdminReviewBatchPageResponse,
   AdminReleaseListResponse,
+  AdminReviewQueueResponseV2,
   AdminReviewQueueResponse,
   AdminSummaryResponse,
   AdminUpdatesResponse,
+  ReviewQueueSummaryRecentBatch,
+  ReviewRiskLevel,
+  ReviewUnit,
+  ReviewUnitReleaseValue,
+  ReviewUnitShape,
 } from './types'
 import type { Language } from '../types'
 import type { ReleaseListItem } from '../release-service'
@@ -618,6 +625,79 @@ function renderPage(title: string, body: string): string {
         flex-wrap: wrap;
         margin-top: var(--space-4);
       }
+      .selection-bar {
+        display: flex;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface-2);
+        margin-bottom: var(--space-4);
+      }
+      .selection-bar .inline-form {
+        margin: 0;
+      }
+      .checkbox-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+        font-weight: 600;
+      }
+      .checkbox-inline input {
+        width: auto;
+      }
+      .filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        margin: var(--space-4) 0;
+      }
+      .filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        text-decoration: none;
+        color: var(--text-secondary);
+        background: var(--surface-2);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      .filter-chip[aria-current="page"] {
+        color: var(--accent);
+        border-color: oklch(83% 0.04 var(--hue));
+        background: var(--accent-subtle);
+      }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--space-3);
+      }
+      .summary-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+        background: var(--surface-2);
+      }
+      .summary-card h3 {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: var(--space-2);
+      }
+      .summary-card .metric-value {
+        display: block;
+        font-size: var(--text-xl);
+      }
 
       /* -- Lists & items -- */
       .item-list {
@@ -665,6 +745,38 @@ function renderPage(title: string, body: string): string {
       }
       .item table {
         margin-top: var(--space-3);
+      }
+      .unit-selection {
+        margin-right: var(--space-2);
+      }
+      .unit-selection input {
+        width: auto;
+      }
+      .diff-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-3);
+      }
+      .diff-block {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface-2);
+        padding: var(--space-3);
+      }
+      .diff-block h4 {
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+        margin-bottom: var(--space-2);
+      }
+      .diff-block ul {
+        margin: 0;
+        padding-left: var(--space-4);
+      }
+      .diff-block li {
+        font-size: var(--text-xs);
       }
 
       /* -- Stat lists -- */
@@ -925,6 +1037,7 @@ function renderPage(title: string, body: string): string {
     </div>
     <script>
       async function submitJsonForm(event) {
+        if (event.defaultPrevented) return;
         event.preventDefault();
         const form = event.currentTarget;
         if (form.dataset.newWordForm === 'true') {
@@ -975,6 +1088,20 @@ function renderPage(title: string, body: string): string {
           }
         } finally {
           form.removeAttribute('aria-busy');
+        }
+      }
+
+      function syncSelectedUnitIds(form) {
+        const hidden = form.querySelector('[data-selected-unit-ids]');
+        if (!hidden) return;
+        const values = Array.from(document.querySelectorAll('[data-review-unit-checkbox]:checked'))
+          .map((input) => input.value);
+        hidden.value = values.join(',');
+      }
+
+      function toggleAllReviewUnits(checked) {
+        for (const input of document.querySelectorAll('[data-review-unit-checkbox]')) {
+          input.checked = checked;
         }
       }
 
@@ -1224,6 +1351,21 @@ function renderPage(title: string, body: string): string {
       }
 
       for (const form of document.querySelectorAll('form[data-json-form="true"]')) {
+        if (form.dataset.reviewBulkForm === 'true') {
+          form.addEventListener('submit', (event) => {
+            syncSelectedUnitIds(form);
+            const hidden = form.querySelector('[data-selected-unit-ids]');
+            if (!hidden || !hidden.value) {
+              event.preventDefault();
+              const result = form.querySelector('[data-result]');
+              if (result) {
+                result.textContent = 'Select at least one review unit.';
+                result.classList.add('visible');
+              }
+              return;
+            }
+          });
+        }
         form.addEventListener('submit', submitJsonForm);
       }
       for (const form of document.querySelectorAll('form[data-new-word-form="true"]')) {
@@ -1235,6 +1377,12 @@ function renderPage(title: string, body: string): string {
         form.querySelector('[data-add-translation]').addEventListener('click', () => addTranslationCard(form));
         addTranslationCard(form, 'en');
         updateWordIdPreview(form);
+      }
+      for (const button of document.querySelectorAll('[data-review-select-all]')) {
+        button.addEventListener('click', () => toggleAllReviewUnits(true));
+      }
+      for (const button of document.querySelectorAll('[data-review-clear-all]')) {
+        button.addEventListener('click', () => toggleAllReviewUnits(false));
       }
     </script>
   </body>
@@ -1346,6 +1494,211 @@ function renderExampleCards(items: ListedExampleUpdateSet[]): string {
       </div>
     `).join('')}
   </div>`
+}
+
+function renderInlineDefinitionList(value: ReviewUnitReleaseValue | null): string {
+  if (!value || value.definitions.length === 0) return '<div class="text-muted text-sm">No definitions</div>'
+  return `<ul>${value.definitions.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+}
+
+function renderInlineExampleList(value: ReviewUnitReleaseValue | null): string {
+  if (!value || value.examples.length === 0) return '<div class="text-muted text-sm">No examples</div>'
+  return `<ul>${value.examples.map((item) => `<li>${escapeHtml(item.japanese)} &middot; ${escapeHtml(item.translation)}</li>`).join('')}</ul>`
+}
+
+function renderReviewUnit(unit: ReviewUnit): string {
+  const inspectorLabel = unit.word?.word ?? unit.word?.reading ?? unit.wordId.split(':')[0]
+  return `<div class="item">
+    <div class="item-header">
+      <div style="display:flex; align-items:center; gap: var(--space-2); flex-wrap:wrap">
+        <label class="unit-selection"><input type="checkbox" data-review-unit-checkbox value="${escapeHtml(unit.unitId)}" /></label>
+        <span class="item-word">${escapeHtml(unit.word?.word ?? unit.wordId)}</span>
+        <span class="item-lang">${escapeHtml(unit.lang)}</span>
+      </div>
+      <div class="badge-row">
+        ${renderBadge(`risk-${unit.riskLevel}`)}
+        ${renderBadge(`batch-${unit.batchId}`)}
+        ${unit.flags.hasSourceConflict ? renderBadge('source-conflict') : ''}
+        ${unit.flags.isTranslationOnly ? renderBadge('translation-only') : ''}
+        ${unit.flags.isExamplesOnly ? renderBadge('examples-only') : ''}
+      </div>
+    </div>
+    <div class="item-meta">
+      Word ID ${escapeHtml(unit.wordId)} &middot; Batch ${unit.batchId} &middot; ${escapeHtml(unit.batch?.actor ?? 'system')}
+    </div>
+    <div class="diff-grid">
+      <div class="diff-block">
+        <h4>Release</h4>
+        ${renderInlineDefinitionList(unit.release)}
+        ${renderInlineExampleList(unit.release)}
+      </div>
+      <div class="diff-block">
+        <h4>Source Override</h4>
+        ${renderInlineDefinitionList(unit.sourceUpdate.translation ? {
+          definitions: unit.sourceUpdate.translation.definitions,
+          sources: unit.sourceUpdate.translation.sources,
+          examples: unit.sourceUpdate.examples?.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })) ?? [],
+        } : unit.sourceUpdate.examples ? {
+          definitions: [],
+          sources: [],
+          examples: unit.sourceUpdate.examples.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })),
+        } : null)}
+        ${renderInlineExampleList(unit.sourceUpdate.translation ? {
+          definitions: unit.sourceUpdate.translation.definitions,
+          sources: unit.sourceUpdate.translation.sources,
+          examples: unit.sourceUpdate.examples?.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })) ?? [],
+        } : unit.sourceUpdate.examples ? {
+          definitions: [],
+          sources: [],
+          examples: unit.sourceUpdate.examples.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })),
+        } : null)}
+      </div>
+      <div class="diff-block">
+        <h4>AI Candidate</h4>
+        ${renderInlineDefinitionList(unit.translation ? {
+          definitions: unit.translation.definitions,
+          sources: unit.translation.sources,
+          examples: unit.exampleSet?.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })) ?? [],
+        } : unit.exampleSet ? {
+          definitions: [],
+          sources: [],
+          examples: unit.exampleSet.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })),
+        } : null)}
+        ${renderInlineExampleList(unit.translation ? {
+          definitions: unit.translation.definitions,
+          sources: unit.translation.sources,
+          examples: unit.exampleSet?.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })) ?? [],
+        } : unit.exampleSet ? {
+          definitions: [],
+          sources: [],
+          examples: unit.exampleSet.examples.map((example) => ({
+            japanese: example.japanese,
+            translation: example.translation,
+            source: example.source,
+          })),
+        } : null)}
+      </div>
+      <div class="diff-block">
+        <h4>Effective If Approved</h4>
+        ${renderInlineDefinitionList(unit.effectivePreview)}
+        ${renderInlineExampleList(unit.effectivePreview)}
+      </div>
+    </div>
+    <div class="page-actions">
+      <form action="/admin/api/review/units/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form">
+        <input type="hidden" name="unitIds" value="${escapeHtml(unit.unitId)}" />
+        <button type="submit">Approve</button>
+        <button type="submit" class="secondary" formaction="/admin/api/review/units/reject" data-confirm="Reject this review unit?">Reject</button>
+        <div class="result" data-result></div>
+      </form>
+      <a href="/admin/entry?word=${encodeURIComponent(inspectorLabel)}&lang=${encodeURIComponent(unit.lang)}">Open Inspector</a>
+    </div>
+  </div>`
+}
+
+function renderReviewUnitList(items: ReviewUnit[]): string {
+  if (items.length === 0) return '<div class="empty">No pending review units match this view.</div>'
+  return `<div class="item-list">${items.map(renderReviewUnit).join('')}</div>`
+}
+
+function renderReviewSummaryCards(summary: AdminReviewQueueResponseV2['summary'] | AdminReviewBatchSummaryResponse): string {
+  const cards: Array<{ title: string; body: string }> = [
+    { title: 'Pending Units', body: `<span class="metric-value">${escapeHtml(summary.pendingUnits)}</span>` },
+    { title: 'Languages', body: renderDefinitionList(summary.byLanguage) },
+    { title: 'Risk', body: renderDefinitionList(summary.byRisk as Record<string, number>) },
+    { title: 'Source Conflict', body: `<span class="metric-value">${escapeHtml(summary.sourceConflictCount)}</span>` },
+  ]
+
+  if ('translationOnlyCount' in summary) {
+    cards.push({
+      title: 'Split Units',
+      body: `<dl class="stat-list"><dt>Translation only</dt><dd>${escapeHtml(summary.translationOnlyCount)}</dd><dt>Examples only</dt><dd>${escapeHtml(summary.examplesOnlyCount)}</dd></dl>`,
+    })
+  }
+
+  return `<div class="summary-grid">
+    ${cards.map((card) => `
+      <div class="summary-card">
+        <h3>${escapeHtml(card.title)}</h3>
+        ${card.body}
+      </div>
+    `).join('')}
+  </div>`
+}
+
+function renderRecentReviewBatches(items: ReviewQueueSummaryRecentBatch[]): string {
+  if (items.length === 0) return '<div class="empty">No pending AI batches right now.</div>'
+  return `<table>
+    <thead><tr><th>Batch</th><th>Actor</th><th>Pending Units</th><th>Source Conflicts</th><th>Languages</th><th>Open</th></tr></thead>
+    <tbody>
+      ${items.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.batchId)}</td>
+          <td>${escapeHtml(item.batch?.actor ?? 'system')}</td>
+          <td>${escapeHtml(item.pendingUnits)}</td>
+          <td>${escapeHtml(item.sourceConflictCount)}</td>
+          <td>${escapeHtml(Object.entries(item.byLanguage).map(([lang, count]) => `${lang}:${count}`).join(', '))}</td>
+          <td><a href="/admin/review/batch/${item.batchId}">Open batch</a></td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>`
+}
+
+function renderReviewFilterChips(basePath: string, current: {
+  risk: ReviewRiskLevel | null
+  shape: ReviewUnitShape | null
+  hasSourceConflict: boolean | null
+}): string {
+  const chips = [
+    { label: 'All', href: basePath, active: current.risk === null && current.shape === null && current.hasSourceConflict === null },
+    { label: 'Low risk', href: `${basePath}?risk=low`, active: current.risk === 'low' && current.shape === null && current.hasSourceConflict === null },
+    { label: 'Medium risk', href: `${basePath}?risk=medium`, active: current.risk === 'medium' && current.shape === null && current.hasSourceConflict === null },
+    { label: 'High risk', href: `${basePath}?risk=high`, active: current.risk === 'high' && current.shape === null && current.hasSourceConflict === null },
+    { label: 'Source conflict', href: `${basePath}?hasSourceConflict=true`, active: current.hasSourceConflict === true },
+    { label: 'Translation only', href: `${basePath}?shape=translation-only`, active: current.shape === 'translation-only' },
+    { label: 'Examples only', href: `${basePath}?shape=examples-only`, active: current.shape === 'examples-only' },
+  ]
+  return `<div class="filter-chips">
+    ${chips.map((chip) => `<a class="filter-chip" href="${chip.href}" ${chip.active ? 'aria-current="page"' : ''}>${escapeHtml(chip.label)}</a>`).join('')}
+  </div>`
+}
+
+function buildReviewPageLink(basePath: string, params: Record<string, string | null>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value)
+  }
+  const serialized = search.toString()
+  return serialized ? `${basePath}?${serialized}` : basePath
 }
 
 export function renderDashboardPage(data: AdminSummaryResponse): string {
@@ -1606,93 +1959,101 @@ export function renderEntryPage(data: AdminEntryInspectionResponse): string {
   `)
 }
 
-export function renderReviewPage(data: AdminReviewQueueResponse): string {
-  const totalPending = data.translations.length + data.exampleSets.length
+export function renderReviewPage(data: AdminReviewQueueResponseV2): string {
   return renderPage('AI Review Queue', `
     <div class="page-header">
       <h1>AI Review</h1>
       <p>
-        ${totalPending > 0
-          ? `${totalPending} item${totalPending === 1 ? '' : 's'} pending review.`
+        ${data.summary.pendingUnits > 0
+          ? `${data.summary.pendingUnits} review unit${data.summary.pendingUnits === 1 ? '' : 's'} pending.`
           : 'All caught up.'
         }
-        Only approved AI updates become visible in lookups. Source updates are effective automatically.
+        Queue is grouped by word, language, and batch so large AI imports can be reviewed in bulk.
       </p>
       <div class="text-sm text-muted" style="margin-top: var(--space-1)">Release: ${escapeHtml(data.releaseVersion)}</div>
     </div>
 
     <div class="section">
-      <h2>Translation Candidates</h2>
-      ${data.translations.length === 0
-        ? '<div class="empty">No pending AI translations. New candidates appear after a <a href="/admin/jobs">Gemini import</a>.</div>'
-        : `<div class="item-list">
-          ${data.translations.map((item) => `
-            <div class="item">
-              <div class="item-header">
-                <div>
-                  <span class="item-word">${escapeHtml(item.wordId)}</span>
-                  <span class="item-lang">${escapeHtml(item.lang)}</span>
-                </div>
-                <div class="badge-row">
-                  ${renderBadge(item.status)}
-                  ${renderBadge(item.reviewStatus)}
-                  ${renderBadge(item.sourceType)}
-                </div>
-              </div>
-              <ol class="entry-definitions">
-                ${item.definitions.map((def) => `<li>${escapeHtml(def)}</li>`).join('')}
-              </ol>
-              <div class="item-meta">Sources: ${escapeHtml(item.sources.join(', '))}</div>
-              <form action="/admin/api/review/translation/${item.id}/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form" style="margin-top: var(--space-3)">
-                <div class="btn-group">
-                  <button type="submit">Approve</button>
-                  <button type="submit" class="secondary" formaction="/admin/api/review/translation/${item.id}/reject" data-confirm="Reject this AI translation?">Reject</button>
-                </div>
-                <div class="result" data-result></div>
-              </form>
-            </div>
-          `).join('')}
-        </div>`
-      }
+      <h2>Queue Summary</h2>
+      ${renderReviewSummaryCards(data.summary)}
     </div>
 
     <div class="section">
-      <h2>Example Set Candidates</h2>
-      ${data.exampleSets.length === 0
-        ? '<div class="empty">No pending AI example sets. New candidates appear after a <a href="/admin/jobs">Gemini import</a>.</div>'
-        : `<div class="item-list">
-          ${data.exampleSets.map((item) => `
-            <div class="item">
-              <div class="item-header">
-                <div>
-                  <span class="item-word">${escapeHtml(item.wordId)}</span>
-                  <span class="item-lang">${escapeHtml(item.lang)}</span>
-                </div>
-                <div class="badge-row">
-                  ${renderBadge(item.status)}
-                  ${renderBadge(item.reviewStatus)}
-                  ${renderBadge(item.sourceType)}
-                </div>
-              </div>
-              <div class="entry-examples">
-                ${item.examples.map((ex) => `
-                  <div class="entry-example-row">
-                    <span class="entry-example-jp">${escapeHtml(ex.japanese)}</span>
-                    <span>${escapeHtml(ex.translation)}</span>
-                  </div>
-                `).join('')}
-              </div>
-              <form action="/admin/api/review/example-set/${item.id}/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form" style="margin-top: var(--space-3)">
-                <div class="btn-group">
-                  <button type="submit">Approve</button>
-                  <button type="submit" class="secondary" formaction="/admin/api/review/example-set/${item.id}/reject" data-confirm="Reject this AI example set?">Reject</button>
-                </div>
-                <div class="result" data-result></div>
-              </form>
-            </div>
-          `).join('')}
-        </div>`
-      }
+      <h2>Pending Batches</h2>
+      ${renderRecentReviewBatches(data.summary.recentBatches)}
+    </div>
+
+    <div class="section">
+      <h2>Visible Units</h2>
+      ${renderReviewFilterChips('/admin/review', {
+        risk: data.filters.risk,
+        shape: data.filters.shape,
+        hasSourceConflict: data.filters.hasSourceConflict,
+      })}
+      ${renderReviewUnitList(data.items)}
+      ${data.nextCursor ? `
+        <div class="page-actions">
+          <a href="${buildReviewPageLink('/admin/review', {
+            cursor: data.nextCursor,
+            risk: data.filters.risk,
+            shape: data.filters.shape,
+            hasSourceConflict: data.filters.hasSourceConflict === null ? null : String(data.filters.hasSourceConflict),
+          })}">Next page</a>
+        </div>
+      ` : ''}
+    </div>
+  `)
+}
+
+export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): string {
+  const batchId = data.summary.batch?.id ?? ''
+  const batchPath = `/admin/review/batch/${batchId}`
+  return renderPage('AI Review Batch', `
+    <div class="page-header">
+      <h1>Batch Review</h1>
+      <p>Review AI candidates grouped into queue units for a single import batch.</p>
+      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Batch: ${escapeHtml(batchId)} &middot; Release: ${escapeHtml(data.releaseVersion)}</div>
+    </div>
+
+    <div class="section">
+      <h2>Batch Summary</h2>
+      ${renderReviewSummaryCards(data.summary)}
+    </div>
+
+    <div class="section">
+      <h2>Review Units</h2>
+      ${renderReviewFilterChips(batchPath, {
+        risk: data.filters.risk,
+        shape: data.filters.shape,
+        hasSourceConflict: data.filters.hasSourceConflict,
+      })}
+      <div class="selection-bar">
+        <div class="btn-group">
+          <button type="button" class="secondary" data-review-select-all>Select all visible</button>
+          <button type="button" class="secondary" data-review-clear-all>Clear</button>
+        </div>
+        <form action="/admin/api/review/units/approve" method="POST" data-json-form="true" data-reload="true" data-review-bulk-form="true" class="inline-form">
+          <input type="hidden" name="unitIds" value="" data-selected-unit-ids />
+          <label class="checkbox-inline">
+            <input type="checkbox" name="overrideSourceConflict" value="true" />
+            Override source conflicts
+          </label>
+          <button type="submit">Approve selected</button>
+          <button type="submit" class="secondary" formaction="/admin/api/review/units/reject" data-confirm="Reject selected review units?">Reject selected</button>
+          <div class="result" data-result></div>
+        </form>
+      </div>
+      ${renderReviewUnitList(data.items)}
+      ${data.nextCursor ? `
+        <div class="page-actions">
+          <a href="${buildReviewPageLink(batchPath, {
+            cursor: data.nextCursor,
+            risk: data.filters.risk,
+            shape: data.filters.shape,
+            hasSourceConflict: data.filters.hasSourceConflict === null ? null : String(data.filters.hasSourceConflict),
+          })}">Next page</a>
+        </div>
+      ` : ''}
     </div>
   `)
 }

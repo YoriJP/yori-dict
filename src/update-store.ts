@@ -184,6 +184,41 @@ export interface ListedExampleUpdateSet extends DetailedExampleUpdateSet {
   batch: UpdateBatchRecord | null
 }
 
+export interface PendingReviewUnitKey {
+  unitId: string
+  wordId: string
+  lang: string
+  batchId: number
+}
+
+export interface PendingReviewUnitKeyFilters {
+  batchId?: number | null
+  lang?: string | null
+}
+
+export interface PendingReviewUnitKeyPage extends PendingReviewUnitKey {
+  translationId: number | null
+  exampleSetId: number | null
+}
+
+export interface PendingReviewUnitKeyPageResult {
+  items: PendingReviewUnitKeyPage[]
+  nextCursor: string | null
+}
+
+export interface BulkReviewStatusInput {
+  translationIds: number[]
+  exampleSetIds: number[]
+  reviewStatus: Extract<ReviewStatus, 'approved' | 'rejected'>
+  actor: string
+  notes?: string | null
+}
+
+export interface BulkReviewStatusResult {
+  translationIds: number[]
+  exampleSetIds: number[]
+}
+
 function defaultReviewStatus(sourceType: UpdateSourceType): ReviewStatus {
   return sourceType === 'ai' ? 'pending' : 'not_required'
 }
@@ -194,6 +229,64 @@ function normalizeSourceTypePriority(sourceType: UpdateSourceType): number {
 
 function isReviewEffective(sourceType: UpdateSourceType, reviewStatus: ReviewStatus): boolean {
   return sourceType === 'source' || reviewStatus === 'approved'
+}
+
+function encodePendingReviewUnitId(wordId: string, lang: string, batchId: number): string {
+  return `${wordId}|${lang}|${batchId}`
+}
+
+function comparePendingReviewUnitOrder(
+  left: Pick<PendingReviewUnitKey, 'batchId' | 'wordId' | 'lang'>,
+  right: Pick<PendingReviewUnitKey, 'batchId' | 'wordId' | 'lang'>
+): number {
+  if (left.batchId !== right.batchId) return right.batchId - left.batchId
+  if (left.wordId !== right.wordId) return left.wordId.localeCompare(right.wordId)
+  return left.lang.localeCompare(right.lang)
+}
+
+function parsePendingReviewCursor(cursor: string): PendingReviewUnitKey | null {
+  const [wordId, lang, batchIdRaw] = cursor.split('|')
+  const batchId = Number(batchIdRaw)
+  if (!wordId || !lang || !Number.isFinite(batchId)) return null
+  return {
+    unitId: encodePendingReviewUnitId(wordId, lang, batchId),
+    wordId,
+    lang,
+    batchId,
+  }
+}
+
+function buildPendingReviewUnitKeyMap(
+  translations: DetailedTranslationUpdate[],
+  exampleSets: DetailedExampleUpdateSet[]
+): Map<string, PendingReviewUnitKeyPage> {
+  const map = new Map<string, PendingReviewUnitKeyPage>()
+
+  for (const item of translations) {
+    const unitId = encodePendingReviewUnitId(item.wordId, item.lang, item.batchId)
+    map.set(unitId, {
+      unitId,
+      wordId: item.wordId,
+      lang: item.lang,
+      batchId: item.batchId,
+      translationId: item.id,
+      exampleSetId: map.get(unitId)?.exampleSetId ?? null,
+    })
+  }
+
+  for (const item of exampleSets) {
+    const unitId = encodePendingReviewUnitId(item.wordId, item.lang, item.batchId)
+    map.set(unitId, {
+      unitId,
+      wordId: item.wordId,
+      lang: item.lang,
+      batchId: item.batchId,
+      translationId: map.get(unitId)?.translationId ?? null,
+      exampleSetId: item.id,
+    })
+  }
+
+  return map
 }
 
 function mapBatchRow(row: UpdateBatchRow): UpdateBatchRecord {
@@ -467,6 +560,26 @@ export function getLatestTranslationUpdateBySourceType(
   return row ? mapTranslationRow(row) : null
 }
 
+export function getActiveTranslationUpdateBySourceType(
+  db: Database,
+  wordId: string,
+  lang: string,
+  sourceType: UpdateSourceType
+): DetailedTranslationUpdate | null {
+  const row = db.query<TranslationUpdateRow, [string, string, UpdateSourceType]>(`
+    SELECT *
+    FROM translation_updates
+    WHERE word_id = ?1
+      AND lang = ?2
+      AND source_type = ?3
+      AND status = 'active'
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(wordId, lang, sourceType)
+
+  return row ? mapTranslationRow(row) : null
+}
+
 export function getLatestExampleUpdateSetBySourceType(
   db: Database,
   wordId: string,
@@ -478,6 +591,26 @@ export function getLatestExampleUpdateSetBySourceType(
     FROM example_update_sets
     WHERE word_id = ?1 AND lang = ?2 AND source_type = ?3
     ORDER BY CASE status WHEN 'active' THEN 3 WHEN 'superseded' THEN 2 ELSE 1 END DESC, id DESC
+    LIMIT 1
+  `).get(wordId, lang, sourceType)
+
+  return row ? mapExampleRows(row, getExampleRowsForSet(db, row.id)) : null
+}
+
+export function getActiveExampleUpdateSetBySourceType(
+  db: Database,
+  wordId: string,
+  lang: string,
+  sourceType: UpdateSourceType
+): DetailedExampleUpdateSet | null {
+  const row = db.query<ExampleUpdateSetRow, [string, string, UpdateSourceType]>(`
+    SELECT *
+    FROM example_update_sets
+    WHERE word_id = ?1
+      AND lang = ?2
+      AND source_type = ?3
+      AND status = 'active'
+    ORDER BY id DESC
     LIMIT 1
   `).get(wordId, lang, sourceType)
 
@@ -886,7 +1019,7 @@ export function listTranslationUpdates(
   filters: UpdateListFilters = {}
 ): ListedTranslationUpdate[] {
   const clauses = ['1 = 1']
-  const params: unknown[] = []
+  const params: Array<string | number> = []
 
   if (filters.lang) {
     params.push(filters.lang)
@@ -910,7 +1043,7 @@ export function listTranslationUpdates(
   }
 
   params.push(filters.limit ?? 100)
-  const rows = db.query<TranslationUpdateRow, unknown[]>(`
+  const rows = db.query<TranslationUpdateRow, Array<string | number>>(`
     SELECT *
     FROM translation_updates
     WHERE ${clauses.join(' AND ')}
@@ -930,7 +1063,7 @@ export function listExampleUpdateSets(
   filters: UpdateListFilters = {}
 ): ListedExampleUpdateSet[] {
   const clauses = ['1 = 1']
-  const params: unknown[] = []
+  const params: Array<string | number> = []
 
   if (filters.lang) {
     params.push(filters.lang)
@@ -954,7 +1087,7 @@ export function listExampleUpdateSets(
   }
 
   params.push(filters.limit ?? 100)
-  const rows = db.query<ExampleUpdateSetRow, unknown[]>(`
+  const rows = db.query<ExampleUpdateSetRow, Array<string | number>>(`
     SELECT *
     FROM example_update_sets
     WHERE ${clauses.join(' AND ')}
@@ -967,4 +1100,143 @@ export function listExampleUpdateSets(
     ...mapExampleRows(row, getExampleRowsForSet(db, row.id)),
     batch: batchMap.get(row.batch_id) ?? null,
   }))
+}
+
+export function listPendingAiTranslationUpdates(
+  db: Database,
+  filters: PendingReviewUnitKeyFilters = {}
+): ListedTranslationUpdate[] {
+  const clauses = [
+    `source_type = 'ai'`,
+    `status = 'active'`,
+    `review_status = 'pending'`,
+  ]
+  const params: Array<string | number> = []
+
+  if (filters.lang) {
+    params.push(filters.lang)
+    clauses.push(`lang = ?${params.length}`)
+  }
+  if (filters.batchId !== undefined && filters.batchId !== null) {
+    params.push(filters.batchId)
+    clauses.push(`batch_id = ?${params.length}`)
+  }
+
+  const rows = db.query<TranslationUpdateRow, Array<string | number>>(`
+    SELECT *
+    FROM translation_updates
+    WHERE ${clauses.join(' AND ')}
+    ORDER BY batch_id DESC, word_id ASC, lang ASC, id DESC
+  `).all(...params)
+
+  const batchMap = getBatchMap(db)
+  return rows.map((row) => ({
+    ...mapTranslationRow(row),
+    batch: batchMap.get(row.batch_id) ?? null,
+  }))
+}
+
+export function listPendingAiExampleUpdateSets(
+  db: Database,
+  filters: PendingReviewUnitKeyFilters = {}
+): ListedExampleUpdateSet[] {
+  const clauses = [
+    `source_type = 'ai'`,
+    `status = 'active'`,
+    `review_status = 'pending'`,
+  ]
+  const params: Array<string | number> = []
+
+  if (filters.lang) {
+    params.push(filters.lang)
+    clauses.push(`lang = ?${params.length}`)
+  }
+  if (filters.batchId !== undefined && filters.batchId !== null) {
+    params.push(filters.batchId)
+    clauses.push(`batch_id = ?${params.length}`)
+  }
+
+  const rows = db.query<ExampleUpdateSetRow, Array<string | number>>(`
+    SELECT *
+    FROM example_update_sets
+    WHERE ${clauses.join(' AND ')}
+    ORDER BY batch_id DESC, word_id ASC, lang ASC, id DESC
+  `).all(...params)
+
+  const batchMap = getBatchMap(db)
+  return rows.map((row) => ({
+    ...mapExampleRows(row, getExampleRowsForSet(db, row.id)),
+    batch: batchMap.get(row.batch_id) ?? null,
+  }))
+}
+
+export function listPendingReviewUnitKeys(
+  db: Database,
+  filters: PendingReviewUnitKeyFilters & {
+    cursor?: string | null
+    limit?: number | null
+  } = {}
+): PendingReviewUnitKeyPageResult {
+  const translations = listPendingAiTranslationUpdates(db, filters)
+  const exampleSets = listPendingAiExampleUpdateSets(db, filters)
+  const map = buildPendingReviewUnitKeyMap(translations, exampleSets)
+  const items = [...map.values()].sort(comparePendingReviewUnitOrder)
+  const cursor = filters.cursor ? parsePendingReviewCursor(filters.cursor) : null
+  const limit = Math.max(1, Math.min(filters.limit ?? 50, 200))
+
+  const startIndex = cursor
+    ? items.findIndex((item) => comparePendingReviewUnitOrder(item, cursor) > 0)
+    : 0
+
+  const normalizedStartIndex = startIndex >= 0 ? startIndex : 0
+  const pageItems = items.slice(normalizedStartIndex, normalizedStartIndex + limit)
+  const last = pageItems[pageItems.length - 1]
+
+  return {
+    items: pageItems,
+    nextCursor: last && normalizedStartIndex + pageItems.length < items.length
+      ? last.unitId
+      : null,
+  }
+}
+
+export function applyBulkReviewStatus(
+  db: Database,
+  input: BulkReviewStatusInput
+): BulkReviewStatusResult {
+  const update = db.transaction((payload: BulkReviewStatusInput): BulkReviewStatusResult => {
+    const approvedTranslationIds: number[] = []
+    const approvedExampleSetIds: number[] = []
+
+    for (const id of payload.translationIds) {
+      const row = db.query<TranslationUpdateRow, [number]>(`
+        SELECT *
+        FROM translation_updates
+        WHERE id = ?1
+      `).get(id)
+
+      if (!row || row.source_type !== 'ai') continue
+      updateReviewMetadata(db, 'translation_updates', id, payload.reviewStatus, payload.actor, payload.notes)
+      approvedTranslationIds.push(id)
+    }
+
+    for (const id of payload.exampleSetIds) {
+      const row = db.query<ExampleUpdateSetRow, [number]>(`
+        SELECT *
+        FROM example_update_sets
+        WHERE id = ?1
+      `).get(id)
+
+      if (!row || row.source_type !== 'ai') continue
+      updateReviewMetadata(db, 'example_update_sets', id, payload.reviewStatus, payload.actor, payload.notes)
+      approvedExampleSetIds.push(id)
+    }
+
+    return {
+      translationIds: approvedTranslationIds,
+      exampleSetIds: approvedExampleSetIds,
+    }
+  })
+
+  return update(input)
 }

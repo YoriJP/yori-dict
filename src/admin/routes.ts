@@ -1,10 +1,14 @@
 import { Hono } from 'hono'
 import { requireAdminAuth, getAdminActor } from './auth'
 import {
+  applyBulkReviewAction,
   approveExampleSetReview,
   approveTranslationReview,
   createAdminNewWord,
   getAdminReleaseList,
+  getReviewBatchPage,
+  getReviewBatchSummary,
+  getReviewQueue,
   getAdminSummary,
   getAiReviewQueue,
   getBatchDetail,
@@ -20,6 +24,7 @@ import {
   runAdminSourceUpdate,
 } from './service'
 import {
+  renderReviewBatchPage,
   renderDashboardPage,
   renderEntryPage,
   renderJobsPage,
@@ -31,6 +36,7 @@ import {
 import { normalizeLanguage, type Language } from '../types'
 import { initUpdatesDatabase, listUpdateBatches } from '../update-store'
 import type { GeminiRunOptions } from '../../scripts/import/gemini'
+import type { ReviewRiskLevel, ReviewUnitShape } from './types'
 
 const admin = new Hono()
 
@@ -63,6 +69,22 @@ function parseOptionalNumber(raw: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function parseReviewRisk(raw: string | undefined): ReviewRiskLevel | null {
+  if (!raw) return null
+  return raw === 'low' || raw === 'medium' || raw === 'high' ? raw : null
+}
+
+function parseReviewShape(raw: string | undefined): ReviewUnitShape | null {
+  if (!raw) return null
+  return raw === 'translation-only' || raw === 'examples-only' ? raw : null
+}
+
+function parseOptionalBooleanQuery(raw: string | undefined): boolean | null {
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return null
+}
+
 async function readJsonBody<T extends Record<string, unknown>>(request: Request): Promise<T> {
   return await request.json() as T
 }
@@ -79,8 +101,24 @@ admin.get('/admin/entry', (c) => {
 })
 
 admin.get('/admin/review', (c) => {
-  const lang = normalizeLanguage(c.req.query('lang') ?? '')
-  return c.html(renderReviewPage(getAiReviewQueue(lang)))
+  return c.html(renderReviewPage(getReviewQueue({
+    lang: normalizeLanguage(c.req.query('lang') ?? ''),
+    risk: parseReviewRisk(c.req.query('risk')),
+    shape: parseReviewShape(c.req.query('shape')),
+    hasSourceConflict: parseOptionalBooleanQuery(c.req.query('hasSourceConflict')),
+    cursor: c.req.query('cursor') ?? null,
+    limit: parseOptionalNumber(c.req.query('limit')) ?? 50,
+  })))
+})
+
+admin.get('/admin/review/batch/:id', (c) => {
+  return c.html(renderReviewBatchPage(getReviewBatchPage(Number(c.req.param('id')), {
+    risk: parseReviewRisk(c.req.query('risk')),
+    shape: parseReviewShape(c.req.query('shape')),
+    hasSourceConflict: parseOptionalBooleanQuery(c.req.query('hasSourceConflict')),
+    cursor: c.req.query('cursor') ?? null,
+    limit: parseOptionalNumber(c.req.query('limit')) ?? 50,
+  })))
 })
 
 admin.get('/admin/new-word', (c) => c.html(renderNewWordPage()))
@@ -215,6 +253,22 @@ admin.get('/admin/api/review/ai', (c) => {
   return c.json(getAiReviewQueue(lang))
 })
 
+admin.get('/admin/api/review/queue', (c) => {
+  return c.json(getReviewQueue({
+    batchId: parseOptionalNumber(c.req.query('batchId')),
+    lang: normalizeLanguage(c.req.query('lang') ?? ''),
+    risk: parseReviewRisk(c.req.query('risk')),
+    shape: parseReviewShape(c.req.query('shape')),
+    hasSourceConflict: parseOptionalBooleanQuery(c.req.query('hasSourceConflict')),
+    cursor: c.req.query('cursor') ?? null,
+    limit: parseOptionalNumber(c.req.query('limit')) ?? 50,
+  }))
+})
+
+admin.get('/admin/api/review/batches/:id/summary', (c) => {
+  return c.json(getReviewBatchSummary(Number(c.req.param('id'))))
+})
+
 admin.post('/admin/api/review/translation/:id/approve', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = approveTranslationReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
@@ -240,6 +294,38 @@ admin.post('/admin/api/review/example-set/:id/reject', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = rejectExampleSetReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Example update set not found' }, 404)
+  return c.json(result)
+})
+
+admin.post('/admin/api/review/units/approve', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
+  const result = applyBulkReviewAction('approved', {
+    unitIds: Array.isArray(body.unitIds)
+      ? body.unitIds.map((value) => String(value))
+      : typeof body.unitIds === 'string'
+        ? [body.unitIds]
+        : [],
+    notes: typeof body.notes === 'string' ? body.notes : null,
+    overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
+  }, getAdminActor(c))
+
+  if (!result.ok) return c.json(result, 400)
+  return c.json(result)
+})
+
+admin.post('/admin/api/review/units/reject', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
+  const result = applyBulkReviewAction('rejected', {
+    unitIds: Array.isArray(body.unitIds)
+      ? body.unitIds.map((value) => String(value))
+      : typeof body.unitIds === 'string'
+        ? [body.unitIds]
+        : [],
+    notes: typeof body.notes === 'string' ? body.notes : null,
+    overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
+  }, getAdminActor(c))
+
+  if (!result.ok) return c.json(result, 400)
   return c.json(result)
 })
 
