@@ -2,6 +2,7 @@ import type {
   AdminBatchDetailResponse,
   AdminEntryInspectionResponse,
   AdminNewWordResponse,
+  AdminReviewBatchSummaryResponse,
   AdminReviewBatchPageResponse,
   AdminReleaseListResponse,
   AdminReviewQueueResponseV2,
@@ -95,10 +96,29 @@ const NAV_ITEMS = [
   { href: '/admin/jobs', label: 'Jobs', match: 'Jobs' },
 ]
 
-function renderPage(title: string, body: string): string {
+type RenderPageOptions = {
+  includeScripts?: boolean
+  standalone?: boolean
+  utilityHtml?: string
+}
+
+function renderPage(title: string, body: string, options: RenderPageOptions = {}): string {
+  const includeScripts = options.includeScripts ?? true
+  const standalone = options.standalone ?? false
   const navHtml = NAV_ITEMS.map(item =>
     `<a href="${item.href}" ${title.includes(item.match) ? 'aria-current="page"' : ''}>${item.label}</a>`
   ).join('\n          ')
+  const utilityHtml = options.utilityHtml ?? `
+    <div class="content-header">
+      <div class="content-utility">
+        <span class="content-utility-label">Internal Admin</span>
+        <span class="content-utility-copy">Release operations, review queues, and data maintenance.</span>
+      </div>
+      <form action="/admin/logout" method="POST" class="shell-utility-form">
+        <button type="submit" class="secondary sm">Log out</button>
+      </form>
+    </div>
+  `
 
   return `<!doctype html>
 <html lang="en">
@@ -177,6 +197,12 @@ function renderPage(title: string, body: string): string {
         background: var(--surface-0);
         line-height: 1.55;
         -webkit-font-smoothing: antialiased;
+      }
+      body.standalone-body {
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, oklch(96% 0.03 var(--hue)) 0, transparent 34%),
+          linear-gradient(180deg, oklch(98% 0.01 var(--hue)) 0%, var(--surface-0) 100%);
       }
 
       /* -- Layout shell -- */
@@ -260,6 +286,34 @@ function renderPage(title: string, body: string): string {
       .content {
         padding: var(--space-7) var(--space-7) var(--space-8);
         max-width: 1000px;
+      }
+      .content-header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+        padding-bottom: var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .content-utility {
+        display: grid;
+        gap: var(--space-1);
+      }
+      .content-utility-label {
+        font-size: var(--text-xs);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+      .content-utility-copy {
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        max-width: 34rem;
+      }
+      .shell-utility-form {
+        display: block;
       }
 
       /* -- Typography -- */
@@ -625,6 +679,138 @@ function renderPage(title: string, body: string): string {
         flex-wrap: wrap;
         margin-top: var(--space-4);
       }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+      .eyebrow::before {
+        content: '';
+        display: inline-block;
+        width: 20px;
+        height: 1px;
+        background: var(--border-strong);
+      }
+      .auth-layout {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.05fr);
+        gap: var(--space-6);
+        padding: clamp(24px, 4vw, 48px);
+        align-items: stretch;
+      }
+      .auth-intro {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: clamp(20px, 4vw, 42px);
+        border-radius: 24px;
+        background: linear-gradient(180deg, color-mix(in oklch, var(--surface-2) 78%, var(--accent-subtle) 22%), var(--surface-2));
+        border: 1px solid color-mix(in oklch, var(--border) 85%, var(--accent) 15%);
+        box-shadow: 0 24px 80px oklch(70% 0.02 var(--hue) / 0.08);
+        position: relative;
+        overflow: hidden;
+      }
+      .auth-intro::after {
+        content: '';
+        position: absolute;
+        inset: auto -10% -18% 40%;
+        height: 240px;
+        background: radial-gradient(circle, color-mix(in oklch, var(--accent-subtle) 72%, white 28%) 0%, transparent 70%);
+        pointer-events: none;
+      }
+      .auth-brand {
+        display: grid;
+        gap: var(--space-4);
+        position: relative;
+        z-index: 1;
+      }
+      .auth-brand-mark {
+        width: 56px;
+        height: 56px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(145deg, var(--accent), oklch(56% 0.13 calc(var(--hue) + 8)));
+        color: var(--surface-2);
+        font-family: var(--font-display);
+        font-size: 1.5rem;
+        font-weight: 700;
+        box-shadow: 0 18px 40px oklch(48% 0.08 var(--hue) / 0.18);
+      }
+      .auth-title {
+        font-size: clamp(2rem, 4vw, 3.6rem);
+        line-height: 0.95;
+        max-width: 8ch;
+      }
+      .auth-lede {
+        max-width: 30rem;
+        color: var(--text-secondary);
+        font-size: var(--text-lg);
+      }
+      .auth-meta {
+        display: grid;
+        gap: var(--space-3);
+        position: relative;
+        z-index: 1;
+      }
+      .auth-meta-item {
+        display: grid;
+        gap: 2px;
+      }
+      .auth-meta-label {
+        font-size: var(--text-xs);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-tertiary);
+        font-weight: 700;
+      }
+      .auth-meta-copy {
+        color: var(--text-secondary);
+        max-width: 26rem;
+      }
+      .auth-card {
+        align-self: center;
+        max-width: 34rem;
+        width: 100%;
+        background: color-mix(in oklch, var(--surface-2) 82%, white 18%);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: clamp(24px, 4vw, 40px);
+        box-shadow: 0 20px 70px oklch(70% 0.02 var(--hue) / 0.08);
+      }
+      .auth-card h1 {
+        margin-top: var(--space-3);
+        margin-bottom: var(--space-3);
+      }
+      .auth-card p {
+        color: var(--text-secondary);
+        max-width: 32rem;
+      }
+      .auth-form {
+        margin-top: var(--space-6);
+      }
+      .auth-form input[type="password"] {
+        font-size: var(--text-base);
+        padding: var(--space-3) var(--space-4);
+      }
+      .auth-form button[type="submit"] {
+        margin-top: var(--space-2);
+        min-height: 48px;
+      }
+      .auth-footnote {
+        margin-top: var(--space-5);
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+      }
+      .auth-disabled {
+        margin-top: var(--space-6);
+      }
       .selection-bar {
         display: flex;
         gap: var(--space-3);
@@ -989,6 +1175,10 @@ function renderPage(title: string, body: string): string {
         .content {
           padding: var(--space-7) var(--space-4) var(--space-8);
         }
+        .content-header {
+          flex-direction: column;
+          align-items: stretch;
+        }
         .two-col {
           grid-template-columns: 1fr;
         }
@@ -1016,10 +1206,23 @@ function renderPage(title: string, body: string): string {
         .list-row {
           grid-template-columns: 1fr;
         }
+        .auth-layout {
+          grid-template-columns: 1fr;
+          min-height: auto;
+        }
+        .auth-intro {
+          min-height: 320px;
+        }
+        .auth-card {
+          max-width: none;
+        }
       }
     </style>
   </head>
-  <body>
+  <body class="${standalone ? 'standalone-body' : ''}">
+    ${standalone
+      ? body
+      : `
     <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">Menu</button>
     <div class="shell">
       <aside class="sidebar">
@@ -1032,10 +1235,11 @@ function renderPage(title: string, body: string): string {
         </nav>
       </aside>
       <main class="content">
+        ${utilityHtml}
         ${body}
       </main>
-    </div>
-    <script>
+    </div>`}
+    ${includeScripts ? `<script>
       async function submitJsonForm(event) {
         if (event.defaultPrevented) return;
         event.preventDefault();
@@ -1392,7 +1596,7 @@ function renderPage(title: string, body: string): string {
       for (const button of document.querySelectorAll('[data-review-clear-all]')) {
         button.addEventListener('click', () => toggleAllReviewUnits(false));
       }
-    </script>
+    </script>` : ''}
   </body>
 </html>`
 }
@@ -1636,6 +1840,80 @@ function renderReviewUnit(unit: ReviewUnit): string {
       <a href="/admin/entry?word=${encodeURIComponent(inspectorLabel)}&lang=${encodeURIComponent(unit.lang)}">Open Inspector</a>
     </div>
   </div>`
+}
+
+export function renderAdminLoginPage(options: {
+  disabled?: boolean
+  error?: string | null
+  next?: string | null
+} = {}): string {
+  const disabled = options.disabled ?? false
+  const next = escapeHtml(options.next ?? '/admin')
+  const errorHtml = options.error
+    ? `<div class="alert error"><h3>Access denied</h3><p>${escapeHtml(options.error)}</p></div>`
+    : ''
+
+  const cardBody = disabled
+    ? `
+      <div class="auth-disabled">
+        <div class="alert warning">
+          <h3>Admin UI is offline for this deployment</h3>
+          <p>Set <code>ADMIN_TOKEN</code> in the runtime environment, then redeploy to re-enable internal admin access.</p>
+        </div>
+      </div>
+      <p class="auth-footnote">The public API and health check can still run without the admin console enabled.</p>
+    `
+    : `
+      ${errorHtml}
+      <form action="/admin/login" method="POST" class="auth-form">
+        <input type="hidden" name="next" value="${next}" />
+        <label>Access code
+          <input type="password" name="password" autocomplete="current-password" autofocus placeholder="Enter the shared admin secret" />
+        </label>
+        <button type="submit">Enter admin</button>
+      </form>
+      <p class="auth-footnote">Use the deployment-level admin token for this environment. Browser sessions end when the browser closes.</p>
+    `
+
+  return renderPage('Admin Login', `
+    <section class="auth-layout">
+      <aside class="auth-intro">
+        <div class="auth-brand">
+          <div class="auth-brand-mark">Y</div>
+          <span class="eyebrow">Yori Dictionary</span>
+          <h1 class="auth-title">Operational access for the live dictionary.</h1>
+          <p class="auth-lede">A calmer front door for release control, review queues, and dictionary maintenance. Same secret, better flow.</p>
+        </div>
+        <div class="auth-meta">
+          <div class="auth-meta-item">
+            <span class="auth-meta-label">Audience</span>
+            <span class="auth-meta-copy">Internal operators working on releases, review, and data quality.</span>
+          </div>
+          <div class="auth-meta-item">
+            <span class="auth-meta-label">Session model</span>
+            <span class="auth-meta-copy">Password-only sign-in backed by a short-lived browser session cookie.</span>
+          </div>
+          <div class="auth-meta-item">
+            <span class="auth-meta-label">Environment</span>
+            <span class="auth-meta-copy">${disabled ? 'Admin token missing' : 'Admin token available'}</span>
+          </div>
+        </div>
+      </aside>
+
+      <section class="auth-card">
+        <span class="eyebrow">${disabled ? 'Configuration required' : 'Internal sign-in'}</span>
+        <h1>${disabled ? 'Admin access is currently disabled.' : 'Enter the admin console.'}</h1>
+        <p>${disabled
+          ? 'This deployment is running without an admin secret, so the browser UI stays safely unavailable.'
+          : 'Sign in with the shared admin access code for this environment. API token auth still works for scripts and operational tooling.'}</p>
+        ${cardBody}
+      </section>
+    </section>
+  `, {
+    includeScripts: false,
+    standalone: true,
+    utilityHtml: '',
+  })
 }
 
 function renderReviewUnitList(items: ReviewUnit[]): string {
