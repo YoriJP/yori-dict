@@ -270,6 +270,24 @@ describe('bulk AI review queue', () => {
     expect(overrideRes.status).toBe(200)
   })
 
+  test('bulk review accepts comma-delimited unitIds payloads', async () => {
+    const res = await request('/admin/api/review/units/approve', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        unitIds: '食べる:たべる|en|1,飲む:のむ|en|1',
+        overrideSourceConflict: true,
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.affected.units).toBe(2)
+  })
+
   test('bulk review rejects mixed batch or language selections', async () => {
     const mixedRes = await request('/admin/api/review/units/reject', {
       method: 'POST',
@@ -294,6 +312,7 @@ describe('bulk AI review queue', () => {
     const dashboardHtml = await dashboardRes.text()
     expect(dashboardHtml.includes('Queue Summary')).toBe(true)
     expect(dashboardHtml.includes('/admin/review/batch/1')).toBe(true)
+    expect(dashboardHtml.includes('Override source conflict')).toBe(true)
 
     const batchRes = await request('/admin/review/batch/1', {
       headers: { authorization: basicAuth('secret-token') },

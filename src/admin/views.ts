@@ -1092,11 +1092,20 @@ function renderPage(title: string, body: string): string {
       }
 
       function syncSelectedUnitIds(form) {
-        const hidden = form.querySelector('[data-selected-unit-ids]');
-        if (!hidden) return;
+        const container = form.querySelector('[data-selected-unit-ids]');
+        if (!container) return 0;
         const values = Array.from(document.querySelectorAll('[data-review-unit-checkbox]:checked'))
           .map((input) => input.value);
-        hidden.value = values.join(',');
+
+        container.replaceChildren(...values.map((value) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'unitIds';
+          input.value = value;
+          return input;
+        }));
+
+        return values.length;
       }
 
       function toggleAllReviewUnits(checked) {
@@ -1353,9 +1362,8 @@ function renderPage(title: string, body: string): string {
       for (const form of document.querySelectorAll('form[data-json-form="true"]')) {
         if (form.dataset.reviewBulkForm === 'true') {
           form.addEventListener('submit', (event) => {
-            syncSelectedUnitIds(form);
-            const hidden = form.querySelector('[data-selected-unit-ids]');
-            if (!hidden || !hidden.value) {
+            const selectedCount = syncSelectedUnitIds(form);
+            if (selectedCount === 0) {
               event.preventDefault();
               const result = form.querySelector('[data-result]');
               if (result) {
@@ -1615,6 +1623,12 @@ function renderReviewUnit(unit: ReviewUnit): string {
     <div class="page-actions">
       <form action="/admin/api/review/units/approve" method="POST" data-json-form="true" data-reload="true" class="inline-form">
         <input type="hidden" name="unitIds" value="${escapeHtml(unit.unitId)}" />
+        ${unit.flags.hasSourceConflict ? `
+          <label class="checkbox-inline">
+            <input type="checkbox" name="overrideSourceConflict" value="true" />
+            Override source conflict
+          </label>
+        ` : ''}
         <button type="submit">Approve</button>
         <button type="submit" class="secondary" formaction="/admin/api/review/units/reject" data-confirm="Reject this review unit?">Reject</button>
         <div class="result" data-result></div>
@@ -2033,7 +2047,7 @@ export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): strin
           <button type="button" class="secondary" data-review-clear-all>Clear</button>
         </div>
         <form action="/admin/api/review/units/approve" method="POST" data-json-form="true" data-reload="true" data-review-bulk-form="true" class="inline-form">
-          <input type="hidden" name="unitIds" value="" data-selected-unit-ids />
+          <div data-selected-unit-ids></div>
           <label class="checkbox-inline">
             <input type="checkbox" name="overrideSourceConflict" value="true" />
             Override source conflicts

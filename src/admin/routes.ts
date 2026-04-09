@@ -85,6 +85,18 @@ function parseOptionalBooleanQuery(raw: string | undefined): boolean | null {
   return null
 }
 
+function parseUnitIds(raw: unknown): string[] {
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? raw.split(',')
+      : []
+
+  return values
+    .map((value) => String(value).trim())
+    .filter(Boolean)
+}
+
 async function readJsonBody<T extends Record<string, unknown>>(request: Request): Promise<T> {
   return await request.json() as T
 }
@@ -300,11 +312,7 @@ admin.post('/admin/api/review/example-set/:id/reject', async (c) => {
 admin.post('/admin/api/review/units/approve', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = applyBulkReviewAction('approved', {
-    unitIds: Array.isArray(body.unitIds)
-      ? body.unitIds.map((value) => String(value))
-      : typeof body.unitIds === 'string'
-        ? [body.unitIds]
-        : [],
+    unitIds: parseUnitIds(body.unitIds),
     notes: typeof body.notes === 'string' ? body.notes : null,
     overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
   }, getAdminActor(c))
@@ -316,11 +324,7 @@ admin.post('/admin/api/review/units/approve', async (c) => {
 admin.post('/admin/api/review/units/reject', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = applyBulkReviewAction('rejected', {
-    unitIds: Array.isArray(body.unitIds)
-      ? body.unitIds.map((value) => String(value))
-      : typeof body.unitIds === 'string'
-        ? [body.unitIds]
-        : [],
+    unitIds: parseUnitIds(body.unitIds),
     notes: typeof body.notes === 'string' ? body.notes : null,
     overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
   }, getAdminActor(c))
