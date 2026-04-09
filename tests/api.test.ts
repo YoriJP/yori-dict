@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, test, expect } from 'bun:test'
 import { closeDb } from '../src/db'
+import { requireActiveReleaseConfig } from '../src/storage'
 
 let app: { fetch: (request: Request) => Response | Promise<Response> }
 let originalReleaseDbPath: string | undefined
@@ -16,9 +17,14 @@ beforeAll(async () => {
   originalReleaseVersion = process.env.RELEASE_VERSION
   originalReleaseManifestPath = process.env.RELEASE_MANIFEST_PATH
 
-  process.env.RELEASE_DB_PATH = './dict.sqlite'
-  process.env.RELEASE_VERSION = 'api-test'
-  delete process.env.RELEASE_MANIFEST_PATH
+  const activeRelease = requireActiveReleaseConfig()
+  process.env.RELEASE_DB_PATH = activeRelease.dbPath
+  process.env.RELEASE_VERSION = activeRelease.version
+  if (activeRelease.manifestPath) {
+    process.env.RELEASE_MANIFEST_PATH = activeRelease.manifestPath
+  } else {
+    delete process.env.RELEASE_MANIFEST_PATH
+  }
 
   const module = await import('../src/index')
   app = module.default
