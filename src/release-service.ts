@@ -3,10 +3,10 @@ import { existsSync, readdirSync } from 'fs'
 import {
   buildReleaseVersion,
   computeFingerprintForFiles,
+  getReleasesDir,
   getReleaseDbPath,
   getReleaseManifestPath,
   readReleaseManifest,
-  RELEASES_DIR,
   requireActiveReleaseConfig,
   resolveActiveReleaseConfig,
   writeCurrentReleasePointer,
@@ -281,10 +281,11 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
 }
 
 export function listReleases(): ReleaseListItem[] {
+  const releasesDir = getReleasesDir()
   const active = resolveActiveReleaseConfig()
-  if (!existsSync(RELEASES_DIR)) return []
+  if (!existsSync(releasesDir)) return []
 
-  const versions = readdirSync(RELEASES_DIR, { withFileTypes: true })
+  const versions = readdirSync(releasesDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort()
