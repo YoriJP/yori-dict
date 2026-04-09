@@ -86,7 +86,7 @@ curl -s "https://yori-dict-production.up.railway.app/v1/lookup?word=食べる&la
 |------|----------------------|----------------|
 | Run the API quickly | `bun run data:pull` → `bun run build:db` → `bun run dev` | You want to build and activate a new immutable release from the checked-in snapshot |
 | Rebuild from source | `bun run rebuild:all` → `bun run release:activate --version <version>` | You are preparing a new candidate release from deterministic inputs |
-| Backfill missing definitions | `bun run import:gemini ...` | You want AI-generated updates to take effect immediately through the overlay update store |
+| Backfill missing definitions | `bun run import:gemini ...` | You want AI-generated candidates written into the overlay review queue, then approved before they affect lookup |
 
 ### Install & Run
 
@@ -104,7 +104,7 @@ bun run dev          # Start server
 # Option B: Build from scratch (fresh data)
 bun run rebuild:all  # base imports + deterministic enrichment + candidate release build
 bun run verify:rebuild  # optional: rebuild in a temp worktree and compare outputs
-bun run release:activate --version <version>  # promote the candidate release when you are ready
+bun run release:activate --version <version>  # activate the candidate release when you are ready
 # Optional: AI backfill for missing definitions (SDK-based, not included in rebuild:all)
 # bun run import:gemini --langs de,ko,zh-cn,zh-tw --limit 5000
 bun run dev
@@ -178,10 +178,16 @@ Then open `http://localhost:3000/admin` and sign in with Basic Auth using any us
 The admin UI is intended for internal operations and lets you:
 
 - inspect release/source/AI/effective views for a single entry
-- review pending AI translations and examples before they affect lookup
-- create new words in snapshot data, then build a release to publish them
-- build, activate, and promote immutable releases
+- review pending AI translations and examples in a queue and batch workflow before they affect lookup
+- create new words in snapshot data, then build a release from the current snapshot to publish them
+- build, activate, and promote immutable releases with separate snapshot-vs-overlay semantics
 - trigger deterministic source updates and Gemini imports
+
+Important release semantics:
+
+- `new-word/build-release` and `release:build` publish the current checked-in snapshot
+- they do not bake current overlay updates into the immutable release
+- `release:promote` is the path that bakes current effective source/approved-AI overlay data into a new release and marks those updates as `promoted`
 
 Full internal manual:
 
@@ -537,7 +543,7 @@ yori-dict/
 | `bun run import:kaikki` | Import Chinese definitions from Kaikki (zhwiktionary) |
 | `bun run import:kowiktionary-ko` | Fill Korean gaps from kowiktionary fallback data |
 | `bun run import:krdict` | Import Korean translations from KRDICT (NIKL) |
-| `bun run import:gemini` | Optional Gemini SDK backfill for missing definitions, writing to `updates.sqlite` by default |
+| `bun run import:gemini` | Optional Gemini SDK backfill for missing definitions, writing pending AI review candidates to `updates.sqlite` by default |
 | `bun run update:ai` | Alias for Gemini backfill in `updates-db` mode |
 | `bun run update:source` | Diff deterministic `data/lang/*.json` against the active release and write source updates |
 | `bun run verify:updates` | Validate overlay updates against the active release |

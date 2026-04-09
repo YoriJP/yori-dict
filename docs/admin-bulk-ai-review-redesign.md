@@ -1,5 +1,7 @@
 # Admin Bulk AI Review Redesign
 
+Status note (2026-04): parts of this proposal are now implemented in the current codebase, including the queue dashboard, batch summary view, review-unit aggregation, and bulk approve/reject endpoints. Read this document as design rationale and future-direction context, not as a literal description of every current UI/API detail.
+
 ## Goal
 
 Upgrade the current admin flow from per-item approval into an operator workflow that can safely process large volumes of AI-generated updates.

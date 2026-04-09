@@ -25,7 +25,7 @@ Admin UI 是內部操作介面，用來處理 release 與 `updates.sqlite` overl
 這個介面目前可做的事包括：
 
 - 檢查單字在 release、source update、AI update、effective lookup 四層的狀態
-- 審核 AI translation 與 AI example set
+- 以 queue / batch workflow 審核 AI translation 與 AI example set
 - 建立新詞，先寫入 snapshot JSON，再建立新 release 讓新詞生效
 - 建立新 release、啟用既有 release、把 effective updates promote 進新 release
 - 觸發 source update 與 Gemini import
@@ -39,6 +39,7 @@ Admin UI 是內部操作介面，用來處理 release 與 `updates.sqlite` overl
 - source update 會自動成為 effective data
 - `promote` 只會把目前 effective 的內容烘焙進新 release
 - `New Word` 寫入 snapshot 後，還要 build release 才會對 lookup 生效
+- `New Word -> Build release` 會從整份目前 snapshot 建立新 release，不會偷偷把 overlay updates 烘進 release
 
 ### English
 
@@ -47,7 +48,7 @@ The Admin UI is an internal operations surface for release and `updates.sqlite` 
 The current admin surface supports:
 
 - inspecting one entry across release, source update, AI update, and effective lookup layers
-- approving or rejecting AI translations and AI example sets
+- reviewing AI translations and AI example sets through queue / batch workflows
 - creating a new word in snapshot JSON, then building a new release to publish it
 - building a new release, activating an existing release, and promoting effective updates into a new release
 - triggering source updates and Gemini imports
@@ -61,6 +62,7 @@ Operating principles:
 - source updates become effective automatically
 - `promote` only bakes currently effective data into a new release
 - `New Word` writes to snapshot files first, then requires a release build before lookup can see it
+- `New Word -> Build release` builds from the full current snapshot and does not silently bake overlay updates into the release
 
 ### 日本語
 
@@ -69,7 +71,7 @@ Admin UI は、リリース管理と `updates.sqlite` overlay を扱うための
 現在の admin 画面でできることは次のとおりです。
 
 - 1 件の単語を release、source update、AI update、effective lookup の各レイヤーで確認する
-- AI translation と AI example set を承認または却下する
+- queue / batch workflow で AI translation と AI example set を承認または却下する
 - snapshot JSON に新規語彙を追加し、その後 release を build して公開する
 - 新規 release を build する、既存 release を activate する、effective updates を新しい release に promote する
 - source update と Gemini import を実行する
@@ -83,6 +85,7 @@ Admin UI は、リリース管理と `updates.sqlite` overlay を扱うための
 - source update は自動的に effective data になる
 - `promote` は、その時点で effective な内容だけを新しい release に取り込む
 - `New Word` はまず snapshot に書き込まれ、その後 release build をしないと lookup に反映されない
+- `New Word -> Build release` は現在の snapshot 全体から release を作り、overlay updates を勝手に release 化しない
 
 ## 2. Access and Authentication
 
@@ -223,6 +226,7 @@ Security guidance:
 release 動作差異：
 
 - `Build release`: 依照目前 snapshot 建立新 release，可選擇是否立刻 activate
+- `New word build release`: 驗證指定的新詞存在於 snapshot，然後仍以整份目前 snapshot 建立新 release
 - `Activate release`: 不重建資料，只切換 active pointer
 - `Promote release`: 依照目前 effective lookup 狀態建立新 release，並把納入的 update 標記為 `promoted`
 
@@ -246,6 +250,7 @@ Data flow rules:
 Release action differences:
 
 - `Build release`: create a new release from current snapshot data, optionally activate it immediately
+- `New word build release`: verify that the requested new word exists in snapshot data, then still build from the full current snapshot
 - `Activate release`: switch the active pointer without rebuilding data
 - `Promote release`: create a new release from the current effective lookup state and mark included updates as `promoted`
 
@@ -269,6 +274,7 @@ Batch status meanings:
 release 操作の違い:
 
 - `Build release`: 現在の snapshot から新しい release を作成し、必要なら即座に activate できる
+- `New word build release`: 指定した新規語彙が snapshot に存在することを確認したうえで、現在の snapshot 全体から release を作成する
 - `Activate release`: データを再作成せず、active pointer だけを切り替える
 - `Promote release`: 現在の effective lookup 状態から新しい release を作成し、取り込まれた update を `promoted` にする
 
@@ -369,45 +375,48 @@ batch 状態の意味:
 
 #### 繁體中文
 
-- Purpose: 決定 AI update 是否可進入 effective lookup。
-- Preconditions: 已有 pending AI updates，通常來自 Gemini import。
+- Purpose: 用 queue / batch workflow 審核 AI candidates，決定哪些內容可進入 effective lookup。
+- Preconditions: 已有 pending AI updates，通常來自 Gemini import；知道要先看哪個 batch 或語言。
 - Steps:
-  1. 前往 `AI Review`
-  2. 先看 Translation Candidates，再看 Example Set Candidates
-  3. 對可接受項目按 `Approve`
-  4. 對不可接受項目按 `Reject`
+  1. 前往 `/admin/review` 查看 `Queue Summary`
+  2. 先從最新 batch 或高風險 batch 進入 `/admin/review/batch/:id`
+  3. 在 batch 頁依 language、risk、shape、source conflict 篩選 review units
+  4. 對單一 unit 用卡片上的 `Approve` / `Reject`，或勾選多筆後使用 `Approve selected` / `Reject selected`
+  5. 若出現 source conflict，只有在你確認要覆蓋目前 source-effective 結果時才使用 override
 - Expected result: `approved` 的 AI update 會變成 effective，`rejected` 不會生效。
 - Risks / do not do: 不要把 review 當成發版；批准只會影響 effective lookup，不會自動建立新 release。
-- Recovery: 若批准後查詢仍未改變，回到 Entry Inspector 確認是否被 source update 覆蓋，或是否查錯語言。
-- Engineering notes: 目前 UI 只有 approve/reject 按鈕，沒有 notes 欄位；source updates 不需 review。
+- Recovery: 若批准後查詢仍未改變，回到 Entry Inspector 確認是否被 source update 覆蓋、是否查錯語言，或該 unit 是否其實被 bulk action 擋下。
+- Engineering notes: `/admin/review` 現在是 queue dashboard，不再只是平面卡片清單；bulk review endpoint 會限制同批次、同語言，並對 source conflict 做保護。
 
 #### English
 
-- Purpose: Decide whether AI updates are allowed into effective lookup.
-- Preconditions: Pending AI updates exist, usually after a Gemini import.
+- Purpose: Review AI candidates through the queue and batch workflow, and decide which ones may enter effective lookup.
+- Preconditions: Pending AI updates exist, usually after a Gemini import, and you know which batch or language you want to review first.
 - Steps:
-  1. Open `AI Review`
-  2. Review `Translation Candidates` first, then `Example Set Candidates`
-  3. Click `Approve` for acceptable items
-  4. Click `Reject` for unacceptable items
+  1. Open `/admin/review` and inspect `Queue Summary`
+  2. Enter the newest or highest-risk batch through `/admin/review/batch/:id`
+  3. Filter review units by language, risk, shape, or source-conflict status
+  4. Use per-unit `Approve` / `Reject`, or select multiple units and use `Approve selected` / `Reject selected`
+  5. Only use the source-conflict override when you intentionally want to approve an AI unit that conflicts with the current source-effective state
 - Expected result: `approved` AI updates become effective. `rejected` ones do not.
 - Risks / do not do: Review is not the same as release publishing. Approval changes effective lookup, but does not create a new release.
-- Recovery: If lookup still does not change, inspect the entry again and check whether a source update outranks the AI update or the wrong language was queried.
-- Engineering notes: The current UI only exposes approve/reject actions, not free-form review notes. Source updates do not require review.
+- Recovery: If lookup still does not change, inspect the entry again and check whether a source update outranks the AI update, whether the wrong language was queried, or whether the bulk action was blocked.
+- Engineering notes: `/admin/review` is now a queue dashboard rather than a flat per-item list. Bulk review endpoints enforce single-batch, single-language scope and guard against source conflicts by default.
 
 #### 日本語
 
-- Purpose: AI update を effective lookup に反映させるかどうかを判断する。
-- Preconditions: pending AI updates が存在すること。通常は Gemini import 後に発生する。
+- Purpose: queue / batch workflow で AI candidates を審査し、どの内容を effective lookup に反映させるか判断する。
+- Preconditions: pending AI updates が存在すること。通常は Gemini import 後に発生し、先に見る batch または言語の見当がついていること。
 - Steps:
-  1. `AI Review` を開く
-  2. `Translation Candidates` を先に確認し、その後 `Example Set Candidates` を確認する
-  3. 問題ない項目は `Approve` を押す
-  4. 不適切な項目は `Reject` を押す
+  1. `/admin/review` を開き、`Queue Summary` を確認する
+  2. 最新 batch または高リスク batch から `/admin/review/batch/:id` に入る
+  3. language、risk、shape、source conflict で review unit を絞り込む
+  4. 各 unit の `Approve` / `Reject` を使うか、複数選択して `Approve selected` / `Reject selected` を使う
+  5. source conflict override は、現在 source-effective な結果と競合する AI unit を意図的に承認したいときだけ使う
 - Expected result: `approved` になった AI update は effective になる。`rejected` は反映されない。
 - Risks / do not do: review は release 公開ではない。承認は effective lookup を変えるだけで、新しい release は自動作成されない。
-- Recovery: 承認後も結果が変わらない場合は、Entry Inspector で source update に上書きされていないか、言語指定が正しいかを確認する。
-- Engineering notes: 現在の UI には approve/reject のみがあり、メモ入力欄はない。source update は審査不要。
+- Recovery: 承認後も結果が変わらない場合は、Entry Inspector で source update に上書きされていないか、言語指定が正しいか、または bulk action がブロックされていないか確認する。
+- Engineering notes: `/admin/review` は現在 queue dashboard であり、単純な平面カード一覧ではない。bulk review endpoint は同一 batch・同一言語に制限され、source conflict を既定で保護する。
 
 ### 4.4 Create a new word
 
@@ -420,11 +429,11 @@ batch 状態の意味:
   2. 輸入 `Word`、`Reading`、可選的 `Part of speech`、`JLPT`、`Common`
   3. 新增至少一個語言區塊，填入 definitions，必要時加入 examples
   4. 按 `Save new word`
-  5. 成功後再去 build release
-- Expected result: 詞條會寫入 snapshot 檔案，但 lookup 還看不到，直到 release build 完成並啟用。
+  5. 成功後再去 build release；若同一批還有其他 snapshot 變更，也可以一起等待這次 build
+- Expected result: 詞條會寫入 snapshot 檔案，但 lookup 還看不到，直到 release build 完成並啟用。之後的 new-word build-release 會帶入整份目前 snapshot，而不只是一個詞。
 - Risks / do not do: 不要把這一步誤認為已發布；不要填非日文讀音；不要重複語言列。
 - Recovery: 若回 409，表示重複詞條；若回 400，依欄位錯誤修正。若已建立但 lookup 找不到，請先 build release。
-- Engineering notes: 這會寫入 `data/core.json` 與對應 `data/lang/*.json`，definition/example 來源會標成 `manual`。
+- Engineering notes: 這會寫入 `data/core.json` 與對應 `data/lang/*.json`，definition/example 來源會標成 `manual`。new-word build-release 只用 `createdWordId` 做存在驗證，不會把目前 overlay updates 直接烘進 release。
 
 #### English
 
@@ -435,11 +444,11 @@ batch 状態の意味:
   2. Fill `Word`, `Reading`, and optional `Part of speech`, `JLPT`, and `Common`
   3. Add at least one language block with definitions and optional examples
   4. Click `Save new word`
-  5. Build a release afterwards
-- Expected result: The word is written to snapshot files, but lookup still will not see it until a release is built and activated.
+  5. Build a release afterwards; other snapshot edits can be published in the same build
+- Expected result: The word is written to snapshot files, but lookup still will not see it until a release is built and activated. The later new-word build-release uses the full current snapshot, not a one-word-only overlay.
 - Risks / do not do: Do not treat this as publishing. Do not enter non-Japanese reading text. Do not duplicate language rows.
 - Recovery: A 409 means duplicate conflict. A 400 means validation failure. If creation succeeded but lookup still cannot find it, build a release first.
-- Engineering notes: This writes to `data/core.json` and matching `data/lang/*.json`. Definition and example sources are tagged as `manual`.
+- Engineering notes: This writes to `data/core.json` and matching `data/lang/*.json`. Definition and example sources are tagged as `manual`. The new-word build-release endpoint uses `createdWordId` only as an existence check and does not bake current overlay updates into the release.
 
 #### 日本語
 
@@ -450,11 +459,11 @@ batch 状態の意味:
   2. `Word`、`Reading`、必要に応じて `Part of speech`、`JLPT`、`Common` を入力する
   3. 少なくとも 1 つの言語ブロックを追加し、definitions と必要なら examples を入力する
   4. `Save new word` を押す
-  5. その後で release を build する
-- Expected result: 単語は snapshot ファイルに書き込まれるが、release build と activate が終わるまで lookup には出ない。
+  5. その後で release を build する。同じタイミングで他の snapshot 変更も一緒に公開できる
+- Expected result: 単語は snapshot ファイルに書き込まれるが、release build と activate が終わるまで lookup には出ない。後続の new-word build-release は 1 語だけでなく、現在の snapshot 全体を対象にする。
 - Risks / do not do: これを公開完了と誤解しない。reading に日本語以外を入れない。言語行を重複させない。
 - Recovery: 409 は重複、400 はバリデーションエラー。作成成功後も lookup に出ない場合は release を build する。
-- Engineering notes: `data/core.json` と対応する `data/lang/*.json` に書き込み、source は `manual` として記録される。
+- Engineering notes: `data/core.json` と対応する `data/lang/*.json` に書き込み、source は `manual` として記録される。new-word build-release の `createdWordId` は存在確認用であり、現在の overlay updates をそのまま release に焼き込むものではない。
 
 ### 4.5 Build a new release
 
@@ -470,7 +479,7 @@ batch 状態の意味:
 - Expected result: 新 release 出現在 Release Inventory；若選 activate，active release 也會更新。
 - Risks / do not do: `Build only` 不會切 active pointer；別以為 build 成功就代表使用者已切到新資料。
 - Recovery: 若新詞仍查不到，確認這次 build 是否真的 activate 了；若沒有，請再 activate 該版本。
-- Engineering notes: build 來自 snapshot，而不是從 effective overlay 反推。
+- Engineering notes: build 來自 snapshot，而不是從 effective overlay 反推。若要把目前 effective source/approved AI overlay 永久化，應改走 promote。
 
 #### English
 
@@ -484,7 +493,7 @@ batch 状態の意味:
 - Expected result: A new release appears in Release Inventory. If activation was selected, the active release also changes.
 - Risks / do not do: `Build only` does not change the active pointer. Do not assume users are on the new data just because build succeeded.
 - Recovery: If the new word still is not visible, confirm whether this build was activated. If not, activate that release separately.
-- Engineering notes: Build uses snapshot data, not the current effective overlay.
+- Engineering notes: Build uses snapshot data, not the current effective overlay. If you need to freeze current effective source/approved AI overlay data into a release, use promote instead.
 
 #### 日本語
 
@@ -498,7 +507,7 @@ batch 状態の意味:
 - Expected result: Release Inventory に新しい release が追加される。activate を選んだ場合は active release も切り替わる。
 - Risks / do not do: `Build only` は active pointer を切り替えない。build 成功だけで利用者が新データを見ているとは限らない。
 - Recovery: 新しい単語が見えない場合は、その build が activate されたか確認する。未反映なら別途 activate する。
-- Engineering notes: build は snapshot データから行われ、effective overlay から逆算されるわけではない。
+- Engineering notes: build は snapshot データから行われ、effective overlay から逆算されるわけではない。現在 effective な source/approved AI overlay を release に固定したい場合は promote を使う。
 
 ### 4.6 Activate an existing release
 
@@ -643,7 +652,7 @@ batch 状態の意味:
   2. 在 `Gemini Import` 設定語言、seed language、model、limit、frequency、cost 等參數
   3. 先用 `Dry run` 驗證範圍
   4. 需要正式寫入時，改用 `Write pending reviews`
-  5. 完成後到 `AI Review` 與 `Batch History` 查看結果
+  5. 完成後到 `/admin/review` 與 `Batch History` 查看結果
 - Expected result: 正式寫入時會建立 pending AI updates，尚未批准前不會進 lookup。
 - Risks / do not do: 不要跳過 dry run 就大範圍實跑；不要把寫入 pending reviews 誤認為已發布。
 - Recovery: 若批次失敗，先檢查 batch detail；若批次成功但頁面沒東西，確認是否真的有候選資料產生，並檢查語言篩選。
@@ -658,7 +667,7 @@ batch 状態の意味:
   2. Configure languages, seed language, model, limit, frequency, cost, and related options in `Gemini Import`
   3. Use `Dry run` first to validate scope
   4. Switch to `Write pending reviews` when ready to write
-  5. Review results in `AI Review` and `Batch History`
+  5. Review results in `/admin/review` and `Batch History`
 - Expected result: A write run creates pending AI updates that do not affect lookup until approved.
 - Risks / do not do: Do not skip dry run for a wide scope. Do not treat pending review creation as publication.
 - Recovery: If the batch fails, inspect batch detail. If it succeeds but no items appear, confirm that candidates were actually generated and that language filters are correct.
@@ -673,7 +682,7 @@ batch 状態の意味:
   2. `Gemini Import` で languages、seed language、model、limit、frequency、cost などを設定する
   3. まず `Dry run` で対象範囲を確認する
   4. 実際に書き込む場合は `Write pending reviews` に切り替える
-  5. `AI Review` と `Batch History` で結果を確認する
+  5. `/admin/review` と `Batch History` で結果を確認する
 - Expected result: 書き込み実行時には pending AI updates が生成され、承認されるまでは lookup に反映されない。
 - Risks / do not do: 広い範囲で dry run を飛ばさない。pending reviews の作成を公開完了と誤解しない。
 - Recovery: batch が失敗したら batch detail を確認する。成功しても項目が出ない場合は、候補が生成されたか、言語フィルタが正しいか確認する。
@@ -734,7 +743,7 @@ batch 状態の意味:
 | --- | --- | --- | --- | --- | --- |
 | Dashboard | 營運、工程 | 指標卡、Recent Batches、Quick Actions | 先確認系統整體狀態時 | 只看總數，不回到細節頁驗證 | `/admin/api/summary` |
 | Entry Inspector | 營運、工程 | Word、Language、raw JSON | 查某個詞目前實際狀態時 | 把 AI layer 當成已生效結果 | `/admin/api/entries` |
-| AI Review | 營運主用，工程支援 | Approve、Reject | 審核 AI 候選內容 | 以為 approve 等於發版 | `/admin/api/review/ai`、approve/reject endpoints |
+| Review Queue | 營運主用，工程支援 | Queue Summary、batch links、filters、single/bulk approve/reject | 審核 AI 候選內容時 | 以為 approve 等於發版，或忽略 source conflict 保護 | `/admin/api/review/queue`、`/admin/api/review/batches/:id/summary`、`/admin/api/review/units/*`、legacy `/admin/api/review/ai` |
 | New Word | 內容維護者、工程 | Core Fields、Translations、Save new word | 補正式新詞時 | 建立後沒 build release 就直接查 lookup | `/admin/api/new-word`、`/admin/api/new-word/build-release` |
 | Releases | 營運、工程 | Build release、Promote release、activate action | 管理 release 生命周期時 | 混淆 build、activate、promote | `/admin/api/releases*` |
 | Jobs | 營運、工程 | Source Update、Gemini Import、Batch History | 執行批次任務與看結果時 | 不先 dry run 就大範圍實跑 | `/admin/api/jobs/*`、`/admin/api/batches/:id` |
@@ -746,7 +755,7 @@ batch 状態の意味:
 | --- | --- | --- | --- | --- | --- |
 | Dashboard | Operators, engineers | metric strip, Recent Batches, Quick Actions | when checking overall system state | stopping at counts without drilling into details | `/admin/api/summary` |
 | Entry Inspector | Operators, engineers | Word, Language, raw JSON | when validating one entry end to end | treating AI layer as already effective | `/admin/api/entries` |
-| AI Review | Primarily operators, with engineering support | Approve, Reject | when reviewing AI-generated candidates | assuming approval equals release publication | `/admin/api/review/ai` and approve/reject endpoints |
+| Review Queue | Primarily operators, with engineering support | Queue Summary, batch links, filters, single/bulk approve/reject | when reviewing AI-generated candidates | assuming approval equals release publication, or ignoring source-conflict guardrails | `/admin/api/review/queue`, `/admin/api/review/batches/:id/summary`, `/admin/api/review/units/*`, legacy `/admin/api/review/ai` |
 | New Word | Content maintainers, engineers | Core Fields, Translations, Save new word | when adding a canonical new entry | expecting lookup visibility before release build | `/admin/api/new-word`, `/admin/api/new-word/build-release` |
 | Releases | Operators, engineers | Build release, Promote release, activate action | when managing release lifecycle | confusing build, activate, and promote | `/admin/api/releases*` |
 | Jobs | Operators, engineers | Source Update, Gemini Import, Batch History | when running batch operations and checking output | running wide writes without a dry run | `/admin/api/jobs/*`, `/admin/api/batches/:id` |
@@ -758,7 +767,7 @@ batch 状態の意味:
 | --- | --- | --- | --- | --- | --- |
 | Dashboard | オペレーター、エンジニア | metric 表示、Recent Batches、Quick Actions | 全体状況を最初に確認するとき | 件数だけ見て詳細確認をしない | `/admin/api/summary` |
 | Entry Inspector | オペレーター、エンジニア | Word、Language、raw JSON | 1 件の単語を端から端まで確認するとき | AI layer がそのまま有効だと思い込む | `/admin/api/entries` |
-| AI Review | 主にオペレーター、必要に応じてエンジニア | Approve、Reject | AI 候補を審査するとき | 承認を release 公開と混同する | `/admin/api/review/ai` と approve/reject endpoints |
+| Review Queue | 主にオペレーター、必要に応じてエンジニア | Queue Summary、batch link、filter、単体/一括 approve/reject | AI 候補を審査するとき | 承認を release 公開と混同したり、source conflict 保護を無視したりする | `/admin/api/review/queue`、`/admin/api/review/batches/:id/summary`、`/admin/api/review/units/*`、legacy `/admin/api/review/ai` |
 | New Word | コンテンツ担当、エンジニア | Core Fields、Translations、Save new word | 正式な新規語彙を追加するとき | release build 前に lookup へ出ると思い込む | `/admin/api/new-word`、`/admin/api/new-word/build-release` |
 | Releases | オペレーター、エンジニア | Build release、Promote release、activate action | release ライフサイクルを管理するとき | build、activate、promote を混同する | `/admin/api/releases*` |
 | Jobs | オペレーター、エンジニア | Source Update、Gemini Import、Batch History | batch 実行と結果確認をするとき | dry run なしで広範囲書き込みを行う | `/admin/api/jobs/*`、`/admin/api/batches/:id` |
@@ -772,7 +781,7 @@ batch 状態の意味:
 | --- | --- | --- |
 | `/admin` 打不開或顯示未啟用 | `ADMIN_TOKEN` 未設定，或服務未啟動 | 先確認環境變數與服務狀態，再重試 |
 | 認證一直失敗 | password 不是 `ADMIN_TOKEN`，header 格式錯誤 | Basic Auth 改用任意 username + 正確 token，或改用 Bearer / `x-admin-token` |
-| AI update 已產生但 lookup 看不到 | 仍是 `pending`，或被 source update 覆蓋 | 到 `AI Review` 檢查 review 狀態，再用 `Entry Inspector` 比對 effective 與 source layer |
+| AI update 已產生但 lookup 看不到 | 仍是 `pending`，被 source update 覆蓋，或 bulk approve 被 conflict guard 擋下 | 到 `/admin/review` 檢查 queue / batch 狀態，再用 `Entry Inspector` 比對 effective 與 source layer |
 | build release 後內容沒切換 | 選了 `Build only`，沒有 activate | 到 `Releases` 對該版本執行 activate，或下次直接選 `Build and activate` |
 | promote 後預期資料沒進新 release | AI update 未批准，或 promote 時該資料不是 effective | 先確認 review 狀態，再回 `Entry Inspector` 驗證 effective layer |
 | batch failed | 來源條件、模型、成本限制或其他執行錯誤 | 在 `Jobs` 的 batch detail 查看 `error`，修正後重跑 |
@@ -784,7 +793,7 @@ batch 状態の意味:
 | --- | --- | --- |
 | `/admin` does not open or says disabled | `ADMIN_TOKEN` is missing, or service is not running | Verify env vars and service state, then retry |
 | Authentication keeps failing | password is not `ADMIN_TOKEN`, or header format is wrong | Use any username plus the correct token for Basic Auth, or switch to Bearer / `x-admin-token` |
-| An AI update exists but lookup does not show it | it is still `pending`, or a source update outranks it | Check review state in `AI Review`, then compare effective and source layers in `Entry Inspector` |
+| An AI update exists but lookup does not show it | it is still `pending`, a source update outranks it, or a bulk approval was blocked by conflict guardrails | Check queue/batch state in `/admin/review`, then compare effective and source layers in `Entry Inspector` |
 | A release was built but content did not switch | `Build only` was chosen instead of activation | Activate that version in `Releases`, or use `Build and activate` next time |
 | Expected data is missing after promote | the AI update was not approved, or it was not effective at promote time | Confirm review state first, then validate effective layer in `Entry Inspector` |
 | A batch failed | source prerequisites, model config, cost controls, or execution errors | Open batch detail in `Jobs`, read `error`, fix the issue, and rerun |
@@ -796,7 +805,7 @@ batch 状態の意味:
 | --- | --- | --- |
 | `/admin` が開かない、または無効化と表示される | `ADMIN_TOKEN` 未設定、またはサービス未起動 | 環境変数とサービス状態を確認して再試行する |
 | 認証に失敗し続ける | password が `ADMIN_TOKEN` ではない、または header 形式が誤っている | Basic Auth では任意の username と正しい token を使う。必要なら Bearer / `x-admin-token` に切り替える |
-| AI update があるのに lookup に出ない | まだ `pending`、または source update に上書きされている | `AI Review` で review 状態を確認し、`Entry Inspector` で effective と source layer を比較する |
+| AI update があるのに lookup に出ない | まだ `pending`、source update に上書きされている、または bulk approve が conflict guard に止められている | `/admin/review` で queue / batch 状態を確認し、`Entry Inspector` で effective と source layer を比較する |
 | release build 後も内容が切り替わらない | `Build only` を選んで activate していない | `Releases` でその version を activate する。次回は `Build and activate` を使う |
 | promote 後に期待したデータが入っていない | AI update が未承認、または promote 時点で effective ではなかった | review 状態を確認し、`Entry Inspector` で effective layer を検証する |
 | batch が failed になった | source 条件、model 設定、cost 制限、その他実行エラー | `Jobs` の batch detail で `error` を確認し、修正後に再実行する |
@@ -810,7 +819,8 @@ batch 状態の意味:
 | --- | --- | --- | --- |
 | Dashboard | `/admin` | `/admin/api/summary` | 系統總覽與最近 batch |
 | Entry Inspector | `/admin/entry` | `/admin/api/entries` | 查單字多層資料 |
-| AI Review | `/admin/review` | `/admin/api/review/ai`、`/admin/api/review/translation/:id/approve`、`/admin/api/review/translation/:id/reject`、`/admin/api/review/example-set/:id/approve`、`/admin/api/review/example-set/:id/reject` | AI 候選審核 |
+| Review Queue | `/admin/review` | `/admin/api/review/queue`、legacy `/admin/api/review/ai` | queue summary 與最近批次入口 |
+| Batch Review | `/admin/review/batch/:id` | `/admin/api/review/batches/:id/summary`、`/admin/api/review/units/approve`、`/admin/api/review/units/reject`、單筆 approve/reject endpoints | 單筆或批次審核 AI review units |
 | New Word | `/admin/new-word` | `/admin/api/new-word`、`/admin/api/new-word/build-release` | 先寫 snapshot，再 build release |
 | Releases | `/admin/releases` | `/admin/api/releases`、`/admin/api/releases/build`、`/admin/api/releases/:version/activate`、`/admin/api/releases/promote` | build / activate / promote |
 | Jobs | `/admin/jobs` | `/admin/api/jobs/source-update`、`/admin/api/jobs/gemini-import`、`/admin/api/batches/:id` | 執行 job 與看 batch |
@@ -822,7 +832,8 @@ batch 状態の意味:
 | --- | --- | --- | --- |
 | Dashboard | `/admin` | `/admin/api/summary` | system overview and recent batches |
 | Entry Inspector | `/admin/entry` | `/admin/api/entries` | inspect one entry across layers |
-| AI Review | `/admin/review` | `/admin/api/review/ai`, `/admin/api/review/translation/:id/approve`, `/admin/api/review/translation/:id/reject`, `/admin/api/review/example-set/:id/approve`, `/admin/api/review/example-set/:id/reject` | review AI candidates |
+| Review Queue | `/admin/review` | `/admin/api/review/queue`, legacy `/admin/api/review/ai` | queue summary and recent batch entry points |
+| Batch Review | `/admin/review/batch/:id` | `/admin/api/review/batches/:id/summary`, `/admin/api/review/units/approve`, `/admin/api/review/units/reject`, single approve/reject endpoints | review AI units one by one or in bulk |
 | New Word | `/admin/new-word` | `/admin/api/new-word`, `/admin/api/new-word/build-release` | writes snapshot first, then needs a release build |
 | Releases | `/admin/releases` | `/admin/api/releases`, `/admin/api/releases/build`, `/admin/api/releases/:version/activate`, `/admin/api/releases/promote` | build / activate / promote lifecycle |
 | Jobs | `/admin/jobs` | `/admin/api/jobs/source-update`, `/admin/api/jobs/gemini-import`, `/admin/api/batches/:id` | run jobs and inspect batches |
@@ -834,7 +845,8 @@ batch 状態の意味:
 | --- | --- | --- | --- |
 | Dashboard | `/admin` | `/admin/api/summary` | システム概要と最近の batch |
 | Entry Inspector | `/admin/entry` | `/admin/api/entries` | 1 件の単語を複数レイヤーで確認 |
-| AI Review | `/admin/review` | `/admin/api/review/ai`、`/admin/api/review/translation/:id/approve`、`/admin/api/review/translation/:id/reject`、`/admin/api/review/example-set/:id/approve`、`/admin/api/review/example-set/:id/reject` | AI 候補の審査 |
+| Review Queue | `/admin/review` | `/admin/api/review/queue`、legacy `/admin/api/review/ai` | queue summary と最近 batch の入口 |
+| Batch Review | `/admin/review/batch/:id` | `/admin/api/review/batches/:id/summary`、`/admin/api/review/units/approve`、`/admin/api/review/units/reject`、単体 approve/reject endpoints | AI review unit の単体/一括審査 |
 | New Word | `/admin/new-word` | `/admin/api/new-word`、`/admin/api/new-word/build-release` | snapshot に書き込み、その後 release build が必要 |
 | Releases | `/admin/releases` | `/admin/api/releases`、`/admin/api/releases/build`、`/admin/api/releases/:version/activate`、`/admin/api/releases/promote` | build / activate / promote の管理 |
 | Jobs | `/admin/jobs` | `/admin/api/jobs/source-update`、`/admin/api/jobs/gemini-import`、`/admin/api/batches/:id` | job 実行と batch 確認 |

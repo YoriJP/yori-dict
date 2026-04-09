@@ -258,6 +258,9 @@ paths:
       tags:
         - Admin
       summary: Build a release from snapshot data
+      description: |
+        Builds a release from the current checked-in snapshot (`data/core.json` and `data/lang/*.json`).
+        This path does not bake overlay updates into the immutable release.
       operationId: buildAdminRelease
       security:
         - basicAuth: []
@@ -327,6 +330,10 @@ paths:
       tags:
         - Admin
       summary: Build a release after creating a new word
+      description: |
+        Validates that `createdWordId` exists in the current snapshot, then builds a release from the full
+        current snapshot. This endpoint does not bake current overlay updates into the immutable release;
+        use `/admin/api/releases/promote` for that workflow.
       operationId: buildAdminReleaseForNewWord
       security:
         - basicAuth: []
@@ -381,6 +388,9 @@ paths:
       tags:
         - Admin
       summary: Promote effective updates into a new release
+      description: |
+        Builds a new release from the current effective state: active release base plus effective overlay
+        updates (`source` updates and `approved` AI updates). Included updates are then marked `promoted`.
       operationId: promoteAdminRelease
       security:
         - basicAuth: []
@@ -487,7 +497,11 @@ paths:
     get:
       tags:
         - Admin
-      summary: Get pending AI review queue
+      summary: Get legacy pending AI review lists
+      description: |
+        Legacy compatibility endpoint that returns flat pending translation/example-set lists.
+        Prefer `/admin/api/review/queue` and `/admin/api/review/batches/{id}/summary` for the current
+        queue-and-batch review workflow.
       operationId: getAdminAiReviewQueue
       security:
         - basicAuth: []
@@ -506,6 +520,95 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminReviewQueueResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/queue:
+    get:
+      tags:
+        - Admin
+      summary: Get AI review queue summary and paginated review units
+      operationId: getAdminReviewQueue
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: batchId
+          in: query
+          required: false
+          schema:
+            type: integer
+            nullable: true
+        - name: lang
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+        - name: risk
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ReviewRiskLevel'
+        - name: shape
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ReviewUnitShape'
+        - name: hasSourceConflict
+          in: query
+          required: false
+          schema:
+            type: boolean
+            nullable: true
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Queue summary plus paginated review units
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReviewQueueResponseV2'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/batches/{id}/summary:
+    get:
+      tags:
+        - Admin
+      summary: Get review summary for one AI batch
+      operationId: getAdminReviewBatchSummary
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Batch review summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReviewBatchSummaryResponse'
         '401':
           $ref: '#/components/responses/UnauthorizedAdmin'
         '503':
@@ -625,6 +728,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/units/approve:
+    post:
+      tags:
+        - Admin
+      summary: Bulk approve AI review units
+      description: |
+        Approves one or more review units in a single batch/single language scope. By default, units with
+        active source conflicts are blocked unless `overrideSourceConflict` is true.
+      operationId: approveAdminReviewUnits
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkReviewActionRequest'
+      responses:
+        '200':
+          description: Bulk review action result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '400':
+          description: Invalid request, blocked unit selection, or queue constraint violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
+        '503':
+          $ref: '#/components/responses/AdminDisabled'
+  /admin/api/review/units/reject:
+    post:
+      tags:
+        - Admin
+      summary: Bulk reject AI review units
+      operationId: rejectAdminReviewUnits
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - adminTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkReviewActionRequest'
+      responses:
+        '200':
+          description: Bulk review action result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '400':
+          description: Invalid request or queue constraint violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkReviewActionResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedAdmin'
         '503':
           $ref: '#/components/responses/AdminDisabled'
   /admin/api/review/example-set/{id}/reject:
@@ -1336,6 +1508,247 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListedExampleUpdateSet'
+    ReviewRiskLevel:
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+    ReviewUnitShape:
+      type: string
+      enum:
+        - translation-only
+        - examples-only
+    ReviewUnitFlags:
+      type: object
+      required:
+        - hasSourceConflict
+        - isSuperseded
+        - hasTranslation
+        - hasExamples
+        - isTranslationOnly
+        - isExamplesOnly
+      properties:
+        hasSourceConflict:
+          type: boolean
+        isSuperseded:
+          type: boolean
+        hasTranslation:
+          type: boolean
+        hasExamples:
+          type: boolean
+        isTranslationOnly:
+          type: boolean
+        isExamplesOnly:
+          type: boolean
+    ReviewUnitReleaseValue:
+      type: object
+      required:
+        - definitions
+        - sources
+        - examples
+      properties:
+        definitions:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseExampleRecord'
+    ReviewQueueSummaryRecentBatch:
+      type: object
+      required:
+        - batchId
+        - batch
+        - pendingUnits
+        - sourceConflictCount
+        - byLanguage
+      properties:
+        batchId:
+          type: integer
+        batch:
+          allOf:
+            - $ref: '#/components/schemas/UpdateBatchRecord'
+          nullable: true
+        pendingUnits:
+          type: integer
+        sourceConflictCount:
+          type: integer
+        byLanguage:
+          type: object
+          additionalProperties:
+            type: integer
+    ReviewQueueSummary:
+      type: object
+      required:
+        - pendingUnits
+        - byLanguage
+        - byRisk
+        - sourceConflictCount
+        - recentBatches
+      properties:
+        pendingUnits:
+          type: integer
+        byLanguage:
+          type: object
+          additionalProperties:
+            type: integer
+        byRisk:
+          type: object
+          additionalProperties:
+            type: integer
+        sourceConflictCount:
+          type: integer
+        recentBatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewQueueSummaryRecentBatch'
+    ReviewQueueAppliedFilters:
+      type: object
+      required:
+        - batchId
+        - lang
+        - risk
+        - shape
+        - hasSourceConflict
+        - limit
+      properties:
+        batchId:
+          type: integer
+          nullable: true
+        lang:
+          allOf:
+            - $ref: '#/components/schemas/LanguageCode'
+          nullable: true
+        risk:
+          allOf:
+            - $ref: '#/components/schemas/ReviewRiskLevel'
+          nullable: true
+        shape:
+          allOf:
+            - $ref: '#/components/schemas/ReviewUnitShape'
+          nullable: true
+        hasSourceConflict:
+          type: boolean
+          nullable: true
+        limit:
+          type: integer
+    ReviewUnit:
+      type: object
+      required:
+        - unitId
+        - wordId
+        - lang
+        - batchId
+        - batch
+        - word
+        - translation
+        - exampleSet
+        - release
+        - sourceUpdate
+        - effectivePreview
+        - flags
+        - riskLevel
+      properties:
+        unitId:
+          type: string
+        wordId:
+          type: string
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        batchId:
+          type: integer
+        batch:
+          allOf:
+            - $ref: '#/components/schemas/UpdateBatchRecord'
+          nullable: true
+        word:
+          allOf:
+            - $ref: '#/components/schemas/ReleaseWordRecord'
+          nullable: true
+        translation:
+          allOf:
+            - $ref: '#/components/schemas/ListedTranslationUpdate'
+          nullable: true
+        exampleSet:
+          allOf:
+            - $ref: '#/components/schemas/ListedExampleUpdateSet'
+          nullable: true
+        release:
+          allOf:
+            - $ref: '#/components/schemas/ReviewUnitReleaseValue'
+          nullable: true
+        sourceUpdate:
+          $ref: '#/components/schemas/EntryUpdateLayer'
+        effectivePreview:
+          allOf:
+            - $ref: '#/components/schemas/ReviewUnitReleaseValue'
+          nullable: true
+        flags:
+          $ref: '#/components/schemas/ReviewUnitFlags'
+        riskLevel:
+          $ref: '#/components/schemas/ReviewRiskLevel'
+    AdminReviewQueueResponseV2:
+      type: object
+      required:
+        - releaseVersion
+        - summary
+        - items
+        - nextCursor
+        - filters
+      properties:
+        releaseVersion:
+          type: string
+        summary:
+          $ref: '#/components/schemas/ReviewQueueSummary'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewUnit'
+        nextCursor:
+          type: string
+          nullable: true
+        filters:
+          $ref: '#/components/schemas/ReviewQueueAppliedFilters'
+    AdminReviewBatchSummaryResponse:
+      type: object
+      required:
+        - releaseVersion
+        - batch
+        - pendingUnits
+        - byLanguage
+        - byRisk
+        - sourceConflictCount
+        - translationOnlyCount
+        - examplesOnlyCount
+      properties:
+        releaseVersion:
+          type: string
+        batch:
+          allOf:
+            - $ref: '#/components/schemas/UpdateBatchRecord'
+          nullable: true
+        pendingUnits:
+          type: integer
+        byLanguage:
+          type: object
+          additionalProperties:
+            type: integer
+        byRisk:
+          type: object
+          additionalProperties:
+            type: integer
+        sourceConflictCount:
+          type: integer
+        translationOnlyCount:
+          type: integer
+        examplesOnlyCount:
+          type: integer
     AdminBatchDetailResponse:
       type: object
       required:
@@ -1384,6 +1797,57 @@ components:
         notes:
           type: string
           nullable: true
+    BulkReviewActionRequest:
+      type: object
+      required:
+        - unitIds
+      properties:
+        unitIds:
+          oneOf:
+            - type: string
+              description: Comma-delimited review unit ids
+            - type: array
+              items:
+                type: string
+        notes:
+          type: string
+          nullable: true
+        overrideSourceConflict:
+          type: boolean
+          default: false
+    BulkReviewActionResponse:
+      type: object
+      required:
+        - ok
+        - action
+        - affected
+      properties:
+        ok:
+          type: boolean
+        action:
+          type: string
+          enum:
+            - approved
+            - rejected
+        affected:
+          type: object
+          required:
+            - units
+            - translations
+            - exampleSets
+          properties:
+            units:
+              type: integer
+            translations:
+              type: integer
+            exampleSets:
+              type: integer
+        blockedUnitIds:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
     AdminReleaseBuildRequest:
       type: object
       properties:
