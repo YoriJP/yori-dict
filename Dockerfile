@@ -39,6 +39,9 @@ RUN bun install --frozen-lockfile --production
 # Copy source code
 COPY src/ ./src/
 
+# Copy runtime scripts used by admin operations
+COPY scripts/ ./scripts/
+
 # Copy OpenAPI spec (served at /openapi.yaml and used by /docs)
 COPY openapi.yaml ./
 
