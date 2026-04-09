@@ -226,7 +226,7 @@ describe('admin new word flow', () => {
       definitions: ['to drink'],
       sources: ['seed'],
     })
-    writeReleaseSnapshotToDb(getReleaseDbPath('initial-release'), activeSnapshot)
+    writeReleaseSnapshotToDb(getReleaseDbPath('initial-release'), activeSnapshot, { overwrite: true })
 
     const updatesDb = initUpdatesDatabase(join(tempDir, 'updates.sqlite'))
     const batchId = insertUpdateBatch(updatesDb, {
