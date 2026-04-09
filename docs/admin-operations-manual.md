@@ -38,6 +38,7 @@ Admin UI 是內部操作介面，用來處理 release 與 `updates.sqlite` overl
 - AI update 在批准前不會影響 lookup
 - source update 會自動成為 effective data
 - `promote` 只會把目前 effective 的內容烘焙進新 release
+- `promote` 遇到 orphaned updates 時會略過它們，而不是讓整個 release build 失敗
 - `New Word` 寫入 snapshot 後，還要 build release 才會對 lookup 生效
 - `New Word -> Build release` 會從整份目前 snapshot 建立新 release，不會偷偷把 overlay updates 烘進 release
 
@@ -61,6 +62,7 @@ Operating principles:
 - AI updates do not affect lookup until approved
 - source updates become effective automatically
 - `promote` only bakes currently effective data into a new release
+- `promote` skips orphaned updates instead of failing the whole release build
 - `New Word` writes to snapshot files first, then requires a release build before lookup can see it
 - `New Word -> Build release` builds from the full current snapshot and does not silently bake overlay updates into the release
 
@@ -84,6 +86,7 @@ Admin UI は、リリース管理と `updates.sqlite` overlay を扱うための
 - AI update は承認前には lookup に反映されない
 - source update は自動的に effective data になる
 - `promote` は、その時点で effective な内容だけを新しい release に取り込む
+- `promote` は orphaned updates を見つけても release build 全体を失敗させず、その行だけをスキップする
 - `New Word` はまず snapshot に書き込まれ、その後 release build をしないと lookup に反映されない
 - `New Word -> Build release` は現在の snapshot 全体から release を作り、overlay updates を勝手に release 化しない
 
@@ -96,6 +99,7 @@ Admin UI は、リリース管理と `updates.sqlite` overlay を扱うための
 - 服務正在執行，通常是 `bun run dev`
 - 環境變數 `ADMIN_TOKEN` 已設定
 - 目前環境可讀取 active release 與 `updates.sqlite`
+- active release 可能來自 `releases/current.json`，也可能來自 `RELEASE_DB_PATH` 之類的 env override
 
 目前支援的 admin 驗證方式：
 
@@ -129,6 +133,7 @@ Prerequisites:
 - the service is running, usually via `bun run dev`
 - `ADMIN_TOKEN` is set in the environment
 - the environment can access the active release and `updates.sqlite`
+- the active release may come from `releases/current.json` or from an env override such as `RELEASE_DB_PATH`
 
 Current admin authentication methods:
 
@@ -162,6 +167,7 @@ Security guidance:
 - サービスが起動していること。通常は `bun run dev`
 - 環境変数 `ADMIN_TOKEN` が設定されていること
 - 対象環境から active release と `updates.sqlite` にアクセスできること
+- active release は `releases/current.json` の場合もあれば、`RELEASE_DB_PATH` などの env override の場合もある
 
 現在サポートされている認証方法:
 
@@ -217,6 +223,7 @@ Security guidance:
 資料流規則：
 
 - runtime base 來自 active release
+- active release 由 runtime 解析決定，可能是 managed pointer，也可能是 env override
 - `updates.sqlite` 會在查詢時疊加在 active release 上
 - source update 自動生效
 - AI update 只有在 `approved` 後才會生效
@@ -229,6 +236,7 @@ release 動作差異：
 - `New word build release`: 驗證指定的新詞存在於 snapshot，然後仍以整份目前 snapshot 建立新 release
 - `Activate release`: 不重建資料，只切換 active pointer
 - `Promote release`: 依照目前 effective lookup 狀態建立新 release，並把納入的 update 標記為 `promoted`
+- orphaned updates 仍會在 admin / verify 畫面中顯示，但 promote 時不會被寫進新 release
 
 batch 狀態差異：
 
@@ -241,6 +249,7 @@ batch 狀態差異：
 Data flow rules:
 
 - the runtime base comes from the active release
+- the active release is resolved by runtime config, either from the managed pointer or an env override
 - `updates.sqlite` is layered on top of the active release at lookup time
 - source updates become effective automatically
 - AI updates only become effective after `approved`
@@ -253,6 +262,7 @@ Release action differences:
 - `New word build release`: verify that the requested new word exists in snapshot data, then still build from the full current snapshot
 - `Activate release`: switch the active pointer without rebuilding data
 - `Promote release`: create a new release from the current effective lookup state and mark included updates as `promoted`
+- orphaned updates may still appear in admin and verification views, but promote does not write them into the new release
 
 Batch status meanings:
 
@@ -265,6 +275,7 @@ Batch status meanings:
 データフローのルール:
 
 - 実行時の基盤データは active release から来る
+- active release は runtime 設定で解決され、managed pointer の場合も env override の場合もある
 - `updates.sqlite` は lookup 時に active release の上に重ねられる
 - source update は自動で effective になる
 - AI update は `approved` になって初めて effective になる
@@ -277,6 +288,7 @@ release 操作の違い:
 - `New word build release`: 指定した新規語彙が snapshot に存在することを確認したうえで、現在の snapshot 全体から release を作成する
 - `Activate release`: データを再作成せず、active pointer だけを切り替える
 - `Promote release`: 現在の effective lookup 状態から新しい release を作成し、取り込まれた update を `promoted` にする
+- orphaned updates は admin / verify には表示され得るが、promote 時には新 release へ書き込まれない
 
 batch 状態の意味:
 
@@ -561,10 +573,10 @@ batch 状態の意味:
   2. 在 `Promote Updates` 選擇 version override 或留空
   3. 選擇 `Promote and activate` 或 `Promote only`
   4. 按 `Promote release`
-- Expected result: 新 release 會根據當前 effective 狀態建立，納入的 updates 會被標記為 `promoted`。
+- Expected result: 新 release 會根據當前 effective 狀態建立，納入的 updates 會被標記為 `promoted`；orphaned updates 會被略過，不會阻塞 promote。
 - Risks / do not do: 未批准的 AI update 不會被帶進 promote；不要把 promote 當成單純 activate。
 - Recovery: 若預期資料沒進新 release，先確認它是否為 effective data，再檢查 review 狀態與語言。
-- Engineering notes: promote 以 active release + effective updates 組出 merged snapshot，再產生新 release。
+- Engineering notes: promote 以 active release + effective updates 組出 merged snapshot，再產生新 release。若 update 指向不在 release snapshot 中的 word，它會被視為 orphaned 並在 promote 時略過。
 
 #### English
 
@@ -575,10 +587,10 @@ batch 状態の意味:
   2. Use `Promote Updates` with an optional version override
   3. Choose `Promote and activate` or `Promote only`
   4. Click `Promote release`
-- Expected result: A new release is built from the current effective state, and included updates are marked `promoted`.
+- Expected result: A new release is built from the current effective state, included updates are marked `promoted`, and orphaned updates are skipped instead of blocking the promote.
 - Risks / do not do: Unapproved AI updates will not be included. Do not confuse promote with plain activate.
 - Recovery: If expected data is missing from the new release, confirm that it was effective at promote time and verify review state and language.
-- Engineering notes: Promote creates a merged snapshot from active release plus effective updates, then writes a new release.
+- Engineering notes: Promote creates a merged snapshot from active release plus effective updates, then writes a new release. Updates that point to words missing from the release snapshot are treated as orphaned and skipped.
 
 #### 日本語
 
@@ -589,10 +601,10 @@ batch 状態の意味:
   2. `Promote Updates` で必要なら version override を指定する
   3. `Promote and activate` または `Promote only` を選ぶ
   4. `Promote release` を押す
-- Expected result: 現在の effective 状態から新しい release が作られ、取り込まれた updates は `promoted` になる。
+- Expected result: 現在の effective 状態から新しい release が作られ、取り込まれた updates は `promoted` になる。orphaned updates は promote を止めずにスキップされる。
 - Risks / do not do: 未承認の AI update は含まれない。promote を単なる activate と混同しない。
 - Recovery: 期待したデータが新 release に入らない場合は、promote 時点で effective だったか、review 状態と言語指定を確認する。
-- Engineering notes: promote は active release と effective updates をマージした snapshot から新しい release を作成する。
+- Engineering notes: promote は active release と effective updates をマージした snapshot から新しい release を作成する。release snapshot に存在しない word を指す update は orphaned とみなし、promote 時には取り込まない。
 
 ### 4.8 Run a source update job
 
@@ -785,7 +797,7 @@ batch 状態の意味:
 | build release 後內容沒切換 | 選了 `Build only`，沒有 activate | 到 `Releases` 對該版本執行 activate，或下次直接選 `Build and activate` |
 | promote 後預期資料沒進新 release | AI update 未批准，或 promote 時該資料不是 effective | 先確認 review 狀態，再回 `Entry Inspector` 驗證 effective layer |
 | batch failed | 來源條件、模型、成本限制或其他執行錯誤 | 在 `Jobs` 的 batch detail 查看 `error`，修正後重跑 |
-| 出現 orphaned word IDs | update 指向的 word 已不在 active release 中 | 先在 `Updates` 與 `Entry Inspector` 查明影響範圍，再決定是否重建或清理資料 |
+| 出現 orphaned word IDs | update 指向的 word 已不在 active release 中 | 先在 `Updates` 與 `Entry Inspector` 查明影響範圍。promote 會略過這些 rows，但仍應決定是否重建或清理資料 |
 
 ### English
 
@@ -797,7 +809,7 @@ batch 状態の意味:
 | A release was built but content did not switch | `Build only` was chosen instead of activation | Activate that version in `Releases`, or use `Build and activate` next time |
 | Expected data is missing after promote | the AI update was not approved, or it was not effective at promote time | Confirm review state first, then validate effective layer in `Entry Inspector` |
 | A batch failed | source prerequisites, model config, cost controls, or execution errors | Open batch detail in `Jobs`, read `error`, fix the issue, and rerun |
-| Orphaned word IDs appear | updates point to words that are not present in the active release | Assess impact in `Updates` and `Entry Inspector`, then decide whether rebuild or cleanup is needed |
+| Orphaned word IDs appear | updates point to words that are not present in the active release | Assess impact in `Updates` and `Entry Inspector`. Promote skips those rows, but you should still decide whether rebuild or cleanup is needed |
 
 ### 日本語
 
@@ -809,7 +821,7 @@ batch 状態の意味:
 | release build 後も内容が切り替わらない | `Build only` を選んで activate していない | `Releases` でその version を activate する。次回は `Build and activate` を使う |
 | promote 後に期待したデータが入っていない | AI update が未承認、または promote 時点で effective ではなかった | review 状態を確認し、`Entry Inspector` で effective layer を検証する |
 | batch が failed になった | source 条件、model 設定、cost 制限、その他実行エラー | `Jobs` の batch detail で `error` を確認し、修正後に再実行する |
-| orphaned word IDs が出ている | update が active release に存在しない単語を指している | `Updates` と `Entry Inspector` で影響範囲を確認し、rebuild または cleanup を検討する |
+| orphaned word IDs が出ている | update が active release に存在しない単語を指している | `Updates` と `Entry Inspector` で影響範囲を確認する。promote はそれらをスキップするが、rebuild または cleanup を検討する |
 
 ## 7. Glossary and Route Map
 

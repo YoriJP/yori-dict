@@ -313,29 +313,26 @@ Returns `{"status": "ok"}` when the server is running.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        DATA PIPELINE                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
-│   │   IMPORT     │    │   BUILD      │    │   SERVE      │     │
-│   │              │    │              │    │              │     │
-│   │ JMdict JSON  │───▶│ data/core.json    │──▶│ dict.sqlite │  │
-│   │ KRDICT JSON  │    │ data/lang/en.json │   │             │  │
-│   │ Kaikki JSONL │    │ data/lang/de.json │   │ ~167MiB     │  │
-│   │ Tatoeba TSV  │    │ data/lang/ko.json │   │             │  │
-│   │ Wiktionary   │    │ data/lang/zh-*    │   │ ~1ms lookup │  │
-│   │ Wadoku/JLPT  │    │                   │   │             │  │
-│   │ Gemini SDK*  │    │                   │   │             │  │
-│   └──────────────┘    │ ~186MiB total JSON │   └─────────────┘  │
-│         ▲                    ▲                   ▲              │
-│         │                    │                   │              │
-│    ┌────┴────┐          ┌────┴────┐        ┌────┴────┐         │
-│    │ Scripts │          │ Scripts │        │   API   │         │
-│    │ import/*│          │build-db │        │  Hono   │         │
-│    └─────────┘          └─────────┘        └─────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                            DATA PIPELINE                                  │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  IMPORTERS                SNAPSHOT                 RELEASES       SERVE    │
+│  ─────────                ────────                 ────────       ─────    │
+│  JMdict JSON   ───────▶   data/core.json    ───▶  releases/v1/   active    │
+│  KRDICT JSON             data/lang/en.json        dict.sqlite     release   │
+│  Kaikki JSONL            data/lang/de.json        manifest.json     │       │
+│  Tatoeba TSV             data/lang/ko.json        releases/v2/      │       │
+│  Wiktionary              data/lang/zh-*           dict.sqlite       ▼       │
+│  Wadoku/JLPT             add / new-word writes                     Hono API │
+│  Gemini SDK*             snapshot first                           +         │
+│                                                                updates.sqlite│
+│                                                                            │
+│  release:build -> create candidate immutable release                       │
+│  release:activate -> switch runtime pointer (or env-pinned override)       │
+│  release:promote -> bake current effective overlay into a new release      │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 `*` Optional post-processing step for missing definitions only; not part of `rebuild:all`.
@@ -450,7 +447,7 @@ CREATE TABLE examples (
 );
 ```
 
-The server runs `initSchema()` on startup so an empty SQLite file gets minimal tables; **`bun run build:db`** is what populates a database that fully matches this layout (including `frequency` on `words`).
+The server runs `initSchema()` on startup so it can open the active release DB and `updates.sqlite`. **`bun run build:db`** now builds and activates a new immutable release under `releases/<version>/`; it no longer rewrites a single shared `dict.sqlite` runtime file.
 
 
 ## Development
@@ -460,8 +457,13 @@ The server runs `initSchema()` on startup so an empty SQLite file gets minimal t
 ```
 yori-dict/
 ├── src/
+│   ├── admin/            # Internal admin routes, services, and views
 │   ├── index.ts          # Hono API server
-│   ├── db.ts             # SQLite queries
+│   ├── db.ts             # Runtime lookup against active release + updates overlay
+│   ├── release-service.ts # Build / activate / promote release orchestration
+│   ├── storage.ts        # Release metadata and schema helpers
+│   ├── update-store.ts   # updates.sqlite read/write helpers
+│   ├── manual-word-service.ts
 │   ├── types.ts          # TypeScript types
 │   └── conjugator.ts     # Verb conjugation engine
 ├── sdk/                  # Generated TypeScript client (do not edit manually)
@@ -491,7 +493,14 @@ yori-dict/
 │   │   └── wiktionary.ts
 │   ├── audit/
 │   │   └── kanji-vocab-gaps.ts
-│   ├── build-db.ts           # JSON → SQLite compiler
+│   ├── build-db.ts           # Convenience wrapper for release:build --activate
+│   ├── release/
+│   │   ├── build.ts
+│   │   ├── activate.ts
+│   │   ├── promote.ts
+│   │   └── lib.ts
+│   ├── update/
+│   │   └── source.ts
 │   ├── pull-data.ts          # Git LFS materializer
 │   ├── verify-dict.ts
 │   ├── cleanup-dict.ts       # Dedup / fix artifacts on a single JSON file
@@ -534,7 +543,7 @@ yori-dict/
 | `bun run release:build` | Build a versioned immutable release under `releases/<version>/` |
 | `bun run release:activate --version <version>` | Point the runtime at an existing release |
 | `bun run release:promote` | Merge active overlay updates into a new release |
-| `bun run verify:rebuild` | Rebuild in a temporary worktree and compare normalized JSON + SQLite outputs against the checked-in snapshot |
+| `bun run verify:rebuild` | Rebuild in a temporary worktree and compare normalized JSON outputs, plus `dict.sqlite` when both trees have one |
 | `bun run import:base` | Run all base importers (jmdict + kaikki + krdict, `--mode replace`) |
 | `bun run import:enrichment` | Run deterministic enrichment importers (jlpt, tatoeba, wadoku, wiktionary, jmdict-examples, jitendex, kowiktionary-ko, cedict, frequency, zhja) |
 | `bun run import:jmdict --lang en,de` | Import JMdict base dictionary |
@@ -565,14 +574,19 @@ yori-dict/
 
 `bun run audit:kanji-vocab-gaps --limit 250` writes per-language JSON reports under `data/reports/kanji-vocab-gaps/` so you can prioritize high-frequency kanji-bearing vocabulary that is missing, thin, or only backed by a weak fallback source.
 
-`bun run verify:rebuild` creates a temporary Git worktree, copies `data/cache/`, reruns the full deterministic pipeline, then compares normalized JSON and SQLite outputs. The JSON comparison ignores order-only differences in `definitions`, `examples`, and `_defSources` so the check stays focused on real data drift.
+`bun run verify:rebuild` creates a temporary Git worktree, copies `data/cache/`, reruns the full deterministic pipeline, then compares normalized JSON outputs. If both the current tree and the worktree also have `dict.sqlite`, it compares SQLite dumps too. The JSON comparison ignores order-only differences in `definitions`, `examples`, and `_defSources` so the check stays focused on real data drift.
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
-| `DATABASE_PATH` | `./dict.sqlite` | SQLite database path |
+| `ADMIN_TOKEN` | unset | Enables `/admin` routes and acts as the admin password/token |
+| `RELEASE_DB_PATH` | unset | Explicit runtime override for the active release DB path |
+| `RELEASE_VERSION` | unset | Optional label for an env-pinned runtime release |
+| `RELEASE_MANIFEST_PATH` | unset | Optional manifest path for an env-pinned runtime release |
+| `UPDATES_DATABASE_PATH` | `./updates.sqlite` | Overlay updates database path |
+| `DATABASE_PATH` | `./dict.sqlite` | Legacy fallback DB path when no managed or env-selected release exists |
 | `GEMINI_API_KEY` | unset | Gemini API key for `import:gemini` |
 | `GOOGLE_API_KEY` | unset | Alternative env var accepted by `@google/genai` / `import:gemini` |
 
@@ -641,6 +655,7 @@ For importer or snapshot work, prefer:
 
 ```bash
 bun run rebuild:all
+bun run release:activate --version <version>
 bun run verify:rebuild
 ```
 
@@ -723,6 +738,7 @@ See `.github/workflows/railway-deployment.yml`
 1. Set build command: `bun run build:db`
 2. Set start command: `bun run start`
 3. Ensure Git LFS files are pulled during build
+4. Persist both `releases/` and `updates.sqlite` if the deployment filesystem is not ephemeral
 
 
 ## Troubleshooting
@@ -783,7 +799,8 @@ bun run build:db
 
 Check the database:
 ```bash
-sqlite3 dict.sqlite "SELECT * FROM words WHERE word = '食べる'"
+ACTIVE_DB="$(jq -r '.dbPath' releases/current.json)"
+sqlite3 "$ACTIVE_DB" "SELECT * FROM words WHERE word = '食べる'"
 ```
 
 If missing, re-import:
@@ -852,7 +869,7 @@ Imports are split into three stages:
 - `bun run import:zhja`       → `data/lang/zh-cn.json`, `data/lang/zh-tw.json` (user-supplied ZIPs)
 
 **Optional AI backfill** — fills entries that still have missing definitions after deterministic imports:
-- `bun run import:gemini --langs de,ko,zh-cn,zh-tw` → writes `ai`-sourced definitions into `data/lang/*.json`
+- `bun run import:gemini --langs de,ko,zh-cn,zh-tw` → writes pending `ai`-sourced updates into `updates.sqlite`
 
 > **Note:** `import:gemini` is intentionally not included in `import:enrichment` or `rebuild:all`. It is API-backed, rate-limited, cost-bearing, and non-deterministic. It uses the official `@google/genai` SDK and requires `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
@@ -896,7 +913,8 @@ Use `--dup-samples <n>` to control how many conflict examples are shown in `ask`
 ```bash
 bun run import:base        # run all base importers (--mode replace)
 bun run import:enrichment  # run deterministic enrichment importers only
-bun run rebuild:all        # base + deterministic enrichment + build:db
+bun run rebuild:all        # base + deterministic enrichment + candidate release build
+bun run release:activate --version <version>
 bun run verify:rebuild     # rebuild in a temp worktree and compare outputs
 # optional afterwards:
 # GEMINI_API_KEY=... bun run import:gemini --langs de,ko,zh-cn,zh-tw
