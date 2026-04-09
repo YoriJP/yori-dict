@@ -1,10 +1,12 @@
 import { Database } from 'bun:sqlite'
 import { existsSync, readdirSync } from 'fs'
 import {
+  type ReleaseSnapshot,
   buildReleaseVersion,
   computeFingerprintForFiles,
   getReleaseDbPath,
   getReleaseManifestPath,
+  makeTranslationKey,
   readCurrentReleasePointer,
   readReleaseManifest,
   RELEASES_DIR,
@@ -94,6 +96,66 @@ function maybeRecordAdminAction(
   updatesDb.close()
 }
 
+function cloneSnapshot(snapshot: ReleaseSnapshot): ReleaseSnapshot {
+  return {
+    words: new Map(
+      [...snapshot.words.entries()].map(([wordId, record]) => [wordId, { ...record, partOfSpeech: [...record.partOfSpeech], jlpt: [...record.jlpt] }])
+    ),
+    translations: new Map(
+      [...snapshot.translations.entries()].map(([key, record]) => [key, { ...record, definitions: [...record.definitions], sources: [...record.sources] }])
+    ),
+    examples: new Map(
+      [...snapshot.examples.entries()].map(([key, records]) => [key, records.map((record) => ({ ...record }))])
+    ),
+  }
+}
+
+function overlayWordFromSnapshot(
+  targetSnapshot: ReleaseSnapshot,
+  sourceSnapshot: ReleaseSnapshot,
+  wordId: string
+): void {
+  const sourceWord = sourceSnapshot.words.get(wordId)
+  if (!sourceWord) return
+
+  targetSnapshot.words.set(wordId, {
+    ...sourceWord,
+    partOfSpeech: [...sourceWord.partOfSpeech],
+    jlpt: [...sourceWord.jlpt],
+  })
+
+  const sourceLangs = new Set<string>()
+  for (const translation of sourceSnapshot.translations.values()) {
+    if (translation.wordId !== wordId) continue
+    sourceLangs.add(translation.lang)
+    targetSnapshot.translations.set(makeTranslationKey(wordId, translation.lang), {
+      ...translation,
+      definitions: [...translation.definitions],
+      sources: [...translation.sources],
+    })
+  }
+
+  for (const examples of sourceSnapshot.examples.values()) {
+    for (const example of examples) {
+      if (example.wordId === wordId) sourceLangs.add(example.lang)
+    }
+  }
+
+  for (const lang of sourceLangs) {
+    const key = makeTranslationKey(wordId, lang)
+    if (!sourceSnapshot.translations.has(key)) {
+      targetSnapshot.translations.delete(key)
+    }
+
+    const sourceExamples = sourceSnapshot.examples.get(key) ?? []
+    if (sourceExamples.length > 0) {
+      targetSnapshot.examples.set(key, sourceExamples.map((example) => ({ ...example })))
+    } else {
+      targetSnapshot.examples.delete(key)
+    }
+  }
+}
+
 export async function buildRelease(options: BuildReleaseOptions = {}): Promise<ReleaseActionResult> {
   const snapshot = await loadSnapshotFromJson()
   const fingerprint = computeFingerprintForFiles(collectFingerprintFiles())
@@ -131,6 +193,65 @@ export async function buildRelease(options: BuildReleaseOptions = {}): Promise<R
     dbPath,
     manifestPath,
     activated: options.activate === true,
+  }
+}
+
+export async function buildReleaseForNewWord(
+  wordId: string,
+  options: BuildReleaseOptions = {}
+): Promise<ReleaseActionResult> {
+  const jsonSnapshot = await loadSnapshotFromJson()
+  if (!jsonSnapshot.words.has(wordId)) {
+    throw new Error(`Word not found in snapshot: ${wordId}`)
+  }
+
+  const activeRelease = requireActiveReleaseConfig()
+  const releaseDb = new Database(activeRelease.dbPath, { readonly: true })
+  const updatesDb = initUpdatesDatabase()
+
+  try {
+    const baseSnapshot = cloneSnapshot(loadSnapshotFromReleaseDb(releaseDb))
+    overlayWordFromSnapshot(baseSnapshot, jsonSnapshot, wordId)
+    const mergedSnapshot = applyActiveUpdatesToSnapshot(baseSnapshot, updatesDb)
+    const fingerprint = computeFingerprintForFiles(collectFingerprintFiles())
+    const version = options.version ?? buildReleaseVersion(new Date(), fingerprint)
+    const dbPath = getReleaseDbPath(version)
+    const manifestPath = getReleaseManifestPath(version)
+
+    writeReleaseSnapshotToDb(dbPath, mergedSnapshot)
+    writeReleaseManifest(version, {
+      version,
+      builtAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      baseSourceFingerprint: fingerprint,
+      releaseDbPath: dbPath,
+      promotedFromUpdateSequence: null,
+    })
+
+    if (options.activate) {
+      writeCurrentReleasePointer({
+        version,
+        dbPath,
+        manifestPath,
+        activatedAt: new Date().toISOString(),
+      })
+    }
+
+    maybeRecordAdminAction(
+      options.activate ? 'release.build_and_activate' : 'release.build',
+      version,
+      options.actor,
+    )
+
+    return {
+      version,
+      dbPath,
+      manifestPath,
+      activated: options.activate === true,
+    }
+  } finally {
+    releaseDb.close()
+    updatesDb.close()
   }
 }
 

@@ -7,19 +7,11 @@
  */
 
 import { mkdir } from 'fs/promises'
-import {
-  addLangDefinition,
-  createEmptyLangEntry,
-  loadCore,
-  loadLang,
-  makeKey,
-  saveCore,
-  saveLang,
-} from './import/base'
+import { createManualWordInSnapshot } from '../src/manual-word-service'
+import type { Language } from '../src/types'
 
 const DATA_DIR = './data'
 const LANG_DIR = './data/lang'
-const CORE_PATH = `${DATA_DIR}/core.json`
 
 interface AddOptions {
   lang: string
@@ -149,70 +141,41 @@ async function main(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true })
   await mkdir(LANG_DIR, { recursive: true })
 
-  const core = await loadCore(CORE_PATH)
-  const langPath = `${LANG_DIR}/${opts.lang}.json`
-  const lang = await loadLang(langPath, opts.lang)
-
-  const key = makeKey(opts.word, opts.reading)
-  const posToAdd = (opts.pos ?? []).map((p) => p.trim()).filter(Boolean)
   const example = parseExample(opts.example)
+  const result = await createManualWordInSnapshot({
+    word: opts.word,
+    reading: opts.reading,
+    partOfSpeech: opts.pos,
+    common: opts.common,
+    jlpt: opts.jlpt ?? null,
+    translations: [{
+      lang: opts.lang as Language,
+      definitions: opts.def ?? [],
+      examples: example ? [{ japanese: example.ja, translation: example.text }] : [],
+    }],
+  }, {
+    allowExistingWordId: true,
+    allowDefinitionlessTranslations: true,
+  })
 
-  const hadCoreEntry = Boolean(core.entries[key])
-  if (!core.entries[key]) {
-    core.entries[key] = {
-      word: opts.word,
-      reading: opts.reading,
-      partOfSpeech: [...new Set(posToAdd)],
-      common: Boolean(opts.common),
-      jlpt: opts.jlpt ?? null,
-      frequency: null,
+  if (!result.created) {
+    console.error('Validation failed:')
+    for (const [field, messages] of Object.entries(result.fieldErrors)) {
+      console.error(`  ${field}: ${messages.join(' | ')}`)
     }
-  } else {
-    const coreEntry = core.entries[key]
-    coreEntry.word = opts.word
-    coreEntry.reading = opts.reading
-    coreEntry.partOfSpeech = [...new Set([...coreEntry.partOfSpeech, ...posToAdd])]
-    if (opts.common) coreEntry.common = true
-    if (opts.jlpt !== undefined) {
-      coreEntry.jlpt = coreEntry.jlpt === null ? opts.jlpt : Math.max(coreEntry.jlpt, opts.jlpt)
-    }
+    process.exit(1)
   }
 
-  if (!lang.entries[key]) {
-    lang.entries[key] = createEmptyLangEntry()
+  console.log(`Key: ${result.wordId}`)
+  console.log(`Core: ${result.coreCreated ? 'created' : 'updated'}`)
+  if (result.warnings.length > 0) {
+    console.log('Warnings:')
+    for (const warning of result.warnings) console.log(`  - ${warning}`)
   }
-
-  const langEntry = lang.entries[key]
-  const defsBefore = langEntry.definitions.length
-  for (const def of opts.def ?? []) {
-    addLangDefinition(langEntry, def, 'manual')
-  }
-
-  let exampleAdded = false
-  if (example) {
-    const exists = langEntry.examples.some(
-      (ex) => ex.ja === example.ja && ex.text === example.text && ex.source === 'manual'
-    )
-    if (!exists) {
-      langEntry.examples.push({ ...example, source: 'manual' })
-      exampleAdded = true
-    }
-  }
-
-  await saveCore(CORE_PATH, core)
-  await saveLang(langPath, lang)
-
-  const coreEntry = core.entries[key]
-  console.log(`Key: ${key}`)
-  console.log(`Core: ${hadCoreEntry ? 'updated' : 'created'}`)
-  console.log(`Lang (${opts.lang}) definitions: ${defsBefore} -> ${langEntry.definitions.length}`)
-  console.log(`Example added: ${exampleAdded ? 'yes' : 'no'}`)
-  console.log(`POS: ${coreEntry.partOfSpeech.join(', ') || '(none)'}`)
-  console.log(`Common: ${coreEntry.common}`)
-  console.log(`JLPT: ${coreEntry.jlpt !== null ? `N${coreEntry.jlpt}` : '(none)'}`)
   console.log('\nSaved:')
-  console.log(`  - ${CORE_PATH}`)
-  console.log(`  - ${langPath}`)
+  for (const file of result.snapshotFiles) {
+    console.log(`  - ${file}`)
+  }
 }
 
 main().catch((err) => {
