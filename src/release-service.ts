@@ -13,11 +13,13 @@ import {
   writeReleaseManifest,
 } from './storage'
 import { initUpdatesDatabase, markAllActiveUpdatesPromoted, recordAdminAction } from './update-store'
-import { applyActiveUpdatesToSnapshot, loadSnapshotFromJson, loadSnapshotFromReleaseDb, writeReleaseSnapshotToDb } from '../scripts/release/lib'
-
-const DATA_DIR = './data'
-const CORE_PATH = `${DATA_DIR}/core.json`
-const LANG_DIR = `${DATA_DIR}/lang`
+import {
+  applyActiveUpdatesToSnapshot,
+  collectSnapshotSourceFiles,
+  loadSnapshotFromJson,
+  loadSnapshotFromReleaseDb,
+  writeReleaseSnapshotToDb,
+} from '../scripts/release/lib'
 
 export interface BuildReleaseOptions {
   version?: string | null
@@ -50,15 +52,17 @@ export interface ReleaseListItem {
 }
 
 function collectFingerprintFiles(): string[] {
-  const files: string[] = []
-  if (existsSync(CORE_PATH)) files.push(CORE_PATH)
-  if (existsSync(LANG_DIR)) {
-    for (const lang of ['en', 'de', 'ko', 'zh-cn', 'zh-tw']) {
-      const path = `${LANG_DIR}/${lang}.json`
-      if (existsSync(path)) files.push(path)
-    }
-  }
-  return files
+  return collectSnapshotSourceFiles()
+}
+
+function releaseArtifactsExist(dbPath: string, manifestPath: string): boolean {
+  if (existsSync(manifestPath)) return true
+  return ['', '-wal', '-shm'].some((suffix) => existsSync(dbPath + suffix))
+}
+
+function assertReleaseVersionAvailable(version: string, dbPath: string, manifestPath: string): void {
+  if (!releaseArtifactsExist(dbPath, manifestPath)) return
+  throw new Error(`Release version already exists: ${version}`)
 }
 
 function getPromotedFromUpdateSequence(db: Database): number | null {
@@ -101,6 +105,7 @@ export async function buildRelease(options: BuildReleaseOptions = {}): Promise<R
   const dbPath = getReleaseDbPath(version)
   const manifestPath = getReleaseManifestPath(version)
 
+  assertReleaseVersionAvailable(version, dbPath, manifestPath)
   writeReleaseSnapshotToDb(dbPath, snapshot)
   writeReleaseManifest(version, {
     version,
@@ -148,6 +153,7 @@ export async function buildReleaseForNewWord(
   const dbPath = getReleaseDbPath(version)
   const manifestPath = getReleaseManifestPath(version)
 
+  assertReleaseVersionAvailable(version, dbPath, manifestPath)
   writeReleaseSnapshotToDb(dbPath, jsonSnapshot)
   writeReleaseManifest(version, {
     version,
@@ -223,6 +229,7 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
   const dbPath = getReleaseDbPath(version)
   const manifestPath = getReleaseManifestPath(version)
 
+  assertReleaseVersionAvailable(version, dbPath, manifestPath)
   writeReleaseSnapshotToDb(dbPath, mergedSnapshot)
   writeReleaseManifest(version, {
     version,

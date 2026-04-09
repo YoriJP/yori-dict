@@ -69,6 +69,20 @@ function parseOptionalNumber(raw: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function mapAdminBuildError(
+  c: { json: (body: unknown, status?: number) => Response },
+  error: unknown
+): Response | null {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.startsWith('Word not found in snapshot:')) {
+    return c.json({ error: message }, 404)
+  }
+  if (message.startsWith('Release version already exists:')) {
+    return c.json({ error: message }, 409)
+  }
+  return null
+}
+
 function parseReviewRisk(raw: string | undefined): ReviewRiskLevel | null {
   if (!raw) return null
   return raw === 'low' || raw === 'medium' || raw === 'high' ? raw : null
@@ -166,12 +180,18 @@ admin.get('/admin/api/releases/:version', (c) => {
 
 admin.post('/admin/api/releases/build', async (c) => {
   const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
-  const result = await runAdminBuildRelease({
-    version: typeof body.version === 'string' ? body.version : null,
-    activate: parseBoolean(body.activate, true),
-    actor: getAdminActor(c),
-  })
-  return c.json(result)
+  try {
+    const result = await runAdminBuildRelease({
+      version: typeof body.version === 'string' ? body.version : null,
+      activate: parseBoolean(body.activate, true),
+      actor: getAdminActor(c),
+    })
+    return c.json(result)
+  } catch (error) {
+    const response = mapAdminBuildError(c, error)
+    if (response) return response
+    throw error
+  }
 })
 
 admin.post('/admin/api/new-word', async (c) => {
@@ -222,10 +242,8 @@ admin.post('/admin/api/new-word/build-release', async (c) => {
     })
     return c.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (message.startsWith('Word not found in snapshot:')) {
-      return c.json({ error: message }, 404)
-    }
+    const response = mapAdminBuildError(c, error)
+    if (response) return response
     throw error
   }
 })
@@ -237,12 +255,20 @@ admin.post('/admin/api/releases/:version/activate', (c) => {
 admin.post('/admin/api/releases/promote', (c) => {
   return c.req.raw.json()
     .catch(() => ({}))
-    .then((body: Record<string, unknown>) => runAdminPromoteRelease({
-      version: typeof body.version === 'string' ? body.version : null,
-      activate: parseBoolean(body.activate, true),
-      actor: getAdminActor(c),
-    }))
-    .then((result) => c.json(result))
+    .then((body: Record<string, unknown>) => {
+      try {
+        const result = runAdminPromoteRelease({
+          version: typeof body.version === 'string' ? body.version : null,
+          activate: parseBoolean(body.activate, true),
+          actor: getAdminActor(c),
+        })
+        return c.json(result)
+      } catch (error) {
+        const response = mapAdminBuildError(c, error)
+        if (response) return response
+        throw error
+      }
+    })
 })
 
 admin.get('/admin/api/entries', (c) => {

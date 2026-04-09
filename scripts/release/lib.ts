@@ -19,6 +19,11 @@ const LANG_DIR = './data/lang'
 const CORE_PATH = `${DATA_DIR}/core.json`
 const LFS_POINTER_HEADER = 'version https://git-lfs.github.com/spec/v1'
 
+interface SnapshotJsonInputs {
+  mode: 'new' | 'legacy'
+  files: string[]
+}
+
 async function assertMaterializedJson(filePath: string): Promise<void> {
   const header = await Bun.file(filePath).slice(0, LFS_POINTER_HEADER.length + 8).text()
   if (header.startsWith(LFS_POINTER_HEADER)) {
@@ -102,6 +107,25 @@ function collectLegacyDictData(dict: DictFile, snapshot: ReleaseSnapshot): void 
         jlpt: entry.jlpt.map((item) => item.level),
         frequency: entry.frequency?.rank ?? null,
       })
+    } else {
+      const partOfSpeech = new Set([
+        ...existingWord.partOfSpeech,
+        ...entry.partOfSpeech.map((part) => part.value),
+      ])
+      const jlpt = new Set([
+        ...existingWord.jlpt,
+        ...entry.jlpt.map((item) => item.level),
+      ])
+      const frequency = entry.frequency?.rank ?? null
+
+      existingWord.partOfSpeech = [...partOfSpeech]
+      existingWord.common = existingWord.common || entry.common || entry.commonSources.length > 0
+      existingWord.jlpt = [...jlpt].sort((a, b) => b - a)
+      if (frequency !== null) {
+        existingWord.frequency = existingWord.frequency === null
+          ? frequency
+          : Math.min(existingWord.frequency, frequency)
+      }
     }
 
     if (entry.definitions.length > 0) {
@@ -134,9 +158,7 @@ function collectLegacyDictData(dict: DictFile, snapshot: ReleaseSnapshot): void 
   }
 }
 
-export async function loadSnapshotFromJson(): Promise<ReleaseSnapshot> {
-  const snapshot = createEmptySnapshot()
-
+function resolveSnapshotJsonInputs(): SnapshotJsonInputs {
   const newLangFiles = existsSync(LANG_DIR)
     ? readdirSync(LANG_DIR).filter((file) => file.endsWith('.json') && !file.includes('/'))
     : []
@@ -160,21 +182,44 @@ export async function loadSnapshotFromJson(): Promise<ReleaseSnapshot> {
   }
 
   if (useNewSchema) {
-    await assertMaterializedJson(CORE_PATH)
-    const core = await loadCore(CORE_PATH)
+    return {
+      mode: 'new',
+      files: [CORE_PATH, ...newLangFiles.map((fileName) => `${LANG_DIR}/${fileName}`)],
+    }
+  }
+
+  return {
+    mode: 'legacy',
+    files: legacyLangFiles.map((fileName) => `${DATA_DIR}/${fileName}`),
+  }
+}
+
+export function collectSnapshotSourceFiles(): string[] {
+  return resolveSnapshotJsonInputs().files
+}
+
+export async function loadSnapshotFromJson(): Promise<ReleaseSnapshot> {
+  const snapshot = createEmptySnapshot()
+
+  const inputs = resolveSnapshotJsonInputs()
+
+  if (inputs.mode === 'new') {
+    const [corePath, ...langPaths] = inputs.files
+    await assertMaterializedJson(corePath)
+    const core = await loadCore(corePath)
     collectCoreData(core, snapshot)
 
-    for (const fileName of newLangFiles) {
+    for (const filePath of langPaths) {
+      const fileName = filePath.split('/').pop() ?? filePath
       const lang = fileName.replace('.json', '')
-      const filePath = `${LANG_DIR}/${fileName}`
       await assertMaterializedJson(filePath)
       const langFile = await loadLang(filePath, lang)
       collectLangData(langFile, snapshot)
     }
   } else {
-    for (const fileName of legacyLangFiles) {
+    for (const filePath of inputs.files) {
+      const fileName = filePath.split('/').pop() ?? filePath
       const lang = fileName.replace('.json', '')
-      const filePath = `${DATA_DIR}/${fileName}`
       await assertMaterializedJson(filePath)
       const dict = await loadDict(filePath, lang)
       collectLegacyDictData(dict, snapshot)
@@ -273,8 +318,16 @@ export function applyActiveUpdatesToSnapshot(snapshot: ReleaseSnapshot, updatesD
   return next
 }
 
-export function writeReleaseSnapshotToDb(dbPath: string, snapshot: ReleaseSnapshot): void {
+export function writeReleaseSnapshotToDb(
+  dbPath: string,
+  snapshot: ReleaseSnapshot,
+  options: { overwrite?: boolean } = {}
+): void {
   ensureParentDir(dbPath)
+  const targetExists = ['', '-wal', '-shm'].some((suffix) => existsSync(dbPath + suffix))
+  if (targetExists && options.overwrite !== true) {
+    throw new Error(`Release DB already exists: ${dbPath}`)
+  }
   removeSqliteWithSidecars(dbPath)
 
   const db = new Database(dbPath)
@@ -333,4 +386,3 @@ export function writeReleaseSnapshotToDb(dbPath: string, snapshot: ReleaseSnapsh
   writeTransaction()
   db.close()
 }
-
