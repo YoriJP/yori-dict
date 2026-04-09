@@ -1,14 +1,4 @@
-import { Database } from 'bun:sqlite'
-import {
-  buildReleaseVersion,
-  requireActiveReleaseConfig,
-  writeCurrentReleasePointer,
-  writeReleaseManifest,
-  getReleaseDbPath,
-  getReleaseManifestPath,
-} from '../../src/storage'
-import { loadSnapshotFromReleaseDb, applyActiveUpdatesToSnapshot, writeReleaseSnapshotToDb } from './lib'
-import { initUpdatesDatabase, markAllActiveUpdatesPromoted } from '../../src/update-store'
+import { promoteRelease } from '../../src/release-service'
 
 interface PromoteOptions {
   version: string | null
@@ -50,60 +40,16 @@ Usage:
 `)
 }
 
-function getPromotedFromUpdateSequence(db: Database): number | null {
-  const row = db.query<{ max_id: number | null }, []>(`
-    SELECT MAX(batch_id) AS max_id
-    FROM (
-      SELECT batch_id FROM translation_updates WHERE status = 'active'
-      UNION ALL
-      SELECT batch_id FROM example_update_sets WHERE status = 'active'
-    )
-  `).get()
-
-  return row?.max_id ?? null
-}
-
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const options = parseArgs(argv)
-  const activeRelease = requireActiveReleaseConfig()
-  const releaseDb = new Database(activeRelease.dbPath, { readonly: true })
-  const updatesDb = initUpdatesDatabase()
-
-  const promotedFromUpdateSequence = getPromotedFromUpdateSequence(updatesDb)
-  const snapshot = loadSnapshotFromReleaseDb(releaseDb)
-  const mergedSnapshot = applyActiveUpdatesToSnapshot(snapshot, updatesDb)
-
-  const version = options.version || buildReleaseVersion()
-  const dbPath = getReleaseDbPath(version)
-  const manifestPath = getReleaseManifestPath(version)
-
-  writeReleaseSnapshotToDb(dbPath, mergedSnapshot)
-  writeReleaseManifest(version, {
-    version,
-    builtAt: new Date().toISOString(),
-    schemaVersion: '1.0.0',
-    baseSourceFingerprint: `promoted-from:${activeRelease.version}`,
-    releaseDbPath: dbPath,
-    promotedFromUpdateSequence,
+  const result = promoteRelease({
+    version: options.version,
+    activate: options.activate,
   })
 
-  markAllActiveUpdatesPromoted(updatesDb)
-
-  if (options.activate) {
-    writeCurrentReleasePointer({
-      version,
-      dbPath,
-      manifestPath,
-      activatedAt: new Date().toISOString(),
-    })
-  }
-
-  releaseDb.close()
-  updatesDb.close()
-
-  console.log(`Promoted release: ${version}`)
-  console.log(`Release DB: ${dbPath}`)
-  if (options.activate) {
+  console.log(`Promoted release: ${result.version}`)
+  console.log(`Release DB: ${result.dbPath}`)
+  if (result.activated) {
     console.log('Release activated.')
   }
 }

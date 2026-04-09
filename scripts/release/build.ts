@@ -1,18 +1,4 @@
-import { existsSync } from 'fs'
-import {
-  buildReleaseVersion,
-  computeFingerprintForFiles,
-  getReleaseDbPath,
-  getReleaseManifestPath,
-  writeCurrentReleasePointer,
-  writeReleaseManifest,
-  type CurrentReleasePointer,
-} from '../../src/storage'
-import { loadSnapshotFromJson, writeReleaseSnapshotToDb } from './lib'
-
-const DATA_DIR = './data'
-const CORE_PATH = `${DATA_DIR}/core.json`
-const LANG_DIR = `${DATA_DIR}/lang`
+import { buildRelease } from '../../src/release-service'
 
 interface BuildOptions {
   version: string | null
@@ -58,55 +44,17 @@ Options:
 `)
 }
 
-function collectFingerprintFiles(): string[] {
-  const files: string[] = []
-  if (existsSync(CORE_PATH)) files.push(CORE_PATH)
-  if (existsSync(LANG_DIR)) {
-    for (const lang of ['en', 'de', 'ko', 'zh-cn', 'zh-tw']) {
-      const path = `${LANG_DIR}/${lang}.json`
-      if (existsSync(path)) files.push(path)
-    }
-  }
-  return files
-}
-
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const options = parseArgs(argv)
-  const snapshot = await loadSnapshotFromJson()
-
-  const fingerprintFiles = collectFingerprintFiles()
-  const fingerprint = computeFingerprintForFiles(fingerprintFiles)
-  const version = options.version || buildReleaseVersion(new Date(), fingerprint)
-  const dbPath = getReleaseDbPath(version)
-  const manifestPath = getReleaseManifestPath(version)
-
-  console.log(`Building release: ${version}`)
-  writeReleaseSnapshotToDb(dbPath, snapshot)
-
-  writeReleaseManifest(version, {
-    version,
-    builtAt: new Date().toISOString(),
-    schemaVersion: '1.0.0',
-    baseSourceFingerprint: fingerprint,
-    releaseDbPath: dbPath,
-    promotedFromUpdateSequence: null,
+  const result = await buildRelease({
+    version: options.version,
+    activate: options.activate,
   })
 
-  console.log(`Release DB: ${dbPath}`)
-  console.log(`Manifest: ${manifestPath}`)
-
-  if (options.activate) {
-    const pointer: CurrentReleasePointer = {
-      version,
-      dbPath,
-      manifestPath,
-      activatedAt: new Date().toISOString(),
-    }
-    writeCurrentReleasePointer(pointer)
-    console.log(`Activated release: ${version}`)
-  } else {
-    console.log('Release built but not activated.')
-  }
+  console.log(`Building release: ${result.version}`)
+  console.log(`Release DB: ${result.dbPath}`)
+  console.log(`Manifest: ${result.manifestPath}`)
+  console.log(result.activated ? `Activated release: ${result.version}` : 'Release built but not activated.')
 }
 
 if (import.meta.main) {
@@ -115,4 +63,3 @@ if (import.meta.main) {
     process.exit(1)
   })
 }
-

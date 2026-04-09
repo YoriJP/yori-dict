@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { loadLang, type LangFile } from '../import/base'
 import { requireActiveReleaseConfig, makeTranslationKey } from '../../src/storage'
 import {
+  finalizeUpdateBatch,
   initUpdatesDatabase,
   insertExampleUpdateSet,
   insertTranslationUpdate,
@@ -18,6 +19,21 @@ type TargetLang = 'en' | 'de' | 'ko' | 'zh-cn' | 'zh-tw'
 interface Options {
   langs: TargetLang[] | null
   dryRun: boolean
+}
+
+export interface SourceUpdateOptions {
+  langs?: TargetLang[] | null
+  dryRun?: boolean
+  actor?: string | null
+}
+
+export interface SourceUpdateResult {
+  langs: TargetLang[]
+  translationChanges: number
+  exampleChanges: number
+  batchId: number | null
+  dryRun: boolean
+  outputPath: string
 }
 
 const LANG_DIR = './data/lang'
@@ -138,8 +154,11 @@ function applySourceUpdatesOnly(snapshot: ReleaseSnapshot, updatesDb: Database):
   return next
 }
 
-async function main(argv = process.argv.slice(2)): Promise<void> {
-  const options = parseArgs(argv)
+export async function runSourceUpdate(input: SourceUpdateOptions = {}): Promise<SourceUpdateResult> {
+  const options: Options = {
+    langs: input.langs ?? null,
+    dryRun: input.dryRun ?? false,
+  }
   const langs = langSelection(options)
   const activeRelease = requireActiveReleaseConfig()
   const releaseDb = new Database(activeRelease.dbPath, { readonly: true })
@@ -153,80 +172,112 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
         kind: 'source_import',
         inputManifest: { langs, releaseVersion: activeRelease.version },
         notes: 'Generated from deterministic lang JSON snapshots.',
+        actor: input.actor ?? null,
       })
 
   let translationChanges = 0
   let exampleChanges = 0
 
-  for (const lang of langs) {
-    const filePath = `${LANG_DIR}/${lang}.json`
-    if (!existsSync(filePath)) continue
+  try {
+    for (const lang of langs) {
+      const filePath = `${LANG_DIR}/${lang}.json`
+      if (!existsSync(filePath)) continue
 
-    const langFile = await loadLang(filePath, lang)
-    const candidateTranslations = buildCandidateTranslationMap(langFile)
-    const candidateExamples = buildCandidateExampleMap(langFile)
+      const langFile = await loadLang(filePath, lang)
+      const candidateTranslations = buildCandidateTranslationMap(langFile)
+      const candidateExamples = buildCandidateExampleMap(langFile)
 
-    const keys = new Set<string>()
-    for (const wordId of sourceBaseline.words.keys()) {
-      keys.add(makeTranslationKey(wordId, lang))
-    }
-    for (const key of candidateTranslations.keys()) keys.add(key)
-    for (const key of candidateExamples.keys()) keys.add(key)
+      const keys = new Set<string>()
+      for (const wordId of sourceBaseline.words.keys()) {
+        keys.add(makeTranslationKey(wordId, lang))
+      }
+      for (const key of candidateTranslations.keys()) keys.add(key)
+      for (const key of candidateExamples.keys()) keys.add(key)
 
-    for (const key of keys) {
-      const currentTranslation = sourceBaseline.translations.get(key) ?? null
-      const candidateTranslation = candidateTranslations.get(key) ?? null
-      if (normalizeTranslation(currentTranslation) !== normalizeTranslation(candidateTranslation)) {
-        translationChanges++
-        if (!options.dryRun && batchId !== null) {
-          const record = candidateTranslation ?? {
-            wordId: key.split('\u0000')[0],
-            lang,
-            definitions: [],
-            sources: [],
+      for (const key of keys) {
+        const currentTranslation = sourceBaseline.translations.get(key) ?? null
+        const candidateTranslation = candidateTranslations.get(key) ?? null
+        if (normalizeTranslation(currentTranslation) !== normalizeTranslation(candidateTranslation)) {
+          translationChanges++
+          if (!options.dryRun && batchId !== null) {
+            const record = candidateTranslation ?? {
+              wordId: key.split('\u0000')[0],
+              lang,
+              definitions: [],
+              sources: [],
+            }
+            insertTranslationUpdate(updatesDb, {
+              wordId: record.wordId,
+              lang: record.lang,
+              definitions: record.definitions,
+              sources: record.sources,
+              sourceType: 'source',
+              batchId,
+              reviewStatus: 'not_required',
+            })
           }
-          insertTranslationUpdate(updatesDb, {
-            wordId: record.wordId,
-            lang: record.lang,
-            definitions: record.definitions,
-            sources: record.sources,
-            sourceType: 'source',
-            batchId,
-          })
         }
-      }
 
-      const currentExamples = sourceBaseline.examples.get(key) ?? null
-      const candidateExampleSet = candidateExamples.get(key) ?? []
-      if (normalizeExamples(currentExamples) !== normalizeExamples(candidateExampleSet)) {
-        exampleChanges++
-        if (!options.dryRun && batchId !== null) {
-          const [wordId] = key.split('\u0000')
-          insertExampleUpdateSet(updatesDb, {
-            wordId,
-            lang,
-            examples: candidateExampleSet.map((example) => ({
-              japanese: example.japanese,
-              translation: example.translation,
-              source: example.source,
-            })),
-            sourceType: 'source',
-            batchId,
-          })
+        const currentExamples = sourceBaseline.examples.get(key) ?? null
+        const candidateExampleSet = candidateExamples.get(key) ?? []
+        if (normalizeExamples(currentExamples) !== normalizeExamples(candidateExampleSet)) {
+          exampleChanges++
+          if (!options.dryRun && batchId !== null) {
+            const [wordId] = key.split('\u0000')
+            insertExampleUpdateSet(updatesDb, {
+              wordId,
+              lang,
+              examples: candidateExampleSet.map((example) => ({
+                japanese: example.japanese,
+                translation: example.translation,
+                source: example.source,
+              })),
+              sourceType: 'source',
+              batchId,
+              reviewStatus: 'not_required',
+            })
+          }
         }
       }
     }
+
+    if (batchId !== null) {
+      finalizeUpdateBatch(updatesDb, batchId, 'succeeded')
+    }
+
+    return {
+      langs,
+      translationChanges,
+      exampleChanges,
+      batchId,
+      dryRun: options.dryRun,
+      outputPath: process.env.UPDATES_DATABASE_PATH || './updates.sqlite',
+    }
+  } catch (error) {
+    if (batchId !== null) {
+      const message = error instanceof Error ? error.message : String(error)
+      finalizeUpdateBatch(updatesDb, batchId, 'failed', message)
+    }
+    throw error
+  } finally {
+    releaseDb.close()
+    updatesDb.close()
   }
+}
 
-  releaseDb.close()
-  updatesDb.close()
+async function main(argv = process.argv.slice(2)): Promise<void> {
+  const options = parseArgs(argv)
+  const result = await runSourceUpdate({
+    langs: options.langs,
+    dryRun: options.dryRun,
+  })
 
-  console.log(`Translation changes: ${translationChanges.toLocaleString()}`)
-  console.log(`Example changes: ${exampleChanges.toLocaleString()}`)
-  if (options.dryRun) {
+  console.log(`Translation changes: ${result.translationChanges.toLocaleString()}`)
+  console.log(`Example changes: ${result.exampleChanges.toLocaleString()}`)
+  if (result.dryRun) {
     console.log('Dry run only, no updates were written.')
   } else {
-    console.log(`Source updates written to ${process.env.UPDATES_DATABASE_PATH || './updates.sqlite'}`)
+    console.log(`Source updates written to ${result.outputPath}`)
   }
 }
 

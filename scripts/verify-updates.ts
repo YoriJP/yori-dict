@@ -15,6 +15,8 @@ async function main(): Promise<void> {
   console.log(`Active release: ${activeRelease.version}`)
   console.log(`Translation update counts: ${JSON.stringify(summary.translationCounts)}`)
   console.log(`Example update set counts: ${JSON.stringify(summary.exampleSetCounts)}`)
+  console.log(`Review counts: ${JSON.stringify(summary.reviewCounts)}`)
+  console.log(`Active reviewed AI updates: ${summary.activeReviewedAiCount.toLocaleString()}`)
   console.log(`Orphaned word IDs: ${summary.orphanedWordIds.length.toLocaleString()}`)
 
   if (summary.orphanedWordIds.length > 0) {
@@ -37,4 +39,3 @@ if (import.meta.main) {
     process.exit(1)
   })
 }
-

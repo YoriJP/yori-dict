@@ -6,7 +6,17 @@ import { Database } from 'bun:sqlite'
 import { closeDb, lookupWord } from '../src/db'
 import { createEmptySnapshot, type ReleaseSnapshot, writeReleaseManifest, type ReleaseManifest } from '../src/storage'
 import { writeReleaseSnapshotToDb, loadSnapshotFromReleaseDb, applyActiveUpdatesToSnapshot } from '../scripts/release/lib'
-import { initUpdatesDatabase, insertExampleUpdateSet, insertTranslationUpdate, insertUpdateBatch, markAllActiveUpdatesPromoted } from '../src/update-store'
+import { activateRelease, promoteRelease } from '../src/release-service'
+import {
+  approveExampleUpdateSet,
+  approveTranslationUpdate,
+  initUpdatesDatabase,
+  insertExampleUpdateSet,
+  insertTranslationUpdate,
+  insertUpdateBatch,
+  listTranslationUpdates,
+  markAllActiveUpdatesPromoted,
+} from '../src/update-store'
 
 const tempPaths: string[] = []
 
@@ -57,7 +67,219 @@ afterEach(() => {
 })
 
 describe('release overlay flow', () => {
-  test('lookup overlays AI and source updates on top of immutable release data', () => {
+  test('activating a staged promoted release retires only baked-in overlays', () => {
+    const dir = makeTempDir()
+    const originalCwd = process.cwd()
+    const releaseDbPath = join(dir, 'release.sqlite')
+    const updatesDbPath = join(dir, 'updates.sqlite')
+    const manifestPath = join(dir, 'manifest.json')
+    process.chdir(dir)
+
+    try {
+      writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+      writeReleaseManifest('test-release', {
+        version: 'test-release',
+        builtAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        baseSourceFingerprint: 'test',
+        releaseDbPath,
+        promotedFromUpdateSequence: null,
+      })
+
+      process.env.RELEASE_DB_PATH = releaseDbPath
+      process.env.RELEASE_VERSION = 'test-release'
+      process.env.RELEASE_MANIFEST_PATH = manifestPath
+      process.env.UPDATES_DATABASE_PATH = updatesDbPath
+
+      let updatesDb = initUpdatesDatabase(updatesDbPath)
+      const stagedBatchId = insertUpdateBatch(updatesDb, {
+        kind: 'ai_import',
+        inputManifest: { test: 'staged' },
+        notes: 'AI batch baked into staged release',
+      })
+      const stagedUpdateId = insertTranslationUpdate(updatesDb, {
+        wordId: '食べる:たべる',
+        lang: 'en',
+        definitions: ['to consume food'],
+        sources: ['ai'],
+        sourceType: 'ai',
+        batchId: stagedBatchId,
+        reviewStatus: 'pending',
+      })
+      approveTranslationUpdate(updatesDb, stagedUpdateId, 'tester')
+      updatesDb.close()
+
+      promoteRelease({ version: 'staged-release', activate: false })
+
+      updatesDb = initUpdatesDatabase(updatesDbPath)
+      const laterBatchId = insertUpdateBatch(updatesDb, {
+        kind: 'ai_import',
+        inputManifest: { test: 'later' },
+        notes: 'AI batch created after staged release build',
+      })
+      const laterUpdateId = insertTranslationUpdate(updatesDb, {
+        wordId: '食べる:たべる',
+        lang: 'de',
+        definitions: ['essen'],
+        sources: ['ai'],
+        sourceType: 'ai',
+        batchId: laterBatchId,
+        reviewStatus: 'pending',
+      })
+      approveTranslationUpdate(updatesDb, laterUpdateId, 'tester')
+      updatesDb.close()
+
+      activateRelease('staged-release')
+
+      updatesDb = initUpdatesDatabase(updatesDbPath)
+      const aiUpdates = listTranslationUpdates(updatesDb, {
+        sourceType: 'ai',
+        limit: 10,
+      })
+      updatesDb.close()
+
+      expect(aiUpdates.find((row) => row.id === stagedUpdateId)?.status).toBe('promoted')
+      expect(aiUpdates.find((row) => row.id === laterUpdateId)?.status).toBe('active')
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
+
+  test('promote without activation keeps active overlay data live', () => {
+    const dir = makeTempDir()
+    const originalCwd = process.cwd()
+    const releaseDbPath = join(dir, 'release.sqlite')
+    const updatesDbPath = join(dir, 'updates.sqlite')
+    const manifestPath = join(dir, 'manifest.json')
+    process.chdir(dir)
+
+    try {
+      writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+      writeReleaseManifest('test-release', {
+        version: 'test-release',
+        builtAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        baseSourceFingerprint: 'test',
+        releaseDbPath,
+        promotedFromUpdateSequence: null,
+      })
+
+      process.env.RELEASE_DB_PATH = releaseDbPath
+      process.env.RELEASE_VERSION = 'test-release'
+      process.env.RELEASE_MANIFEST_PATH = manifestPath
+      process.env.UPDATES_DATABASE_PATH = updatesDbPath
+
+      let updatesDb = initUpdatesDatabase(updatesDbPath)
+      const batchId = insertUpdateBatch(updatesDb, {
+        kind: 'ai_import',
+        inputManifest: { test: true },
+        notes: 'AI backfill',
+      })
+      const translationUpdateId = insertTranslationUpdate(updatesDb, {
+        wordId: '食べる:たべる',
+        lang: 'en',
+        definitions: ['to consume food'],
+        sources: ['ai'],
+        sourceType: 'ai',
+        batchId,
+        reviewStatus: 'pending',
+      })
+      approveTranslationUpdate(updatesDb, translationUpdateId, 'tester')
+      updatesDb.close()
+
+      closeDb()
+      expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to consume food'])
+
+      promoteRelease({ version: 'promoted-release', activate: false })
+
+      closeDb()
+      expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to consume food'])
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
+
+  test('promote skips orphaned active updates instead of failing the release build', () => {
+    const dir = makeTempDir()
+    const originalCwd = process.cwd()
+    const releaseDbPath = join(dir, 'release.sqlite')
+    const updatesDbPath = join(dir, 'updates.sqlite')
+    const manifestPath = join(dir, 'manifest.json')
+    process.chdir(dir)
+
+    try {
+      writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+      writeReleaseManifest('test-release', {
+        version: 'test-release',
+        builtAt: new Date().toISOString(),
+        schemaVersion: '1.0.0',
+        baseSourceFingerprint: 'test',
+        releaseDbPath,
+        promotedFromUpdateSequence: null,
+      })
+
+      process.env.RELEASE_DB_PATH = releaseDbPath
+      process.env.RELEASE_VERSION = 'test-release'
+      process.env.RELEASE_MANIFEST_PATH = manifestPath
+      process.env.UPDATES_DATABASE_PATH = updatesDbPath
+
+      const updatesDb = initUpdatesDatabase(updatesDbPath)
+      const batchId = insertUpdateBatch(updatesDb, {
+        kind: 'source_import',
+        inputManifest: { test: 'orphaned' },
+        notes: 'orphaned updates should be ignored during promote',
+      })
+
+      insertTranslationUpdate(updatesDb, {
+        wordId: '幽霊語:ゆうれいご',
+        lang: 'en',
+        definitions: ['ghost entry'],
+        sources: ['manual-test'],
+        sourceType: 'source',
+        batchId,
+      })
+      insertExampleUpdateSet(updatesDb, {
+        wordId: '幽霊語:ゆうれいご',
+        lang: 'en',
+        examples: [{
+          japanese: '幽霊語を使う',
+          translation: 'use a ghost entry',
+          source: 'manual-test',
+        }],
+        sourceType: 'source',
+        batchId,
+      })
+      updatesDb.close()
+
+      const result = promoteRelease({ version: 'promoted-release', activate: false })
+
+      const promotedDb = new Database(result.dbPath, { readonly: true })
+      const orphanedTranslation = promotedDb.query<{ count: number }, []>(`
+        SELECT COUNT(*) AS count
+        FROM translations
+        WHERE word_id = '幽霊語:ゆうれいご'
+      `).get()
+      const orphanedExamples = promotedDb.query<{ count: number }, []>(`
+        SELECT COUNT(*) AS count
+        FROM examples
+        WHERE word_id = '幽霊語:ゆうれいご'
+      `).get()
+      const preservedTranslation = promotedDb.query<{ definitions: string }, []>(`
+        SELECT definitions
+        FROM translations
+        WHERE word_id = '食べる:たべる' AND lang = 'en'
+      `).get()
+      promotedDb.close()
+
+      expect(orphanedTranslation?.count).toBe(0)
+      expect(orphanedExamples?.count).toBe(0)
+      expect(JSON.parse(preservedTranslation?.definitions ?? '[]')).toEqual(['to eat'])
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
+
+  test('lookup only uses approved AI updates and still lets source override them', () => {
     const dir = makeTempDir()
     const releaseDbPath = join(dir, 'release.sqlite')
     const promotedDbPath = join(dir, 'promoted.sqlite')
@@ -89,15 +311,16 @@ describe('release overlay flow', () => {
       inputManifest: { test: true },
       notes: 'AI backfill',
     })
-    insertTranslationUpdate(updatesDb, {
+    const translationUpdateId = insertTranslationUpdate(updatesDb, {
       wordId: '食べる:たべる',
       lang: 'en',
       definitions: ['to consume food'],
       sources: ['ai'],
       sourceType: 'ai',
       batchId,
+      reviewStatus: 'pending',
     })
-    insertExampleUpdateSet(updatesDb, {
+    const exampleSetId = insertExampleUpdateSet(updatesDb, {
       wordId: '食べる:たべる',
       lang: 'en',
       examples: [{
@@ -107,7 +330,21 @@ describe('release overlay flow', () => {
       }],
       sourceType: 'ai',
       batchId,
+      reviewStatus: 'pending',
     })
+    updatesDb.close()
+
+    closeDb()
+    result = lookupWord('食べる', 'en')
+    expect(result?.definitions).toEqual(['to eat'])
+    expect(result?.examples).toEqual([{
+      japanese: '毎朝食べます',
+      translation: 'I eat every morning',
+    }])
+
+    updatesDb = initUpdatesDatabase(updatesDbPath)
+    approveTranslationUpdate(updatesDb, translationUpdateId, 'tester')
+    approveExampleUpdateSet(updatesDb, exampleSetId, 'tester')
     updatesDb.close()
 
     closeDb()
@@ -167,4 +404,3 @@ describe('release overlay flow', () => {
     expect(exampleRows).toHaveLength(0)
   })
 })
-
