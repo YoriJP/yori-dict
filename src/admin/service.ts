@@ -1,8 +1,9 @@
 import { Database } from 'bun:sqlite'
-import { activateRelease, buildRelease, listReleases, promoteRelease } from '../release-service'
+import { activateRelease, buildRelease, buildReleaseForNewWord, listReleases, promoteRelease } from '../release-service'
 import type { Language, LookupResponse, WordRow } from '../types'
 import { lookupWord } from '../db'
 import { requireActiveReleaseConfig, type ReleaseExampleRecord, type ReleaseTranslationRecord, type ReleaseWordRecord } from '../storage'
+import { createManualWordInSnapshot, type ManualWordInput } from '../manual-word-service'
 import {
   approveExampleUpdateSet,
   approveTranslationUpdate,
@@ -23,6 +24,8 @@ import {
 import type {
   AdminBatchDetailResponse,
   AdminEntryInspectionResponse,
+  AdminNewWordFormData,
+  AdminNewWordResponse,
   AdminReleaseListResponse,
   AdminReviewQueueResponse,
   AdminSummaryResponse,
@@ -316,7 +319,9 @@ export async function runAdminSourceUpdate(input: {
   })
 }
 
-export async function runAdminGeminiImport(input: Partial<GeminiRunOptions> & { actor: string }) {
+export async function runAdminGeminiImport(
+  input: Partial<GeminiRunOptions> & { actor: string }
+): Promise<unknown> {
   const defaults = defaultCliOptions()
   return runGeminiImport({
     ...defaults,
@@ -362,4 +367,76 @@ export function getEffectiveOverrides(wordId: string, lang: Language) {
   }
   updatesDb.close()
   return response
+}
+
+export async function createAdminNewWord(
+  input: AdminNewWordFormData,
+  actor: string
+): Promise<AdminNewWordResponse> {
+  const activeRelease = requireActiveReleaseConfig()
+  const result = await createManualWordInSnapshot(input as ManualWordInput)
+
+  if (!result.created) {
+    return {
+      created: false,
+      releaseVersion: activeRelease.version,
+      activeReleaseContainsWord: false,
+      fieldErrors: result.fieldErrors,
+      warnings: result.warnings,
+      similarEntries: result.similarEntries,
+      conflictWordId: result.conflictWordId,
+    }
+  }
+
+  const updatesDb = initUpdatesDatabase()
+  recordAdminAction(updatesDb, {
+    actor,
+    action: 'new-word.create',
+    targetKind: 'word',
+    targetId: result.wordId,
+    notes: `snapshot:${result.snapshotFiles.join(',')}`,
+  })
+  updatesDb.close()
+
+  return {
+    created: true,
+    wordId: result.wordId,
+    snapshotFiles: result.snapshotFiles,
+    releaseVersion: activeRelease.version,
+    activeReleaseContainsWord: false,
+    warnings: result.warnings,
+    similarEntries: result.similarEntries,
+    fieldErrors: {},
+    nextActions: {
+      buildReleaseUrl: '/admin/api/new-word/build-release',
+      entryInspectorUrl: `/admin/entry?word=${encodeURIComponent(input.word)}&lang=${encodeURIComponent(input.translations[0]?.lang ?? 'en')}`,
+      releasesUrl: '/admin/releases',
+    },
+  }
+}
+
+export async function runAdminBuildReleaseForNewWord(input: {
+  createdWordId: string
+  activate?: boolean
+  actor: string
+}) {
+  const result = await buildReleaseForNewWord(input.createdWordId, {
+    activate: input.activate,
+    actor: input.actor,
+  })
+
+  const updatesDb = initUpdatesDatabase()
+  recordAdminAction(updatesDb, {
+    actor: input.actor,
+    action: 'new-word.build-release',
+    targetKind: 'word',
+    targetId: input.createdWordId,
+    notes: result.version,
+  })
+  updatesDb.close()
+
+  return {
+    ...result,
+    createdWordId: input.createdWordId,
+  }
 }

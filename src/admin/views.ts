@@ -1,6 +1,7 @@
 import type {
   AdminBatchDetailResponse,
   AdminEntryInspectionResponse,
+  AdminNewWordResponse,
   AdminReleaseListResponse,
   AdminReviewQueueResponse,
   AdminSummaryResponse,
@@ -81,6 +82,7 @@ const NAV_ITEMS = [
   { href: '/admin', label: 'Dashboard', match: 'Dashboard' },
   { href: '/admin/entry', label: 'Entry Inspector', match: 'Entry' },
   { href: '/admin/review', label: 'AI Review', match: 'Review' },
+  { href: '/admin/new-word', label: 'New Word', match: 'New Word' },
   { href: '/admin/updates', label: 'Updates', match: 'Updates' },
   { href: '/admin/releases', label: 'Releases', match: 'Release' },
   { href: '/admin/jobs', label: 'Jobs', match: 'Jobs' },
@@ -539,6 +541,83 @@ function renderPage(title: string, body: string): string {
         display: flex;
         gap: var(--space-2);
       }
+      .checkbox-label {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .checkbox-label input {
+        width: auto;
+      }
+      .alert {
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+        border: 1px solid var(--border);
+        background: var(--surface-1);
+        font-size: var(--text-sm);
+      }
+      .alert.error {
+        background: var(--negative-subtle);
+        border-color: oklch(90% 0.04 25);
+      }
+      .alert.warning {
+        background: var(--caution-subtle);
+        border-color: oklch(91% 0.04 85);
+      }
+      .alert.success {
+        background: var(--positive-subtle);
+        border-color: oklch(90% 0.04 155);
+      }
+      .alert h3 {
+        margin-bottom: var(--space-2);
+      }
+      .alert ul {
+        margin: 0;
+        padding-left: var(--space-5);
+      }
+      .alert + .alert {
+        margin-top: var(--space-3);
+      }
+      .translation-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-4);
+        background: var(--surface-2);
+        display: grid;
+        gap: var(--space-4);
+      }
+      .translation-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .dynamic-list {
+        display: grid;
+        gap: var(--space-2);
+      }
+      .list-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: var(--space-2);
+        align-items: start;
+      }
+      .example-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: var(--space-2);
+        align-items: start;
+      }
+      .page-actions {
+        display: flex;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        margin-top: var(--space-4);
+      }
 
       /* -- Lists & items -- */
       .item-list {
@@ -821,6 +900,10 @@ function renderPage(title: string, body: string): string {
         .entry-example-row {
           grid-template-columns: 1fr;
         }
+        .example-row,
+        .list-row {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -844,6 +927,9 @@ function renderPage(title: string, body: string): string {
       async function submitJsonForm(event) {
         event.preventDefault();
         const form = event.currentTarget;
+        if (form.dataset.newWordForm === 'true') {
+          return submitNewWordForm(form);
+        }
         const result = form.querySelector('[data-result]');
         const submitter = event.submitter;
         if (submitter && submitter.dataset.confirm) {
@@ -891,8 +977,264 @@ function renderPage(title: string, body: string): string {
           form.removeAttribute('aria-busy');
         }
       }
+
+      function createButton(label, className, handler) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        if (className) button.className = className;
+        button.addEventListener('click', handler);
+        return button;
+      }
+
+      function escapeHtmlClient(value) {
+        return String(value ?? '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function updateWordIdPreview(form) {
+        const word = form.querySelector('[name="word"]').value.trim();
+        const reading = form.querySelector('[name="reading"]').value.trim();
+        const preview = form.querySelector('[data-word-id-preview]');
+        if (!preview) return;
+        preview.textContent = word && reading ? word + ':' + reading : 'waiting for word + reading';
+      }
+
+      function addDefinitionRow(container, value = '') {
+        const row = document.createElement('div');
+        row.className = 'list-row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = value;
+        input.placeholder = 'Definition';
+        input.dataset.definitionInput = 'true';
+        const remove = createButton('Remove', 'secondary sm', () => row.remove());
+        row.append(input, remove);
+        container.append(row);
+      }
+
+      function addExampleRow(container, japanese = '', translation = '') {
+        const row = document.createElement('div');
+        row.className = 'example-row';
+        const japaneseInput = document.createElement('input');
+        japaneseInput.type = 'text';
+        japaneseInput.value = japanese;
+        japaneseInput.placeholder = 'Japanese example';
+        japaneseInput.dataset.exampleJapanese = 'true';
+        const translationInput = document.createElement('input');
+        translationInput.type = 'text';
+        translationInput.value = translation;
+        translationInput.placeholder = 'Translation';
+        translationInput.dataset.exampleTranslation = 'true';
+        const remove = createButton('Remove', 'secondary sm', () => row.remove());
+        row.append(japaneseInput, translationInput, remove);
+        container.append(row);
+      }
+
+      function addTranslationCard(form, lang = 'en') {
+        const container = form.querySelector('[data-translation-list]');
+        if (!container) return;
+        const card = document.createElement('section');
+        card.className = 'translation-card';
+        card.dataset.translationCard = 'true';
+        card.innerHTML = [
+          '<div class="translation-card-header">',
+          '  <label>Language',
+          '    <select data-translation-lang>',
+          '      <option value="en">en</option>',
+          '      <option value="de">de</option>',
+          '      <option value="ko">ko</option>',
+          '      <option value="zh-cn">zh-cn</option>',
+          '      <option value="zh-tw">zh-tw</option>',
+          '    </select>',
+          '  </label>',
+          '</div>',
+          '<div>',
+          '  <div class="section-header">',
+          '    <h3>Definitions</h3>',
+          '  </div>',
+          '  <div class="dynamic-list" data-definition-list></div>',
+          '  <button type="button" class="secondary sm" data-add-definition>Add definition</button>',
+          '</div>',
+          '<div>',
+          '  <div class="section-header">',
+          '    <h3>Examples</h3>',
+          '  </div>',
+          '  <div class="dynamic-list" data-example-list></div>',
+          '  <button type="button" class="secondary sm" data-add-example>Add example</button>',
+          '</div>',
+        ].join('');
+        card.querySelector('[data-translation-lang]').value = lang;
+        card.querySelector('[data-add-definition]').addEventListener('click', () => {
+          addDefinitionRow(card.querySelector('[data-definition-list]'));
+        });
+        card.querySelector('[data-add-example]').addEventListener('click', () => {
+          addExampleRow(card.querySelector('[data-example-list]'));
+        });
+        const removeButton = createButton('Remove language', 'secondary sm', () => card.remove());
+        card.querySelector('.translation-card-header').append(removeButton);
+        container.append(card);
+        addDefinitionRow(card.querySelector('[data-definition-list]'));
+      }
+
+      function collectNewWordPayload(form) {
+        const partOfSpeech = form.querySelector('[name="partOfSpeech"]').value
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
+
+        const translations = Array.from(form.querySelectorAll('[data-translation-card="true"]')).map((card) => ({
+          lang: card.querySelector('[data-translation-lang]').value,
+          definitions: Array.from(card.querySelectorAll('[data-definition-input="true"]'))
+            .map((input) => input.value.trim())
+            .filter(Boolean),
+          examples: Array.from(card.querySelectorAll('.example-row')).map((row) => ({
+            japanese: row.querySelector('[data-example-japanese]').value.trim(),
+            translation: row.querySelector('[data-example-translation]').value.trim(),
+          })).filter((item) => item.japanese || item.translation),
+        }));
+
+        return {
+          word: form.querySelector('[name="word"]').value,
+          reading: form.querySelector('[name="reading"]').value,
+          partOfSpeech,
+          common: form.querySelector('[name="common"]').checked,
+          jlpt: form.querySelector('[name="jlpt"]').value ? Number(form.querySelector('[name="jlpt"]').value) : null,
+          translations,
+        };
+      }
+
+      function renderAlert(container, title, items, kind) {
+        if (!container || !items || items.length === 0) {
+          if (container) container.innerHTML = '';
+          return;
+        }
+        container.innerHTML = [
+          '<div class="alert ' + escapeHtmlClient(kind) + '">',
+          '  <h3>' + escapeHtmlClient(title) + '</h3>',
+          '  <ul>' + items.map((item) => '<li>' + escapeHtmlClient(item) + '</li>').join('') + '</ul>',
+          '</div>',
+        ].join('');
+      }
+
+      function renderFieldErrors(container, fieldErrors) {
+        if (!container) return;
+        const items = [];
+        for (const [field, messages] of Object.entries(fieldErrors || {})) {
+          for (const message of messages) items.push(field + ': ' + message);
+        }
+        renderAlert(container, 'Validation errors', items, 'error');
+      }
+
+      function renderNewWordSuccess(form, response) {
+        const success = form.querySelector('[data-new-word-success]');
+        const errors = form.querySelector('[data-new-word-errors]');
+        const warnings = form.querySelector('[data-new-word-warnings]');
+        renderFieldErrors(errors, {});
+        renderAlert(warnings, 'Warnings', response.warnings || [], 'warning');
+        if (!success) return;
+        success.innerHTML = [
+          '<div class="alert success">',
+          '  <h3>New word saved to snapshot</h3>',
+          '  <ul>',
+          '    <li>Word ID: <code>' + escapeHtmlClient(response.wordId) + '</code></li>',
+          '    <li>Active release: <code>' + escapeHtmlClient(response.releaseVersion) + '</code></li>',
+          '    <li>This word is not live yet. Build a new release to make it searchable, then open Entry Inspector to verify it.</li>',
+          '  </ul>',
+          '  <div class="page-actions">',
+          '    <a href="' + response.nextActions.releasesUrl + '">Open releases</a>',
+          '    <button type="button" data-build-release>Build & activate new release</button>',
+          '  </div>',
+          '</div>',
+          '<div class="alert">',
+          '  <h3>Snapshot files</h3>',
+          '  <ul>' + (response.snapshotFiles || []).map((file) => '<li><code>' + escapeHtmlClient(file) + '</code></li>').join('') + '</ul>',
+          '</div>',
+        ].join('');
+        const buildButton = success.querySelector('[data-build-release]');
+        if (buildButton) {
+          buildButton.addEventListener('click', async () => {
+            buildButton.disabled = true;
+            const res = await fetch(response.nextActions.buildReleaseUrl, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ activate: true, createdWordId: response.wordId }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+              success.innerHTML = [
+                '<div class="alert success">',
+                '  <h3>Release built and activated</h3>',
+                '  <ul>',
+                '    <li>Release: <code>' + escapeHtmlClient(data.version) + '</code></li>',
+                '    <li>New word: <code>' + escapeHtmlClient(data.createdWordId || response.wordId) + '</code></li>',
+                '  </ul>',
+                '  <div class="page-actions">',
+                '    <a href="' + response.nextActions.entryInspectorUrl + '">Open entry inspector</a>',
+                '    <a href="' + response.nextActions.releasesUrl + '">Open releases</a>',
+                '  </div>',
+                '</div>',
+              ].join('');
+            } else {
+              buildButton.disabled = false;
+              renderFieldErrors(errors, { release: [data.error || 'Failed to build release.'] });
+            }
+          });
+        }
+      }
+
+      async function submitNewWordForm(form) {
+        const errors = form.querySelector('[data-new-word-errors]');
+        const warnings = form.querySelector('[data-new-word-warnings]');
+        const success = form.querySelector('[data-new-word-success]');
+        if (errors) errors.innerHTML = '';
+        if (warnings) warnings.innerHTML = '';
+        if (success) success.innerHTML = '';
+        form.setAttribute('aria-busy', 'true');
+        try {
+          const res = await fetch(form.action, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(collectNewWordPayload(form)),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            renderFieldErrors(errors, data.fieldErrors || {});
+            renderAlert(warnings, 'Warnings', data.warnings || [], 'warning');
+            if (data.conflictWordId && success) {
+              success.innerHTML = [
+                '<div class="alert">',
+                '  <h3>Existing word found</h3>',
+                '  <p><code>' + escapeHtmlClient(data.conflictWordId) + '</code> already exists.</p>',
+                '</div>',
+              ].join('');
+            }
+            return;
+          }
+          renderNewWordSuccess(form, data);
+        } catch (error) {
+          renderFieldErrors(errors, { request: [String(error)] });
+        } finally {
+          form.removeAttribute('aria-busy');
+        }
+      }
+
       for (const form of document.querySelectorAll('form[data-json-form="true"]')) {
         form.addEventListener('submit', submitJsonForm);
+      }
+      for (const form of document.querySelectorAll('form[data-new-word-form="true"]')) {
+        form.addEventListener('submit', submitJsonForm);
+        const word = form.querySelector('[name="word"]');
+        const reading = form.querySelector('[name="reading"]');
+        if (word) word.addEventListener('input', () => updateWordIdPreview(form));
+        if (reading) reading.addEventListener('input', () => updateWordIdPreview(form));
+        form.querySelector('[data-add-translation]').addEventListener('click', () => addTranslationCard(form));
+        addTranslationCard(form, 'en');
+        updateWordIdPreview(form);
       }
     </script>
   </body>
@@ -1064,6 +1406,12 @@ export function renderDashboardPage(data: AdminSummaryResponse): string {
                 <div class="link-desc">Approve or reject pending AI translations</div>
               </div>
             </a>
+            <a href="/admin/new-word">
+              <div>
+                <div>New Word</div>
+                <div class="link-desc">Create a new deterministic word and add it to the next release</div>
+              </div>
+            </a>
             <a href="/admin/releases">
               <div>
                 <div>Release Management</div>
@@ -1080,6 +1428,75 @@ export function renderDashboardPage(data: AdminSummaryResponse): string {
         </div>
       </div>
     </div>
+  `)
+}
+
+export function renderNewWordPage(): string {
+  return renderPage('New Word', `
+    <div class="page-header">
+      <h1>New Word</h1>
+      <p>Create a new deterministic dictionary entry. This writes to snapshot JSON only; build a new release afterwards to make the word searchable.</p>
+    </div>
+
+    <form action="/admin/api/new-word" method="POST" data-new-word-form="true">
+      <div class="panel">
+        <div class="section-header">
+          <h2>Core Fields</h2>
+        </div>
+        <div class="form-grid">
+          <label>Word
+            <input type="text" name="word" class="input-lg" placeholder="新語" />
+          </label>
+          <label>Reading
+            <input type="text" name="reading" class="input-lg" placeholder="しんご" />
+          </label>
+          <label>Part of speech
+            <input type="text" name="partOfSpeech" placeholder="noun, expression" />
+          </label>
+          <label>JLPT
+            <select name="jlpt">
+              <option value="">(none)</option>
+              <option value="5">N5</option>
+              <option value="4">N4</option>
+              <option value="3">N3</option>
+              <option value="2">N2</option>
+              <option value="1">N1</option>
+            </select>
+          </label>
+        </div>
+        <label class="checkbox-label">
+          <input type="checkbox" name="common" />
+          Mark as common word
+        </label>
+      </div>
+
+      <div class="panel">
+        <div class="section-header">
+          <h2>Translations</h2>
+          <button type="button" class="secondary" data-add-translation>Add language</button>
+        </div>
+        <div data-translation-list class="stack"></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-header">
+          <h2>Submit Summary</h2>
+        </div>
+        <dl class="stat-list" style="max-width: 480px">
+          <dt>Preview word ID</dt><dd><code data-word-id-preview>waiting for word + reading</code></dd>
+          <dt>Publish mode</dt><dd>Snapshot first</dd>
+          <dt>Next step</dt><dd>Build release</dd>
+        </dl>
+        <div class="page-actions">
+          <button type="submit">Save new word</button>
+          <a href="/admin/releases">Open releases</a>
+        </div>
+      </div>
+
+      <div data-new-word-errors></div>
+      <div data-new-word-warnings></div>
+      <div data-new-word-success></div>
+    </form>
   `)
 }
 

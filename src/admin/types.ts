@@ -77,3 +77,44 @@ export interface AdminUpdatesResponse {
   exampleSets: ListedExampleUpdateSet[]
   verification: UpdateVerificationSummary
 }
+
+export interface AdminNewWordFormData {
+  word: string
+  reading: string
+  partOfSpeech?: string[]
+  common?: boolean
+  jlpt?: number | null
+  translations: Array<{
+    lang: Language
+    definitions: string[]
+    examples?: Array<{
+      japanese: string
+      translation: string
+    }>
+  }>
+}
+
+export interface AdminNewWordValidationError {
+  fieldErrors: Record<string, string[]>
+  warnings: string[]
+  similarEntries: Array<{
+    wordId: string
+    word: string
+    reading: string
+    match: 'word' | 'reading'
+  }>
+  conflictWordId?: string
+}
+
+export interface AdminNewWordResponse extends AdminNewWordValidationError {
+  created: boolean
+  wordId?: string
+  snapshotFiles?: string[]
+  releaseVersion: string
+  activeReleaseContainsWord: boolean
+  nextActions?: {
+    buildReleaseUrl: string
+    entryInspectorUrl: string
+    releasesUrl: string
+  }
+}

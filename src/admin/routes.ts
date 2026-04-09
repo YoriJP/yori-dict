@@ -3,6 +3,7 @@ import { requireAdminAuth, getAdminActor } from './auth'
 import {
   approveExampleSetReview,
   approveTranslationReview,
+  createAdminNewWord,
   getAdminReleaseList,
   getAdminSummary,
   getAiReviewQueue,
@@ -12,6 +13,7 @@ import {
   rejectExampleSetReview,
   rejectTranslationReview,
   runAdminActivateRelease,
+  runAdminBuildReleaseForNewWord,
   runAdminBuildRelease,
   runAdminGeminiImport,
   runAdminPromoteRelease,
@@ -21,6 +23,7 @@ import {
   renderDashboardPage,
   renderEntryPage,
   renderJobsPage,
+  renderNewWordPage,
   renderReleasesPage,
   renderReviewPage,
   renderUpdatesPage,
@@ -80,6 +83,8 @@ admin.get('/admin/review', (c) => {
   return c.html(renderReviewPage(getAiReviewQueue(lang)))
 })
 
+admin.get('/admin/new-word', (c) => c.html(renderNewWordPage()))
+
 admin.get('/admin/releases', (c) => c.html(renderReleasesPage(getAdminReleaseList())))
 
 admin.get('/admin/jobs', (c) => {
@@ -117,6 +122,62 @@ admin.post('/admin/api/releases/build', async (c) => {
     actor: getAdminActor(c),
   })
   return c.json(result)
+})
+
+admin.post('/admin/api/new-word', async (c) => {
+  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+  const result = await createAdminNewWord({
+    word: typeof body.word === 'string' ? body.word : '',
+    reading: typeof body.reading === 'string' ? body.reading : '',
+    partOfSpeech: Array.isArray(body.partOfSpeech)
+      ? body.partOfSpeech.map((value) => String(value))
+      : typeof body.partOfSpeech === 'string'
+        ? [body.partOfSpeech]
+        : [],
+    common: parseBoolean(body.common, false),
+    jlpt: parseOptionalNumber(body.jlpt),
+    translations: Array.isArray(body.translations)
+      ? body.translations.map((row) => ({
+          lang: typeof row === 'object' && row && 'lang' in row ? String((row as Record<string, unknown>).lang) as Language : 'en',
+          definitions: typeof row === 'object' && row && Array.isArray((row as Record<string, unknown>).definitions)
+            ? ((row as Record<string, unknown>).definitions as unknown[]).map((value) => String(value))
+            : [],
+          examples: typeof row === 'object' && row && Array.isArray((row as Record<string, unknown>).examples)
+            ? ((row as Record<string, unknown>).examples as Record<string, unknown>[]).map((item) => ({
+                japanese: String(item.japanese ?? ''),
+                translation: String(item.translation ?? ''),
+              }))
+            : [],
+        }))
+      : [],
+  }, getAdminActor(c))
+
+  if (!result.created && result.conflictWordId) return c.json(result, 409)
+  if (!result.created) return c.json(result, 400)
+  return c.json(result)
+})
+
+admin.post('/admin/api/new-word/build-release', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
+  const createdWordId = typeof body.createdWordId === 'string' ? body.createdWordId.trim() : ''
+  if (!createdWordId) {
+    return c.json({ error: 'createdWordId is required.' }, 400)
+  }
+
+  try {
+    const result = await runAdminBuildReleaseForNewWord({
+      createdWordId,
+      activate: parseBoolean(body.activate, true),
+      actor: getAdminActor(c),
+    })
+    return c.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (message.startsWith('Word not found in snapshot:')) {
+      return c.json({ error: message }, 404)
+    }
+    throw error
+  }
 })
 
 admin.post('/admin/api/releases/:version/activate', (c) => {
