@@ -110,6 +110,24 @@ describe('admin routes', () => {
     expect(await res.text()).toContain('dictionary admin console')
   })
 
+  test('malformed unrelated cookies do not break admin auth checks', async () => {
+    const loginRes = await request('/admin/login', {
+      headers: {
+        cookie: 'theme=100%; bad=%E0%A4%A',
+      },
+    })
+    expect(loginRes.status).toBe(200)
+    expect(await loginRes.text()).toContain('dictionary admin console')
+
+    const protectedRes = await request('/admin/new-word', {
+      headers: {
+        cookie: 'theme=100%; bad=%E0%A4%A',
+      },
+    })
+    expect(protectedRes.status).toBe(302)
+    expect(protectedRes.headers.get('location')).toBe('/admin/login?next=%2Fadmin%2Fnew-word')
+  })
+
   test('protected page routes redirect to login and preserve the destination', async () => {
     const res = await request('/admin/new-word')
     expect(res.status).toBe(302)

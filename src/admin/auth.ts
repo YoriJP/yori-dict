@@ -34,7 +34,14 @@ function parseCookies(header: string): Map<string, string> {
     if (!trimmed) continue
     const separator = trimmed.indexOf('=')
     if (separator < 0) continue
-    cookies.set(trimmed.slice(0, separator), decodeURIComponent(trimmed.slice(separator + 1)))
+    const name = trimmed.slice(0, separator)
+    const rawValue = trimmed.slice(separator + 1)
+    try {
+      cookies.set(name, decodeURIComponent(rawValue))
+    } catch {
+      // Ignore malformed cookie encoding so unrelated client state cannot break auth.
+      cookies.set(name, rawValue)
+    }
   }
   return cookies
 }
