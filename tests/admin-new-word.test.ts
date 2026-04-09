@@ -9,7 +9,13 @@ import { createEmptySnapshot, getReleaseDbPath, getReleaseManifestPath, writeCur
 import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
 import { createEmptyCore, createEmptyLang, saveCore, saveLang } from '../scripts/import/base'
 import { createManualWordInSnapshot } from '../src/manual-word-service'
-import { initUpdatesDatabase, insertTranslationUpdate, insertUpdateBatch } from '../src/update-store'
+import {
+  approveTranslationUpdate,
+  initUpdatesDatabase,
+  insertTranslationUpdate,
+  insertUpdateBatch,
+  rejectTranslationUpdate,
+} from '../src/update-store'
 
 let tempDir = ''
 let originalCwd = ''
@@ -156,7 +162,7 @@ describe('admin new word flow', () => {
     expect(lookupWord('新語', 'en')?.definitions).toEqual(['neologism'])
   })
 
-  test('building a release for a new word preserves the active release state and active updates', async () => {
+  test('building a release for a new word keeps overlay updates mutable instead of baking them into the release', async () => {
     const core = createEmptyCore()
     core.entries['食べる:たべる'] = {
       word: '食べる',
@@ -224,23 +230,25 @@ describe('admin new word flow', () => {
 
     const updatesDb = initUpdatesDatabase(join(tempDir, 'updates.sqlite'))
     const batchId = insertUpdateBatch(updatesDb, {
-      kind: 'source_import',
+      kind: 'ai_import',
       inputManifest: { test: true },
-      notes: 'keep effective updates',
+      notes: 'reviewable update should stay in overlay',
     })
-    insertTranslationUpdate(updatesDb, {
-      wordId: '飲む:のむ',
+    const updateId = insertTranslationUpdate(updatesDb, {
+      wordId: '食べる:たべる',
       lang: 'en',
-      definitions: ['to sip'],
-      sources: ['source'],
-      sourceType: 'source',
+      definitions: ['to consume food'],
+      sources: ['ai'],
+      sourceType: 'ai',
       batchId,
+      reviewStatus: 'pending',
     })
+    approveTranslationUpdate(updatesDb, updateId, 'tester')
     updatesDb.close()
 
     closeDb()
-    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to dine'])
-    expect(lookupWord('飲む', 'en')?.definitions).toEqual(['to sip'])
+    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to consume food'])
+    expect(lookupWord('飲む', 'en')?.definitions).toEqual(['to drink'])
 
     const payload = {
       word: '新語',
@@ -273,9 +281,69 @@ describe('admin new word flow', () => {
     expect(buildRes.status).toBe(200)
 
     closeDb()
-    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to dine'])
-    expect(lookupWord('飲む', 'en')?.definitions).toEqual(['to sip'])
+    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to consume food'])
+    expect(lookupWord('飲む', 'en')?.definitions).toEqual(['to drink'])
     expect(lookupWord('新語', 'en')?.definitions).toEqual(['neologism'])
+
+    const updatesDbAfterBuild = initUpdatesDatabase(join(tempDir, 'updates.sqlite'))
+    rejectTranslationUpdate(updatesDbAfterBuild, updateId, 'tester')
+    updatesDbAfterBuild.close()
+
+    closeDb()
+    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to eat'])
+    expect(lookupWord('新語', 'en')?.definitions).toEqual(['neologism'])
+  })
+
+  test('building a release for one new word still includes other pending snapshot additions', async () => {
+    const firstCreateRes = await request('/admin/api/new-word', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        word: '新語A',
+        reading: 'しんごえー',
+        partOfSpeech: ['noun'],
+        translations: [{
+          lang: 'en',
+          definitions: ['entry a'],
+        }],
+      }),
+    })
+    expect(firstCreateRes.status).toBe(200)
+
+    const secondCreateRes = await request('/admin/api/new-word', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        word: '新語B',
+        reading: 'しんごびー',
+        partOfSpeech: ['noun'],
+        translations: [{
+          lang: 'en',
+          definitions: ['entry b'],
+        }],
+      }),
+    })
+    expect(secondCreateRes.status).toBe(200)
+
+    const buildRes = await request('/admin/api/new-word/build-release', {
+      method: 'POST',
+      headers: {
+        authorization: basicAuth('secret-token'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ activate: true, createdWordId: '新語B:しんごびー' }),
+    })
+    expect(buildRes.status).toBe(200)
+
+    closeDb()
+    expect(lookupWord('新語A', 'en')?.definitions).toEqual(['entry a'])
+    expect(lookupWord('新語B', 'en')?.definitions).toEqual(['entry b'])
   })
 
   test('returns validation errors for invalid reading and empty translations', async () => {
