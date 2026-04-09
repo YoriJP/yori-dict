@@ -1,4 +1,4 @@
-# Stage 1: Build SQLite database from JSON
+# Stage 1: Build immutable release artifacts from JSON
 FROM oven/bun:1 AS builder
 
 WORKDIR /app
@@ -7,22 +7,24 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-# Copy build scripts
-COPY scripts/import/ ./scripts/import/
-COPY scripts/build-db.ts ./scripts/
+# Copy source and build scripts needed by build:db
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY openapi.yaml ./
 
-# Copy per-language dictionary files
-COPY data/*.json ./data/
+# Copy dictionary JSON snapshots
+COPY data/core.json ./data/core.json
+COPY data/lang/ ./data/lang/
 
 # Fail early if JSON files are still Git LFS pointers.
-RUN for f in data/*.json; do \
+RUN for f in data/core.json data/lang/*.json; do \
       if [ -f "$f" ] && head -n 1 "$f" | grep -q "version https://git-lfs.github.com/spec/v1"; then \
         echo "ERROR: $f is a Git LFS pointer. Run 'bun run data:pull' on host before docker build."; \
         exit 1; \
       fi; \
     done
 
-# Build SQLite database from JSON
+# Build and activate the current immutable release
 RUN bun run build:db
 
 # Stage 2: Production image
@@ -40,8 +42,12 @@ COPY src/ ./src/
 # Copy OpenAPI spec (served at /openapi.yaml and used by /docs)
 COPY openapi.yaml ./
 
-# Copy built database from builder stage
-COPY --from=builder /app/dict.sqlite ./
+# Copy JSON snapshots for admin release operations
+COPY --from=builder /app/data/core.json ./data/core.json
+COPY --from=builder /app/data/lang/ ./data/lang/
+
+# Copy the active immutable release artifacts
+COPY --from=builder /app/releases/ ./releases/
 
 # Expose port (Railway will set PORT env var)
 EXPOSE 3000
