@@ -11,7 +11,7 @@ import {
   writeReleaseManifest,
 } from '../src/storage'
 import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
-import { activateRelease } from '../src/release-service'
+import { activateRelease, listReleases } from '../src/release-service'
 
 let tempDir = ''
 let originalCwd = ''
@@ -147,5 +147,54 @@ describe('release activation', () => {
     expect(process.env.RELEASE_VERSION).toBe(v2)
     expect(process.env.RELEASE_MANIFEST_PATH).toBe(v2ManifestPath)
     expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to dine'])
+  })
+
+  test('release listings mark the env-selected runtime release as active', () => {
+    originalCwd = process.cwd()
+    tempDir = mkdtempSync(join(tmpdir(), 'yori-release-list-env-'))
+    process.chdir(tempDir)
+    process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
+
+    const v1 = 'release-v1'
+    const v2 = 'release-v2'
+    const v1DbPath = getReleaseDbPath(v1)
+    const v2DbPath = getReleaseDbPath(v2)
+    const v1ManifestPath = getReleaseManifestPath(v1)
+    const v2ManifestPath = getReleaseManifestPath(v2)
+
+    writeReleaseSnapshotToDb(v1DbPath, makeSnapshot('to eat'))
+    writeReleaseManifest(v1, {
+      version: v1,
+      builtAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      baseSourceFingerprint: 'v1',
+      releaseDbPath: v1DbPath,
+      promotedFromUpdateSequence: null,
+    })
+
+    writeReleaseSnapshotToDb(v2DbPath, makeSnapshot('to dine'))
+    writeReleaseManifest(v2, {
+      version: v2,
+      builtAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      baseSourceFingerprint: 'v2',
+      releaseDbPath: v2DbPath,
+      promotedFromUpdateSequence: null,
+    })
+
+    writeCurrentReleasePointer({
+      version: v1,
+      dbPath: v1DbPath,
+      manifestPath: v1ManifestPath,
+      activatedAt: new Date().toISOString(),
+    })
+
+    process.env.RELEASE_DB_PATH = v2DbPath
+    process.env.RELEASE_VERSION = v2
+    process.env.RELEASE_MANIFEST_PATH = v2ManifestPath
+
+    const releases = listReleases()
+    expect(releases.find((release) => release.version === v1)?.isActive).toBe(false)
+    expect(releases.find((release) => release.version === v2)?.isActive).toBe(true)
   })
 })

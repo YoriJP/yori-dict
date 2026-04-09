@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite'
 import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
-import { dirname, join, resolve } from 'path'
+import { dirname, join, relative, resolve, sep } from 'path'
 
 export const RELEASE_SCHEMA_VERSION = '1.0.0'
 export const RELEASES_DIR = './releases'
@@ -319,8 +319,23 @@ export function initUpdatesDatabase(path = getUpdatesDbPath()): Database {
 
 export function computeFingerprintForFiles(filePaths: string[]): string {
   const hash = createHash('sha256')
-  for (const filePath of [...filePaths].sort()) {
-    hash.update(resolve(filePath))
+  const resolvedFiles = [...filePaths].map((filePath) => resolve(filePath)).sort()
+  const commonBase = resolvedFiles.reduce<string | null>((current, filePath) => {
+    const parts = dirname(filePath).split(sep).filter(Boolean)
+    if (current === null) return parts.join(sep)
+
+    const currentParts = current.split(sep).filter(Boolean)
+    const limit = Math.min(currentParts.length, parts.length)
+    let index = 0
+    while (index < limit && currentParts[index] === parts[index]) index++
+    return currentParts.slice(0, index).join(sep)
+  }, null)
+
+  for (const filePath of resolvedFiles) {
+    const stablePath = relative(commonBase ? resolve(sep, commonBase) : dirname(filePath), filePath)
+      .split(sep)
+      .join('/')
+    hash.update(stablePath)
     hash.update(readFileSync(filePath))
   }
   return hash.digest('hex')

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { mkdirSync, mkdtempSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createEmptyCore, createEmptyDict, createEmptyLang, saveCore, saveDict, saveLang } from '../scripts/import/base'
 import { loadSnapshotFromJson } from '../scripts/release/lib'
 import { buildRelease } from '../src/release-service'
-import { readReleaseManifest } from '../src/storage'
+import { computeFingerprintForFiles, readReleaseManifest } from '../src/storage'
 
 let tempDir = ''
 let originalCwd = ''
@@ -174,5 +174,49 @@ describe('release build workflow', () => {
     const secondManifest = readReleaseManifest(secondBuild.manifestPath)
 
     expect(secondManifest.baseSourceFingerprint).not.toBe(firstManifest.baseSourceFingerprint)
+  })
+
+  test('fingerprint stays stable across different checkout roots', async () => {
+    const firstRoot = join(tempDir, 'checkout-a')
+    const secondRoot = join(tempDir, 'checkout-b')
+    const timestamp = '2026-01-01T00:00:00.000Z'
+
+    mkdirSync(join(firstRoot, 'data', 'lang'), { recursive: true })
+    mkdirSync(join(secondRoot, 'data', 'lang'), { recursive: true })
+
+    const core = createEmptyCore()
+    core.entries['食べる:たべる'] = {
+      word: '食べる',
+      reading: 'たべる',
+      partOfSpeech: ['ichidan verb'],
+      common: true,
+      jlpt: 5,
+      frequency: 10,
+    }
+
+    const en = createEmptyLang('en')
+    en.entries['食べる:たべる'] = {
+      definitions: ['to eat'],
+      examples: [],
+      _defSources: { 'to eat': ['seed'] },
+    }
+    core.updatedAt = timestamp
+    en.updatedAt = timestamp
+
+    writeFileSync(join(firstRoot, 'data', 'core.json'), JSON.stringify(core, null, 2))
+    writeFileSync(join(secondRoot, 'data', 'core.json'), JSON.stringify(core, null, 2))
+    writeFileSync(join(firstRoot, 'data', 'lang', 'en.json'), JSON.stringify(en, null, 2))
+    writeFileSync(join(secondRoot, 'data', 'lang', 'en.json'), JSON.stringify(en, null, 2))
+
+    const firstFingerprint = computeFingerprintForFiles([
+      join(firstRoot, 'data', 'core.json'),
+      join(firstRoot, 'data', 'lang', 'en.json'),
+    ])
+    const secondFingerprint = computeFingerprintForFiles([
+      join(secondRoot, 'data', 'core.json'),
+      join(secondRoot, 'data', 'lang', 'en.json'),
+    ])
+
+    expect(firstFingerprint).toBe(secondFingerprint)
   })
 })

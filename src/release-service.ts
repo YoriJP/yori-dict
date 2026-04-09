@@ -5,10 +5,10 @@ import {
   computeFingerprintForFiles,
   getReleaseDbPath,
   getReleaseManifestPath,
-  readCurrentReleasePointer,
   readReleaseManifest,
   RELEASES_DIR,
   requireActiveReleaseConfig,
+  resolveActiveReleaseConfig,
   writeCurrentReleasePointer,
   writeReleaseManifest,
 } from './storage'
@@ -281,7 +281,7 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
 }
 
 export function listReleases(): ReleaseListItem[] {
-  const active = readCurrentReleasePointer()
+  const active = resolveActiveReleaseConfig()
   if (!existsSync(RELEASES_DIR)) return []
 
   const versions = readdirSync(RELEASES_DIR, { withFileTypes: true })
@@ -304,7 +304,7 @@ export function listReleases(): ReleaseListItem[] {
         schemaVersion: manifest.schemaVersion,
         baseSourceFingerprint: manifest.baseSourceFingerprint,
         promotedFromUpdateSequence: manifest.promotedFromUpdateSequence,
-        isActive: active?.version === version,
+        isActive: active?.dbPath === dbPath || active?.version === version,
       } satisfies ReleaseListItem
     })
     .filter((item): item is ReleaseListItem => item !== null)
