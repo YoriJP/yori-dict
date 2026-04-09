@@ -103,6 +103,27 @@ function maybeRecordAdminAction(
   updatesDb.close()
 }
 
+function applyActivatedReleasePointer(
+  version: string,
+  dbPath: string,
+  manifestPath: string
+): void {
+  writeCurrentReleasePointer({
+    version,
+    dbPath,
+    manifestPath,
+    activatedAt: new Date().toISOString(),
+  })
+
+  // When the process is pinned via env vars, keep the in-process override in sync
+  // so activation takes effect immediately for subsequent lookups.
+  if (process.env.RELEASE_DB_PATH) {
+    process.env.RELEASE_DB_PATH = dbPath
+    process.env.RELEASE_VERSION = version
+    process.env.RELEASE_MANIFEST_PATH = manifestPath
+  }
+}
+
 export async function buildRelease(options: BuildReleaseOptions = {}): Promise<ReleaseActionResult> {
   const snapshot = await loadSnapshotFromJson()
   const fingerprint = computeFingerprintForFiles(collectFingerprintFiles())
@@ -122,12 +143,7 @@ export async function buildRelease(options: BuildReleaseOptions = {}): Promise<R
   })
 
   if (options.activate) {
-    writeCurrentReleasePointer({
-      version,
-      dbPath,
-      manifestPath,
-      activatedAt: new Date().toISOString(),
-    })
+    applyActivatedReleasePointer(version, dbPath, manifestPath)
   }
 
   maybeRecordAdminAction(
@@ -170,12 +186,7 @@ export async function buildReleaseForNewWord(
   })
 
   if (options.activate) {
-    writeCurrentReleasePointer({
-      version,
-      dbPath,
-      manifestPath,
-      activatedAt: new Date().toISOString(),
-    })
+    applyActivatedReleasePointer(version, dbPath, manifestPath)
   }
 
   maybeRecordAdminAction(
@@ -204,12 +215,7 @@ export function activateRelease(version: string, actor?: string | null): Release
   }
 
   const manifest = readReleaseManifest(manifestPath)
-  writeCurrentReleasePointer({
-    version,
-    dbPath,
-    manifestPath,
-    activatedAt: new Date().toISOString(),
-  })
+  applyActivatedReleasePointer(version, dbPath, manifestPath)
 
   if (manifest.promotedFromUpdateSequence !== null) {
     const updatesDb = initUpdatesDatabase()
@@ -254,12 +260,7 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
 
   if (shouldActivate) {
     markAllActiveUpdatesPromoted(updatesDb)
-    writeCurrentReleasePointer({
-      version,
-      dbPath,
-      manifestPath,
-      activatedAt: new Date().toISOString(),
-    })
+    applyActivatedReleasePointer(version, dbPath, manifestPath)
   }
 
   releaseDb.close()

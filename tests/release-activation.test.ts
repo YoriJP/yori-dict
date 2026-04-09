@@ -94,4 +94,58 @@ describe('release activation', () => {
     activateRelease(v2)
     expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to dine'])
   })
+
+  test('env-pinned runtime switches to the newly activated release in-process', () => {
+    originalCwd = process.cwd()
+    tempDir = mkdtempSync(join(tmpdir(), 'yori-release-activation-env-'))
+    process.chdir(tempDir)
+    process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
+
+    const v1 = 'release-v1'
+    const v2 = 'release-v2'
+    const v1DbPath = getReleaseDbPath(v1)
+    const v2DbPath = getReleaseDbPath(v2)
+    const v1ManifestPath = getReleaseManifestPath(v1)
+    const v2ManifestPath = getReleaseManifestPath(v2)
+
+    writeReleaseSnapshotToDb(v1DbPath, makeSnapshot('to eat'))
+    writeReleaseManifest(v1, {
+      version: v1,
+      builtAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      baseSourceFingerprint: 'v1',
+      releaseDbPath: v1DbPath,
+      promotedFromUpdateSequence: null,
+    })
+
+    writeReleaseSnapshotToDb(v2DbPath, makeSnapshot('to dine'))
+    writeReleaseManifest(v2, {
+      version: v2,
+      builtAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      baseSourceFingerprint: 'v2',
+      releaseDbPath: v2DbPath,
+      promotedFromUpdateSequence: null,
+    })
+
+    writeCurrentReleasePointer({
+      version: v1,
+      dbPath: v1DbPath,
+      manifestPath: v1ManifestPath,
+      activatedAt: new Date().toISOString(),
+    })
+
+    process.env.RELEASE_DB_PATH = v1DbPath
+    process.env.RELEASE_VERSION = v1
+    process.env.RELEASE_MANIFEST_PATH = v1ManifestPath
+
+    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to eat'])
+
+    activateRelease(v2)
+
+    expect(process.env.RELEASE_DB_PATH).toBe(v2DbPath)
+    expect(process.env.RELEASE_VERSION).toBe(v2)
+    expect(process.env.RELEASE_MANIFEST_PATH).toBe(v2ManifestPath)
+    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to dine'])
+  })
 })
