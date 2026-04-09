@@ -696,120 +696,154 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         height: 1px;
         background: var(--border-strong);
       }
-      .auth-layout {
+      /* -- Login page -- */
+      .auth-page {
         min-height: 100vh;
         display: grid;
-        grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.05fr);
-        gap: var(--space-6);
-        padding: clamp(24px, 4vw, 48px);
-        align-items: stretch;
-      }
-      .auth-intro {
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        padding: clamp(20px, 4vw, 42px);
-        border-radius: 24px;
-        background: linear-gradient(180deg, color-mix(in oklch, var(--surface-2) 78%, var(--accent-subtle) 22%), var(--surface-2));
-        border: 1px solid color-mix(in oklch, var(--border) 85%, var(--accent) 15%);
-        box-shadow: 0 24px 80px oklch(70% 0.02 var(--hue) / 0.08);
+        grid-template-columns: 1fr min(520px, 100%) 1fr;
+        align-content: center;
+        padding: clamp(32px, 6vh, 80px) clamp(20px, 4vw, 48px);
         position: relative;
         overflow: hidden;
       }
-      .auth-intro::after {
-        content: '';
-        position: absolute;
-        inset: auto -10% -18% 40%;
-        height: 240px;
-        background: radial-gradient(circle, color-mix(in oklch, var(--accent-subtle) 72%, white 28%) 0%, transparent 70%);
+      .auth-page > * {
+        grid-column: 2;
+      }
+      .auth-watermark {
+        position: fixed;
+        right: -4vw;
+        bottom: -6vh;
+        font-family: var(--font-jp);
+        font-size: clamp(18rem, 28vw, 36rem);
+        font-weight: 700;
+        line-height: 1;
+        color: oklch(92% 0.02 var(--hue));
         pointer-events: none;
+        user-select: none;
+        z-index: 0;
       }
-      .auth-brand {
-        display: grid;
-        gap: var(--space-4);
+      .auth-content {
         position: relative;
         z-index: 1;
       }
-      .auth-brand-mark {
-        width: 56px;
-        height: 56px;
-        border-radius: 18px;
-        display: grid;
-        place-items: center;
-        background: linear-gradient(145deg, var(--accent), oklch(56% 0.13 calc(var(--hue) + 8)));
-        color: var(--surface-2);
+      .auth-headword {
         font-family: var(--font-display);
-        font-size: 1.5rem;
+        font-size: clamp(3.5rem, 7vw, 5.5rem);
         font-weight: 700;
-        box-shadow: 0 18px 40px oklch(48% 0.08 var(--hue) / 0.18);
+        line-height: 0.9;
+        letter-spacing: -0.03em;
+        color: var(--text-primary);
       }
-      .auth-title {
-        font-size: clamp(2rem, 4vw, 3.6rem);
-        line-height: 0.95;
-        max-width: 8ch;
-      }
-      .auth-lede {
-        max-width: 30rem;
-        color: var(--text-secondary);
+      .auth-reading {
+        font-family: var(--font-jp);
         font-size: var(--text-lg);
-      }
-      .auth-meta {
-        display: grid;
-        gap: var(--space-3);
-        position: relative;
-        z-index: 1;
-      }
-      .auth-meta-item {
-        display: grid;
-        gap: 2px;
-      }
-      .auth-meta-label {
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
         color: var(--text-tertiary);
-        font-weight: 700;
+        margin-top: var(--space-2);
       }
-      .auth-meta-copy {
-        color: var(--text-secondary);
-        max-width: 26rem;
+      .auth-pos {
+        display: inline-flex;
+        gap: var(--space-2);
+        margin-top: var(--space-4);
       }
-      .auth-card {
-        align-self: center;
-        max-width: 34rem;
-        width: 100%;
-        background: color-mix(in oklch, var(--surface-2) 82%, white 18%);
+      .auth-pos span {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+        padding: 2px var(--space-2);
         border: 1px solid var(--border);
-        border-radius: 24px;
-        padding: clamp(24px, 4vw, 40px);
-        box-shadow: 0 20px 70px oklch(70% 0.02 var(--hue) / 0.08);
+        border-radius: var(--radius-sm);
       }
-      .auth-card h1 {
-        margin-top: var(--space-3);
-        margin-bottom: var(--space-3);
+      .auth-divider {
+        width: 100%;
+        height: 2px;
+        background: var(--border);
+        margin: var(--space-6) 0;
+        border: none;
       }
-      .auth-card p {
+      .auth-def-number {
+        font-family: var(--font-display);
+        font-size: var(--text-sm);
+        font-weight: 700;
+        color: var(--accent);
+        margin-right: var(--space-2);
+      }
+      .auth-definition {
+        font-size: var(--text-lg);
+        line-height: 1.5;
+        color: var(--text-primary);
+        margin-bottom: var(--space-2);
+      }
+      .auth-context {
+        font-size: var(--text-sm);
         color: var(--text-secondary);
-        max-width: 32rem;
+        font-style: italic;
+        margin-bottom: var(--space-6);
       }
       .auth-form {
-        margin-top: var(--space-6);
+        margin-top: var(--space-5);
+        display: grid;
+        gap: var(--space-3);
+      }
+      .auth-form label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
       }
       .auth-form input[type="password"] {
         font-size: var(--text-base);
         padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        font-family: var(--font-mono);
+        letter-spacing: 0.08em;
+        transition: border-color 150ms, box-shadow 150ms;
+      }
+      .auth-form input[type="password"]:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px oklch(52% 0.16 45 / 10%);
       }
       .auth-form button[type="submit"] {
-        margin-top: var(--space-2);
-        min-height: 48px;
+        justify-self: start;
+        min-height: 44px;
+        padding: var(--space-2) var(--space-6);
       }
       .auth-footnote {
-        margin-top: var(--space-5);
+        margin-top: var(--space-6);
         color: var(--text-tertiary);
-        font-size: var(--text-sm);
+        font-size: var(--text-xs);
+        max-width: 36rem;
+        line-height: 1.6;
       }
       .auth-disabled {
-        margin-top: var(--space-6);
+        margin-top: var(--space-5);
+      }
+      .auth-env {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-top: var(--space-5);
+        padding-top: var(--space-5);
+        border-top: 1px solid var(--border);
+      }
+      .auth-env::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+      }
+      .auth-env.available::before {
+        background: var(--positive);
+      }
+      .auth-env.unavailable::before {
+        background: var(--negative);
       }
       .selection-bar {
         display: flex;
@@ -1206,15 +1240,20 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         .list-row {
           grid-template-columns: 1fr;
         }
-        .auth-layout {
+        .auth-page {
           grid-template-columns: 1fr;
-          min-height: auto;
+          padding: var(--space-6) var(--space-4);
         }
-        .auth-intro {
-          min-height: 320px;
+        .auth-page > * {
+          grid-column: 1;
         }
-        .auth-card {
-          max-width: none;
+        .auth-headword {
+          font-size: clamp(2.5rem, 10vw, 4rem);
+        }
+        .auth-watermark {
+          font-size: clamp(10rem, 40vw, 18rem);
+          right: -8vw;
+          bottom: -3vh;
         }
       }
     </style>
@@ -1853,62 +1892,54 @@ export function renderAdminLoginPage(options: {
     ? `<div class="alert error"><h3>Access denied</h3><p>${escapeHtml(options.error)}</p></div>`
     : ''
 
-  const cardBody = disabled
+  const formSection = disabled
     ? `
       <div class="auth-disabled">
         <div class="alert warning">
-          <h3>Admin UI is offline for this deployment</h3>
-          <p>Set <code>ADMIN_TOKEN</code> in the runtime environment, then redeploy to re-enable internal admin access.</p>
+          <h3>Admin UI is offline</h3>
+          <p>Set <code>ADMIN_TOKEN</code> in the runtime environment, then redeploy.</p>
         </div>
       </div>
-      <p class="auth-footnote">The public API and health check can still run without the admin console enabled.</p>
+      <p class="auth-footnote">The public API continues to serve lookups. Only the admin console requires the token.</p>
     `
     : `
       ${errorHtml}
       <form action="/admin/login" method="POST" class="auth-form">
         <input type="hidden" name="next" value="${next}" />
         <label>Access code
-          <input type="password" name="password" autocomplete="current-password" autofocus placeholder="Enter the shared admin secret" />
+          <input type="password" name="password" autocomplete="current-password" autofocus placeholder="Shared admin token" />
         </label>
-        <button type="submit">Enter admin</button>
+        <button type="submit">Sign in</button>
       </form>
-      <p class="auth-footnote">Use the deployment-level admin token for this environment. Browser sessions end when the browser closes.</p>
+      <p class="auth-footnote">Session persists until the browser closes. API callers can authenticate via Bearer token or Basic auth header instead.</p>
     `
 
   return renderPage('Admin Login', `
-    <section class="auth-layout">
-      <aside class="auth-intro">
-        <div class="auth-brand">
-          <div class="auth-brand-mark">Y</div>
-          <span class="eyebrow">Yori Dictionary</span>
-          <h1 class="auth-title">Operational access for the live dictionary.</h1>
-          <p class="auth-lede">A calmer front door for release control, review queues, and dictionary maintenance. Same secret, better flow.</p>
+    <div class="auth-page">
+      <div class="auth-watermark">辞</div>
+      <div class="auth-content">
+        <div class="auth-headword">Yori</div>
+        <div class="auth-reading">よりじてん — dictionary admin console</div>
+        <div class="auth-pos">
+          <span>noun</span>
+          <span>internal tool</span>
         </div>
-        <div class="auth-meta">
-          <div class="auth-meta-item">
-            <span class="auth-meta-label">Audience</span>
-            <span class="auth-meta-copy">Internal operators working on releases, review, and data quality.</span>
-          </div>
-          <div class="auth-meta-item">
-            <span class="auth-meta-label">Session model</span>
-            <span class="auth-meta-copy">Password-only sign-in backed by a short-lived browser session cookie.</span>
-          </div>
-          <div class="auth-meta-item">
-            <span class="auth-meta-label">Environment</span>
-            <span class="auth-meta-copy">${disabled ? 'Admin token missing' : 'Admin token available'}</span>
-          </div>
-        </div>
-      </aside>
 
-      <section class="auth-card">
-        <span class="eyebrow">${disabled ? 'Configuration required' : 'Internal sign-in'}</span>
-        <h1>${disabled ? 'Admin access is currently disabled.' : 'Enter the admin console.'}</h1>
-        <p>${disabled
-          ? 'This deployment is running without an admin secret, so the browser UI stays safely unavailable.'
-          : 'Sign in with the shared admin access code for this environment. API token auth still works for scripts and operational tooling.'}</p>
-        ${cardBody}
-      </section>
-    </section>
+        <hr class="auth-divider" />
+
+        <div class="auth-definition">
+          <span class="auth-def-number">1.</span>
+          An operational interface for managing immutable releases, reviewing AI-generated translations, and maintaining multilingual dictionary data.
+        </div>
+        <div class="auth-context">"Release control, review queues, and data quality — from one place."</div>
+
+        ${formSection}
+
+        <div class="auth-env ${disabled ? 'unavailable' : 'available'}">
+          ${disabled ? 'Admin token not configured' : 'Token available — ready to authenticate'}
+        </div>
+      </div>
+    </div>
   `, {
     includeScripts: false,
     standalone: true,

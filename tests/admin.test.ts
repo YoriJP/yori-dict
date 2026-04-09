@@ -107,7 +107,7 @@ describe('admin routes', () => {
   test('login page renders when admin is enabled', async () => {
     const res = await request('/admin/login')
     expect(res.status).toBe(200)
-    expect(await res.text()).toContain('Enter the admin console.')
+    expect(await res.text()).toContain('dictionary admin console')
   })
 
   test('protected page routes redirect to login and preserve the destination', async () => {
@@ -200,7 +200,7 @@ describe('admin routes', () => {
     delete process.env.ADMIN_TOKEN
     const res = await request('/admin/login')
     expect(res.status).toBe(503)
-    expect(await res.text()).toContain('Admin UI is offline for this deployment')
+    expect(await res.text()).toContain('Admin UI is offline')
     process.env.ADMIN_TOKEN = 'secret-token'
   })
 
