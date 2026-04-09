@@ -6,6 +6,7 @@ import { Database } from 'bun:sqlite'
 import { closeDb, lookupWord } from '../src/db'
 import { createEmptySnapshot, type ReleaseSnapshot, writeReleaseManifest, type ReleaseManifest } from '../src/storage'
 import { writeReleaseSnapshotToDb, loadSnapshotFromReleaseDb, applyActiveUpdatesToSnapshot } from '../scripts/release/lib'
+import { promoteRelease } from '../src/release-service'
 import {
   approveExampleUpdateSet,
   approveTranslationUpdate,
@@ -65,6 +66,54 @@ afterEach(() => {
 })
 
 describe('release overlay flow', () => {
+  test('promote without activation keeps active overlay data live', () => {
+    const dir = makeTempDir()
+    const releaseDbPath = join(dir, 'release.sqlite')
+    const updatesDbPath = join(dir, 'updates.sqlite')
+    const manifestPath = join(dir, 'manifest.json')
+
+    writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+    writeReleaseManifest('test-release', {
+      version: 'test-release',
+      builtAt: new Date().toISOString(),
+      schemaVersion: '1.0.0',
+      baseSourceFingerprint: 'test',
+      releaseDbPath,
+      promotedFromUpdateSequence: null,
+    })
+
+    process.env.RELEASE_DB_PATH = releaseDbPath
+    process.env.RELEASE_VERSION = 'test-release'
+    process.env.RELEASE_MANIFEST_PATH = manifestPath
+    process.env.UPDATES_DATABASE_PATH = updatesDbPath
+
+    let updatesDb = initUpdatesDatabase(updatesDbPath)
+    const batchId = insertUpdateBatch(updatesDb, {
+      kind: 'ai_import',
+      inputManifest: { test: true },
+      notes: 'AI backfill',
+    })
+    const translationUpdateId = insertTranslationUpdate(updatesDb, {
+      wordId: '食べる:たべる',
+      lang: 'en',
+      definitions: ['to consume food'],
+      sources: ['ai'],
+      sourceType: 'ai',
+      batchId,
+      reviewStatus: 'pending',
+    })
+    approveTranslationUpdate(updatesDb, translationUpdateId, 'tester')
+    updatesDb.close()
+
+    closeDb()
+    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to consume food'])
+
+    promoteRelease({ version: 'promoted-release', activate: false })
+
+    closeDb()
+    expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to consume food'])
+  })
+
   test('lookup only uses approved AI updates and still lets source override them', () => {
     const dir = makeTempDir()
     const releaseDbPath = join(dir, 'release.sqlite')

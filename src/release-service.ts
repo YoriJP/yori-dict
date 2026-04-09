@@ -220,6 +220,7 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
   const activeRelease = requireActiveReleaseConfig()
   const releaseDb = new Database(activeRelease.dbPath, { readonly: true })
   const updatesDb = initUpdatesDatabase()
+  const shouldActivate = options.activate !== false
 
   const promotedFromUpdateSequence = getPromotedFromUpdateSequence(updatesDb)
   const snapshot = loadSnapshotFromReleaseDb(releaseDb)
@@ -240,9 +241,8 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
     promotedFromUpdateSequence,
   })
 
-  markAllActiveUpdatesPromoted(updatesDb)
-
-  if (options.activate !== false) {
+  if (shouldActivate) {
+    markAllActiveUpdatesPromoted(updatesDb)
     writeCurrentReleasePointer({
       version,
       dbPath,
@@ -255,7 +255,7 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
   updatesDb.close()
 
   maybeRecordAdminAction(
-    options.activate === false ? 'release.promote' : 'release.promote_and_activate',
+    shouldActivate ? 'release.promote_and_activate' : 'release.promote',
     version,
     options.actor,
   )
@@ -264,7 +264,7 @@ export function promoteRelease(options: PromoteReleaseOptions = {}): ReleaseActi
     version,
     dbPath,
     manifestPath,
-    activated: options.activate !== false,
+    activated: shouldActivate,
   }
 }
 
