@@ -179,8 +179,13 @@ The admin UI is intended for internal operations and lets you:
 
 - inspect release/source/AI/effective views for a single entry
 - review pending AI translations and examples before they affect lookup
+- create new words in snapshot data, then build a release to publish them
 - build, activate, and promote immutable releases
 - trigger deterministic source updates and Gemini imports
+
+Full internal manual:
+
+- [Admin Operations Manual (繁中 / English / 日本語)](docs/admin-operations-manual.md)
 
 ### Inspect one entry from the command line
 
@@ -200,6 +205,13 @@ http://localhost:3000/docs
 ```
 
 The spec is also available as a raw file at `GET /openapi.yaml` and in the repo at [`openapi.yaml`](openapi.yaml).
+
+The OpenAPI spec covers:
+
+- public lookup and health endpoints
+- internal `/admin/api/*` control-plane endpoints used by the admin UI
+
+Admin API operations require `ADMIN_TOKEN` authentication and are intended for internal use.
 
 
 ### `GET /v1/lookup`
