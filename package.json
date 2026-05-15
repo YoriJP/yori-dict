@@ -47,6 +47,7 @@
     "@google/genai": "^1.44.0",
     "@scalar/hono-api-reference": "^0.9.44",
     "hono": "^4.6.0",
+    "jose": "^6.2.3",
     "opencc-js": "^1.0.5",
     "wanakana": "^5.3.1"
   },

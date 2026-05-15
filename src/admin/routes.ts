@@ -1,15 +1,19 @@
 import { Hono } from 'hono'
 import {
-  clearAdminSessionCookie,
+  attemptLogin,
+  clearAuthCookies,
   getAdminActor,
-  isAdminAuthenticated,
+  getAuthenticatedUser,
   isAdminEnabled,
+  logout as logoutAuth,
   normalizeAdminNextPath,
+  readRefreshTokenCookie,
+  refreshSession,
   requireAdminApiAuth,
   requireAdminPageAuth,
-  setAdminSessionCookie,
-  verifyAdminPassword,
+  setAuthCookies,
 } from './auth'
+import { checkLoginRate, clearLoginAttempts, recordLoginFailure } from './rate-limit'
 import {
   applyBulkReviewAction,
   approveExampleSetReview,
@@ -128,12 +132,19 @@ async function readJsonBody<T extends Record<string, unknown>>(request: Request)
   return await request.json() as T
 }
 
-admin.get('/admin/login', (c) => {
+function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  const forwarded = c.req.header('x-forwarded-for')
+  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown'
+  return c.req.header('x-real-ip')?.trim() || 'unknown'
+}
+
+admin.get('/admin/login', async (c) => {
   const next = normalizeAdminNextPath(c.req.query('next'))
   if (!isAdminEnabled()) {
     return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
   }
-  if (isAdminAuthenticated(c)) {
+  const user = await getAuthenticatedUser(c)
+  if (user) {
     return c.redirect(next, 302)
   }
   return c.html(renderAdminLoginPage({ next }))
@@ -141,6 +152,7 @@ admin.get('/admin/login', (c) => {
 
 admin.post('/admin/login', async (c) => {
   const body = await c.req.parseBody()
+  const email = typeof body.email === 'string' ? body.email : ''
   const password = typeof body.password === 'string' ? body.password : ''
   const next = normalizeAdminNextPath(typeof body.next === 'string' ? body.next : null)
 
@@ -148,19 +160,61 @@ admin.post('/admin/login', async (c) => {
     return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
   }
 
-  if (!verifyAdminPassword(password)) {
-    return c.html(renderAdminLoginPage({
-      error: 'The access code did not match this environment.',
-      next,
-    }), 401)
+  const ip = clientIp(c)
+  const rate = checkLoginRate(ip)
+  if (!rate.allowed) {
+    c.header('Retry-After', String(rate.retryAfterSeconds))
+    return c.html(
+      renderAdminLoginPage({
+        error: `Too many failed attempts. Try again in ${rate.retryAfterSeconds} seconds.`,
+        next,
+      }),
+      429
+    )
   }
 
-  setAdminSessionCookie(c)
+  const userAgent = c.req.header('user-agent') ?? null
+  const result = await attemptLogin(email, password, { userAgent, ip })
+
+  if (!result) {
+    recordLoginFailure(ip)
+    return c.html(
+      renderAdminLoginPage({
+        error: 'Invalid email or password.',
+        next,
+      }),
+      401
+    )
+  }
+
+  clearLoginAttempts(ip)
+  setAuthCookies(c, result.accessToken, result.refreshToken)
   return c.redirect(next, 303)
 })
 
+admin.post('/admin/auth/refresh', async (c) => {
+  if (!isAdminEnabled()) {
+    return c.json({ error: 'Admin UI is disabled.' }, 503)
+  }
+  const refreshToken = readRefreshTokenCookie(c)
+  if (!refreshToken) {
+    return c.json({ error: 'No refresh token' }, 401)
+  }
+  const userAgent = c.req.header('user-agent') ?? null
+  const ip = clientIp(c)
+  const result = await refreshSession(refreshToken, { userAgent, ip })
+  if (!result) {
+    clearAuthCookies(c)
+    return c.json({ error: 'Invalid or expired refresh token' }, 401)
+  }
+  setAuthCookies(c, result.accessToken, result.refreshToken)
+  return c.json({ ok: true })
+})
+
 admin.post('/admin/logout', (c) => {
-  clearAdminSessionCookie(c)
+  const refreshToken = readRefreshTokenCookie(c)
+  logoutAuth(refreshToken)
+  clearAuthCookies(c)
   return c.redirect('/admin/login', 303)
 })
 

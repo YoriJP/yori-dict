@@ -16,14 +16,17 @@ import {
   insertUpdateBatch,
   rejectTranslationUpdate,
 } from '../src/update-store'
+import {
+  clearTestAuthEnv,
+  loginAsTestAdmin,
+  seedTestAdmin,
+  setTestAuthEnv,
+} from './helpers/admin-auth'
 
 let tempDir = ''
 let originalCwd = ''
 let app: { fetch: (request: Request) => Promise<Response> }
-
-function basicAuth(token: string): string {
-  return `Basic ${Buffer.from(`admin:${token}`).toString('base64')}`
-}
+let session: { cookie: string }
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init))
@@ -63,17 +66,20 @@ beforeEach(async () => {
   })
 
   process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
-  process.env.ADMIN_TOKEN = 'secret-token'
+  setTestAuthEnv()
 
   const hono = new Hono()
   hono.route('/', adminRoutes)
   app = { fetch: hono.fetch }
+
+  await seedTestAdmin()
+  session = await loginAsTestAdmin(app)
 })
 
 afterEach(() => {
   closeDb()
   delete process.env.UPDATES_DATABASE_PATH
-  delete process.env.ADMIN_TOKEN
+  clearTestAuthEnv()
   process.chdir(originalCwd)
   if (tempDir) rmSync(tempDir, { recursive: true, force: true })
 })
@@ -87,7 +93,7 @@ describe('admin new word flow', () => {
 
   test('new word page only offers entry inspector after the release is built', async () => {
     const res = await request('/admin/new-word', {
-      headers: { authorization: basicAuth('secret-token') },
+      headers: { cookie: session.cookie },
     })
     expect(res.status).toBe(200)
     const html = await res.text()
@@ -115,7 +121,7 @@ describe('admin new word flow', () => {
     const createRes = await request('/admin/api/new-word', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -139,7 +145,7 @@ describe('admin new word flow', () => {
     const duplicateRes = await request('/admin/api/new-word', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -149,7 +155,7 @@ describe('admin new word flow', () => {
     const buildRes = await request('/admin/api/new-word/build-release', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ activate: true, createdWordId: '新語:しんご' }),
@@ -264,7 +270,7 @@ describe('admin new word flow', () => {
     const createRes = await request('/admin/api/new-word', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -274,7 +280,7 @@ describe('admin new word flow', () => {
     const buildRes = await request('/admin/api/new-word/build-release', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ activate: true, createdWordId: '新語:しんご' }),
@@ -299,7 +305,7 @@ describe('admin new word flow', () => {
     const firstCreateRes = await request('/admin/api/new-word', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -317,7 +323,7 @@ describe('admin new word flow', () => {
     const secondCreateRes = await request('/admin/api/new-word', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -335,7 +341,7 @@ describe('admin new word flow', () => {
     const buildRes = await request('/admin/api/new-word/build-release', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ activate: true, createdWordId: '新語B:しんごびー' }),
@@ -351,7 +357,7 @@ describe('admin new word flow', () => {
     const res = await request('/admin/api/new-word', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -370,7 +376,7 @@ describe('admin new word flow', () => {
     const res = await request('/admin/api/new-word/build-release', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ activate: true }),
@@ -386,7 +392,7 @@ describe('admin new word flow', () => {
     const res = await request('/admin/api/new-word/build-release', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ activate: true, createdWordId: '不存在:ふそんざい' }),

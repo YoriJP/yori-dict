@@ -1897,21 +1897,24 @@ export function renderAdminLoginPage(options: {
       <div class="auth-disabled">
         <div class="alert warning">
           <h3>Admin UI is offline</h3>
-          <p>Set <code>ADMIN_TOKEN</code> in the runtime environment, then redeploy.</p>
+          <p>Set <code>JWT_SECRET</code> in the runtime environment and create an admin user via <code>bun run scripts/admin/create-user.ts</code>, then redeploy.</p>
         </div>
       </div>
-      <p class="auth-footnote">The public API continues to serve lookups. Only the admin console requires the token.</p>
+      <p class="auth-footnote">The public API continues to serve lookups. Only the admin console requires authentication.</p>
     `
     : `
       ${errorHtml}
       <form action="/admin/login" method="POST" class="auth-form">
         <input type="hidden" name="next" value="${next}" />
-        <label>Access code
-          <input type="password" name="password" autocomplete="current-password" autofocus placeholder="Shared admin token" />
+        <label>Email
+          <input type="email" name="email" autocomplete="username" autofocus placeholder="admin@example.com" />
+        </label>
+        <label>Password
+          <input type="password" name="password" autocomplete="current-password" placeholder="Your admin password" />
         </label>
         <button type="submit">Sign in</button>
       </form>
-      <p class="auth-footnote">Session persists until the browser closes. API callers can authenticate via Bearer token or Basic auth header instead.</p>
+      <p class="auth-footnote">Sessions last 15 minutes and renew silently while the refresh token is valid (30 days). Sign out to revoke immediately.</p>
     `
 
   return renderPage('Admin Login', `
@@ -1936,7 +1939,7 @@ export function renderAdminLoginPage(options: {
         ${formSection}
 
         <div class="auth-env ${disabled ? 'unavailable' : 'available'}">
-          ${disabled ? 'Admin token not configured' : 'Token available — ready to authenticate'}
+          ${disabled ? 'JWT secret not configured' : 'Ready to authenticate'}
         </div>
       </div>
     </div>
