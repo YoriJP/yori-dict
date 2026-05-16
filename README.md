@@ -169,11 +169,11 @@ Useful flags:
 ### Open the Admin UI
 
 ```bash
-export ADMIN_TOKEN="change-me"
+export JWT_SECRET="your-secret-key"
 bun run dev
 ```
 
-Then open `http://localhost:3000/admin` and sign in with Basic Auth using any username plus the `ADMIN_TOKEN` as the password.
+Then open `http://localhost:3000/admin`. On first visit, you'll be redirected to a one-time setup page to create the first admin account. After that, sign in with your email and password.
 
 The admin UI is intended for internal operations and lets you:
 
@@ -182,6 +182,7 @@ The admin UI is intended for internal operations and lets you:
 - create new words in snapshot data, then build a release from the current snapshot to publish them
 - build, activate, and promote immutable releases with separate snapshot-vs-overlay semantics
 - trigger deterministic source updates and Gemini imports
+- manage your account, change password, and view/revoke active sessions
 
 Important release semantics:
 
@@ -217,7 +218,7 @@ The OpenAPI spec covers:
 - public lookup and health endpoints
 - internal `/admin/api/*` control-plane endpoints used by the admin UI
 
-Admin API operations require `ADMIN_TOKEN` authentication and are intended for internal use.
+Admin API operations require JWT authentication and are intended for internal use.
 
 
 ### `GET /v1/lookup`
@@ -457,7 +458,7 @@ The server runs `initSchema()` on startup so it can open the active release DB a
 ```
 yori-dict/
 ├── src/
-│   ├── admin/            # Internal admin routes, services, and views
+│   ├── admin/            # Internal admin routes, auth, services, and views
 │   ├── index.ts          # Hono API server
 │   ├── db.ts             # Runtime lookup against active release + updates overlay
 │   ├── release-service.ts # Build / activate / promote release orchestration
@@ -507,10 +508,16 @@ yori-dict/
 │   ├── sync-zh-cn-from-tw.ts      # OpenCC merge zh-tw → zh-cn (`bun run sync:zh-cn-from-tw`)
 │   └── add.ts
 ├── tests/
+│   ├── admin.test.ts
+│   ├── admin-account.test.ts
+│   ├── admin-new-word.test.ts
+│   ├── admin-review-queue.test.ts
 │   ├── api.test.ts
 │   ├── audit-kanji-vocab-gaps.test.ts
 │   ├── build-db.test.ts
 │   ├── conjugator.test.ts
+│   ├── helpers/
+│   │   └── admin-auth.ts    # Shared test auth helpers
 │   ├── import-base.test.ts
 │   ├── import-jitendex.test.ts
 │   ├── import-kaikki.test.ts
@@ -581,7 +588,7 @@ yori-dict/
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
-| `ADMIN_TOKEN` | unset | Enables `/admin` routes and acts as the admin password/token |
+| `JWT_SECRET` | unset | Enables `/admin` routes with account-based JWT authentication |
 | `RELEASE_DB_PATH` | unset | Explicit runtime override for the active release DB path |
 | `RELEASE_VERSION` | unset | Optional label for an env-pinned runtime release |
 | `RELEASE_MANIFEST_PATH` | unset | Optional manifest path for an env-pinned runtime release |
