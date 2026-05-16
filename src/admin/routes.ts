@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import {
   attemptLogin,
+  changeAdminPassword,
   clearAuthCookies,
   getAdminActor,
   getAuthenticatedUser,
@@ -11,8 +12,11 @@ import {
   refreshSession,
   requireAdminApiAuth,
   requireAdminPageAuth,
+  revokeSessionForUser,
   setAuthCookies,
 } from './auth'
+import type { AdminUser } from './users'
+import { listActiveSessions } from './refresh-tokens'
 import { checkLoginRate, clearLoginAttempts, recordLoginFailure } from './rate-limit'
 import {
   applyBulkReviewAction,
@@ -38,6 +42,7 @@ import {
   runAdminSourceUpdate,
 } from './service'
 import {
+  renderAdminAccountPage,
   renderAdminLoginPage,
   renderReviewBatchPage,
   renderDashboardPage,
@@ -211,9 +216,14 @@ admin.post('/admin/auth/refresh', async (c) => {
   return c.json({ ok: true })
 })
 
-admin.post('/admin/logout', (c) => {
+admin.post('/admin/logout', async (c) => {
   const refreshToken = readRefreshTokenCookie(c)
-  logoutAuth(refreshToken)
+  const user = await getAuthenticatedUser(c)
+  logoutAuth(refreshToken, {
+    actor: user?.email,
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
   clearAuthCookies(c)
   return c.redirect('/admin/login', 303)
 })
@@ -223,6 +233,72 @@ adminPages.use('/admin/*', requireAdminPageAuth)
 adminApi.use('/admin/api/*', requireAdminApiAuth)
 
 adminPages.get('/admin', (c) => c.html(renderDashboardPage(getAdminSummary())))
+
+function renderAccountPageFor(user: AdminUser, flash: { kind: 'success' | 'error'; message: string } | null = null): string {
+  return renderAdminAccountPage({
+    email: user.email,
+    lastLoginAt: user.lastLoginAt,
+    sessions: listActiveSessions(user.id),
+    flash,
+  })
+}
+
+adminPages.get('/admin/account', (c) => {
+  const user = c.get('adminUser') as AdminUser
+  return c.html(renderAccountPageFor(user))
+})
+
+adminPages.post('/admin/account/change-password', async (c) => {
+  const user = c.get('adminUser') as AdminUser
+  const body = await c.req.parseBody()
+  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : ''
+  const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : ''
+
+  if (newPassword !== confirmPassword) {
+    return c.html(
+      renderAccountPageFor(user, { kind: 'error', message: 'New password and confirmation do not match.' }),
+      400
+    )
+  }
+
+  const result = await changeAdminPassword(user, currentPassword, newPassword, {
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+
+  if (!result.ok) {
+    const message =
+      result.reason === 'wrong_current'
+        ? 'Current password is incorrect.'
+        : 'New password must be at least 12 characters.'
+    return c.html(renderAccountPageFor(user, { kind: 'error', message }), 400)
+  }
+
+  clearAuthCookies(c)
+  const loginUrl = new URL('/admin/login', c.req.url)
+  loginUrl.searchParams.set('next', '/admin/account')
+  return c.redirect(loginUrl.pathname + loginUrl.search, 303)
+})
+
+adminPages.post('/admin/account/sessions/:id/revoke', (c) => {
+  const user = c.get('adminUser') as AdminUser
+  const sessionId = Number(c.req.param('id'))
+  if (!Number.isFinite(sessionId)) {
+    return c.html(renderAccountPageFor(user, { kind: 'error', message: 'Invalid session id.' }), 400)
+  }
+  const ok = revokeSessionForUser(user, sessionId, {
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+  return c.html(
+    renderAccountPageFor(user, {
+      kind: ok ? 'success' : 'error',
+      message: ok ? 'Session revoked.' : 'Session not found or already revoked.',
+    }),
+    ok ? 200 : 404
+  )
+})
 
 adminPages.get('/admin/entry', (c) => {
   const word = c.req.query('word') ?? ''

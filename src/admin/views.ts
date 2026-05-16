@@ -2110,6 +2110,111 @@ export function renderDashboardPage(data: AdminSummaryResponse): string {
   `)
 }
 
+function shortenUserAgent(ua: string | null): string {
+  if (!ua) return 'Unknown device'
+  const trimmed = ua.length > 80 ? `${ua.slice(0, 80)}…` : ua
+  return trimmed
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false }) + ' UTC'
+  } catch {
+    return iso
+  }
+}
+
+export interface AccountPageData {
+  email: string
+  lastLoginAt: string | null
+  sessions: Array<{
+    id: number
+    createdAt: string
+    expiresAt: string
+    userAgent: string | null
+    ip: string | null
+  }>
+  flash?: { kind: 'success' | 'error'; message: string } | null
+}
+
+export function renderAdminAccountPage(data: AccountPageData): string {
+  const flashHtml = data.flash
+    ? `<div class="alert ${data.flash.kind === 'success' ? 'success' : 'error'}">
+         <p>${escapeHtml(data.flash.message)}</p>
+       </div>`
+    : ''
+
+  const sessionRows =
+    data.sessions.length === 0
+      ? '<div class="empty">No active sessions.</div>'
+      : `<table class="data-table">
+          <thead>
+            <tr><th>Device</th><th>IP</th><th>Created</th><th>Expires</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${data.sessions
+              .map(
+                (session) => `
+                <tr>
+                  <td>${escapeHtml(shortenUserAgent(session.userAgent))}</td>
+                  <td>${escapeHtml(session.ip ?? 'unknown')}</td>
+                  <td>${escapeHtml(formatDate(session.createdAt))}</td>
+                  <td>${escapeHtml(formatDate(session.expiresAt))}</td>
+                  <td>
+                    <form action="/admin/account/sessions/${session.id}/revoke" method="POST" class="inline-form">
+                      <button type="submit" class="danger-button">Revoke</button>
+                    </form>
+                  </td>
+                </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>`
+
+  return renderPage(
+    'Account',
+    `
+    <div class="page-header">
+      <h1>Account</h1>
+      <p>Manage your password and active sessions.</p>
+    </div>
+
+    ${flashHtml}
+
+    <div class="section">
+      <h2>Profile</h2>
+      <dl class="definition-list">
+        <dt>Email</dt><dd>${escapeHtml(data.email)}</dd>
+        <dt>Last login</dt><dd>${escapeHtml(data.lastLoginAt ? formatDate(data.lastLoginAt) : 'never')}</dd>
+      </dl>
+    </div>
+
+    <div class="section">
+      <h2>Change password</h2>
+      <form action="/admin/account/change-password" method="POST" class="auth-form">
+        <label>Current password
+          <input type="password" name="currentPassword" autocomplete="current-password" required />
+        </label>
+        <label>New password (min 12 characters)
+          <input type="password" name="newPassword" autocomplete="new-password" minlength="12" required />
+        </label>
+        <label>Confirm new password
+          <input type="password" name="confirmPassword" autocomplete="new-password" minlength="12" required />
+        </label>
+        <button type="submit">Update password</button>
+      </form>
+      <p class="auth-footnote">Updating the password signs you out everywhere; you will need to log in again with the new password.</p>
+    </div>
+
+    <div class="section">
+      <h2>Active sessions</h2>
+      <p>Sessions correspond to refresh tokens. Revoking one signs that device out the next time it tries to refresh.</p>
+      ${sessionRows}
+    </div>
+  `
+  )
+}
+
 export function renderNewWordPage(): string {
   return renderPage('New Word', `
     <div class="page-header">

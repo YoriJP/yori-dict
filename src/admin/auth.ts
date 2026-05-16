@@ -1,6 +1,18 @@
 import type { Context, MiddlewareHandler } from 'hono'
+
+declare module 'hono' {
+  interface ContextVariableMap {
+    adminUser: import('./users').AdminUser
+  }
+}
 import { renderAdminLoginPage } from './views'
-import { findAdminUserById, findAdminUserByEmail, updateLastLogin, verifyPassword } from './users'
+import {
+  findAdminUserById,
+  findAdminUserByEmail,
+  updateAdminPassword,
+  updateLastLogin,
+  verifyPassword,
+} from './users'
 import type { AdminUser } from './users'
 import {
   ACCESS_TOKEN_MAX_AGE,
@@ -13,8 +25,10 @@ import {
   issueRefreshToken,
   revokeAllUserTokens,
   revokeRefreshToken,
+  revokeRefreshTokenById,
   rotateRefreshToken,
 } from './refresh-tokens'
+import { recordAuthEvent } from './audit'
 
 export const ADMIN_ACCESS_COOKIE = 'yori_admin_access'
 export const ADMIN_REFRESH_COOKIE = 'yori_admin_refresh'
@@ -138,16 +152,40 @@ export async function attemptLogin(
 ): Promise<LoginResult | null> {
   const user = findAdminUserByEmail(email)
   if (!user || !user.isActive) {
-    // Run a dummy verify to keep timing consistent (avoid email enumeration)
     await verifyPassword(password, '$2b$12$0000000000000000000000000000000000000000000000000000')
+    recordAuthEvent({
+      kind: 'auth.login_failure',
+      actor: email || 'unknown',
+      targetId: email || 'unknown',
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      extra: { reason: 'unknown_user_or_inactive' },
+    })
     return null
   }
   const ok = await verifyPassword(password, user.passwordHash)
-  if (!ok) return null
+  if (!ok) {
+    recordAuthEvent({
+      kind: 'auth.login_failure',
+      actor: user.email,
+      targetId: String(user.id),
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      extra: { reason: 'wrong_password' },
+    })
+    return null
+  }
 
   updateLastLogin(user.id)
   const accessToken = await signAccessToken(user.id, user.email)
   const refresh = issueRefreshToken(user.id, meta)
+  recordAuthEvent({
+    kind: 'auth.login_success',
+    actor: user.email,
+    targetId: String(user.id),
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  })
   return { user, accessToken, refreshToken: refresh.raw }
 }
 
@@ -155,19 +193,102 @@ export async function refreshSession(
   refreshToken: string,
   meta: { userAgent?: string | null; ip?: string | null } = {}
 ): Promise<RefreshResult | null> {
-  const rotated = rotateRefreshToken(refreshToken, meta)
-  if (!rotated) return null
-  const user = findAdminUserById(rotated.userId)
+  const outcome = rotateRefreshToken(refreshToken, meta)
+  if (outcome.kind === 'invalid') return null
+
+  if (outcome.kind === 'reused') {
+    const user = findAdminUserById(outcome.userId)
+    recordAuthEvent({
+      kind: 'auth.refresh_reuse_detected',
+      actor: user?.email ?? `user:${outcome.userId}`,
+      targetId: String(outcome.userId),
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      extra: { note: 'all sessions revoked' },
+    })
+    return null
+  }
+
+  const user = findAdminUserById(outcome.userId)
   if (!user || !user.isActive) {
-    revokeAllUserTokens(rotated.userId)
+    revokeAllUserTokens(outcome.userId)
     return null
   }
   const accessToken = await signAccessToken(user.id, user.email)
-  return { user, accessToken, refreshToken: rotated.refreshToken.raw }
+  recordAuthEvent({
+    kind: 'auth.refresh',
+    actor: user.email,
+    targetId: String(user.id),
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  })
+  return { user, accessToken, refreshToken: outcome.refreshToken.raw }
 }
 
-export function logout(refreshToken: string | null): void {
+export function logout(
+  refreshToken: string | null,
+  meta: { actor?: string; ip?: string | null; userAgent?: string | null } = {}
+): void {
   if (refreshToken) revokeRefreshToken(refreshToken)
+  if (meta.actor) {
+    recordAuthEvent({
+      kind: 'auth.logout',
+      actor: meta.actor,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
+  }
+}
+
+export async function changeAdminPassword(
+  user: AdminUser,
+  currentPassword: string,
+  newPassword: string,
+  meta: { ip?: string | null; userAgent?: string | null } = {}
+): Promise<{ ok: true } | { ok: false; reason: 'wrong_current' | 'weak_new' }> {
+  const currentOk = await verifyPassword(currentPassword, user.passwordHash)
+  if (!currentOk) {
+    recordAuthEvent({
+      kind: 'auth.login_failure',
+      actor: user.email,
+      targetId: String(user.id),
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      extra: { reason: 'password_change_wrong_current' },
+    })
+    return { ok: false, reason: 'wrong_current' }
+  }
+  if (newPassword.length < 12) {
+    return { ok: false, reason: 'weak_new' }
+  }
+  await updateAdminPassword(user.id, newPassword)
+  revokeAllUserTokens(user.id)
+  recordAuthEvent({
+    kind: 'auth.password_change',
+    actor: user.email,
+    targetId: String(user.id),
+    ip: meta.ip,
+    userAgent: meta.userAgent,
+  })
+  return { ok: true }
+}
+
+export function revokeSessionForUser(
+  user: AdminUser,
+  sessionId: number,
+  meta: { ip?: string | null; userAgent?: string | null } = {}
+): boolean {
+  const ok = revokeRefreshTokenById(user.id, sessionId)
+  if (ok) {
+    recordAuthEvent({
+      kind: 'auth.session_revoke',
+      actor: user.email,
+      targetId: String(sessionId),
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
+  }
+  return ok
 }
 
 export async function getAuthenticatedUser(c: Context): Promise<AdminUser | null> {

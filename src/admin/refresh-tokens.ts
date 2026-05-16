@@ -11,6 +11,14 @@ export interface RefreshTokenLookup {
   expiresAt: string
 }
 
+export interface ActiveSession {
+  id: number
+  createdAt: string
+  expiresAt: string
+  userAgent: string | null
+  ip: string | null
+}
+
 interface RefreshTokenRow {
   id: number
   user_id: number
@@ -18,6 +26,8 @@ interface RefreshTokenRow {
   expires_at: string
   revoked_at: string | null
   created_at: string
+  user_agent: string | null
+  ip: string | null
 }
 
 export function issueRefreshToken(
@@ -54,6 +64,19 @@ export function lookupRefreshToken(raw: string): RefreshTokenLookup | null {
   return { userId: row.user_id, expiresAt: row.expires_at }
 }
 
+function lookupRefreshTokenRow(raw: string): RefreshTokenRow | null {
+  if (!raw) return null
+  const db = getUpdatesDb()
+  const hash = hashRefreshToken(raw)
+  return (
+    db
+      .query<RefreshTokenRow, [string]>(
+        `SELECT * FROM admin_refresh_tokens WHERE token_hash = ? LIMIT 1`
+      )
+      .get(hash) ?? null
+  )
+}
+
 export function revokeRefreshToken(raw: string): void {
   if (!raw) return
   const db = getUpdatesDb()
@@ -65,22 +88,68 @@ export function revokeRefreshToken(raw: string): void {
   )
 }
 
-export function revokeAllUserTokens(userId: number): void {
+export function revokeRefreshTokenById(userId: number, sessionId: number): boolean {
   const db = getUpdatesDb()
   const now = new Date().toISOString()
-  db.run(
+  const result = db.run(
+    `UPDATE admin_refresh_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
+    [now, sessionId, userId]
+  )
+  return result.changes > 0
+}
+
+export function revokeAllUserTokens(userId: number): number {
+  const db = getUpdatesDb()
+  const now = new Date().toISOString()
+  const result = db.run(
     `UPDATE admin_refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`,
     [now, userId]
   )
+  return Number(result.changes ?? 0)
 }
+
+export type RotateOutcome =
+  | { kind: 'ok'; userId: number; refreshToken: RefreshTokenIssuance }
+  | { kind: 'invalid' }
+  | { kind: 'reused'; userId: number }
 
 export function rotateRefreshToken(
   oldRaw: string,
   meta: { userAgent?: string | null; ip?: string | null } = {}
-): { userId: number; refreshToken: RefreshTokenIssuance } | null {
-  const lookup = lookupRefreshToken(oldRaw)
-  if (!lookup) return null
+): RotateOutcome {
+  const row = lookupRefreshTokenRow(oldRaw)
+  if (!row) return { kind: 'invalid' }
+
+  if (row.revoked_at) {
+    // Reuse of a revoked token signals theft: revoke every active session for this user.
+    revokeAllUserTokens(row.user_id)
+    return { kind: 'reused', userId: row.user_id }
+  }
+
+  if (new Date(row.expires_at).getTime() <= Date.now()) {
+    return { kind: 'invalid' }
+  }
+
   revokeRefreshToken(oldRaw)
-  const refreshToken = issueRefreshToken(lookup.userId, meta)
-  return { userId: lookup.userId, refreshToken }
+  const refreshToken = issueRefreshToken(row.user_id, meta)
+  return { kind: 'ok', userId: row.user_id, refreshToken }
+}
+
+export function listActiveSessions(userId: number): ActiveSession[] {
+  const db = getUpdatesDb()
+  const now = new Date().toISOString()
+  return db
+    .query<RefreshTokenRow, [number, string]>(
+      `SELECT * FROM admin_refresh_tokens
+       WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
+       ORDER BY created_at DESC`
+    )
+    .all(userId, now)
+    .map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      userAgent: row.user_agent,
+      ip: row.ip,
+    }))
 }
