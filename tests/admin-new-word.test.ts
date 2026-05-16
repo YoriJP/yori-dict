@@ -24,7 +24,6 @@ import {
 } from './helpers/admin-auth'
 
 let tempDir = ''
-let originalCwd = ''
 let app: { fetch: (request: Request) => Promise<Response> }
 let session: { cookie: string }
 
@@ -33,9 +32,8 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 }
 
 beforeEach(async () => {
-  originalCwd = process.cwd()
   tempDir = mkdtempSync(join(tmpdir(), 'yori-admin-new-word-'))
-  process.chdir(tempDir)
+  process.env.YORI_PROJECT_ROOT = tempDir
 
   mkdirSync(join(tempDir, 'data', 'lang'), { recursive: true })
 
@@ -80,7 +78,6 @@ afterEach(() => {
   closeDb()
   delete process.env.UPDATES_DATABASE_PATH
   clearTestAuthEnv()
-  process.chdir(originalCwd)
   if (tempDir) rmSync(tempDir, { recursive: true, force: true })
 })
 

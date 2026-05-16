@@ -14,7 +14,6 @@ import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
 import { activateRelease, listReleases } from '../src/release-service'
 
 let tempDir = ''
-let originalCwd = ''
 
 function makeSnapshot(definition: string) {
   const snapshot = createEmptySnapshot()
@@ -42,17 +41,15 @@ afterEach(() => {
   delete process.env.RELEASE_VERSION
   delete process.env.RELEASE_MANIFEST_PATH
   delete process.env.UPDATES_DATABASE_PATH
-  if (originalCwd) process.chdir(originalCwd)
+  delete process.env.YORI_PROJECT_ROOT
   if (tempDir) rmSync(tempDir, { recursive: true, force: true })
   tempDir = ''
-  originalCwd = ''
 })
 
 describe('release activation', () => {
   test('lookup switches to the newly activated release without restarting the process', () => {
-    originalCwd = process.cwd()
     tempDir = mkdtempSync(join(tmpdir(), 'yori-release-activation-'))
-    process.chdir(tempDir)
+    process.env.YORI_PROJECT_ROOT = tempDir
     process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
 
     const v1 = 'release-v1'
@@ -96,9 +93,8 @@ describe('release activation', () => {
   })
 
   test('env-pinned runtime switches to the newly activated release in-process', () => {
-    originalCwd = process.cwd()
     tempDir = mkdtempSync(join(tmpdir(), 'yori-release-activation-env-'))
-    process.chdir(tempDir)
+    process.env.YORI_PROJECT_ROOT = tempDir
     process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
 
     const v1 = 'release-v1'
@@ -150,9 +146,8 @@ describe('release activation', () => {
   })
 
   test('release listings mark the env-selected runtime release as active', () => {
-    originalCwd = process.cwd()
     tempDir = mkdtempSync(join(tmpdir(), 'yori-release-list-env-'))
-    process.chdir(tempDir)
+    process.env.YORI_PROJECT_ROOT = tempDir
     process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
 
     const v1 = 'release-v1'

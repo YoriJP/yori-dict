@@ -11,12 +11,10 @@ import {
   ensureParentDir,
   makeTranslationKey,
   removeSqliteWithSidecars,
+  resolveProjectPath,
 } from '../../src/storage'
 import { buildExampleMapFromUpdates, buildTranslationMapFromUpdates } from '../../src/update-store'
 
-const DATA_DIR = './data'
-const LANG_DIR = './data/lang'
-const CORE_PATH = `${DATA_DIR}/core.json`
 const LFS_POINTER_HEADER = 'version https://git-lfs.github.com/spec/v1'
 
 interface SnapshotJsonInputs {
@@ -159,12 +157,15 @@ function collectLegacyDictData(dict: DictFile, snapshot: ReleaseSnapshot): void 
 }
 
 function resolveSnapshotJsonInputs(): SnapshotJsonInputs {
-  const newLangFiles = existsSync(LANG_DIR)
-    ? readdirSync(LANG_DIR).filter((file) => file.endsWith('.json') && !file.includes('/'))
+  const dataDir = resolveProjectPath('data')
+  const langDir = resolveProjectPath('data/lang')
+  const corePath = resolveProjectPath('data/core.json')
+  const newLangFiles = existsSync(langDir)
+    ? readdirSync(langDir).filter((file) => file.endsWith('.json') && !file.includes('/'))
     : []
 
-  const legacyLangFiles = existsSync(DATA_DIR)
-    ? readdirSync(DATA_DIR).filter((file) => {
+  const legacyLangFiles = existsSync(dataDir)
+    ? readdirSync(dataDir).filter((file) => {
       if (!file.endsWith('.json')) return false
       if (file.includes('/')) return false
       if (file === 'core.json') return false
@@ -172,7 +173,7 @@ function resolveSnapshotJsonInputs(): SnapshotJsonInputs {
     })
     : []
 
-  const useNewSchema = existsSync(CORE_PATH) && newLangFiles.length > 0
+  const useNewSchema = existsSync(corePath) && newLangFiles.length > 0
   const useLegacySchema = !useNewSchema && legacyLangFiles.length > 0
 
   if (!useNewSchema && !useLegacySchema) {
@@ -184,13 +185,13 @@ function resolveSnapshotJsonInputs(): SnapshotJsonInputs {
   if (useNewSchema) {
     return {
       mode: 'new',
-      files: [CORE_PATH, ...newLangFiles.map((fileName) => `${LANG_DIR}/${fileName}`)],
+      files: [corePath, ...newLangFiles.map((fileName) => `${langDir}/${fileName}`)],
     }
   }
 
   return {
     mode: 'legacy',
-    files: legacyLangFiles.map((fileName) => `${DATA_DIR}/${fileName}`),
+    files: legacyLangFiles.map((fileName) => `${dataDir}/${fileName}`),
   }
 }
 
