@@ -47,6 +47,7 @@ async function loginWithCredentials(email: string, password: string): Promise<{
 
 beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'yori-admin-account-'))
+  process.env.YORI_PROJECT_ROOT = tempDir
   const releaseDbPath = join(tempDir, 'release.sqlite')
   const updatesDbPath = join(tempDir, 'updates.sqlite')
   const manifestPath = join(tempDir, 'manifest.json')
@@ -77,6 +78,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   closeDb()
+  delete process.env.YORI_PROJECT_ROOT
   delete process.env.RELEASE_DB_PATH
   delete process.env.RELEASE_VERSION
   delete process.env.RELEASE_MANIFEST_PATH

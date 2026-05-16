@@ -86,6 +86,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'yori-admin-review-'))
+  process.env.YORI_PROJECT_ROOT = tempDir
   const releaseDbPath = join(tempDir, 'release.sqlite')
   const updatesDbPath = join(tempDir, 'updates.sqlite')
   const manifestPath = join(tempDir, 'manifest.json')
@@ -187,6 +188,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   closeDb()
+  delete process.env.YORI_PROJECT_ROOT
   delete process.env.RELEASE_DB_PATH
   delete process.env.RELEASE_VERSION
   delete process.env.RELEASE_MANIFEST_PATH
