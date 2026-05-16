@@ -16,6 +16,7 @@ import {
   setAuthCookies,
 } from './auth'
 import type { AdminUser } from './users'
+import { createAdminUser, hasAnyAdminUser } from './users'
 import { listActiveSessions } from './refresh-tokens'
 import { checkLoginRate, clearLoginAttempts, recordLoginFailure } from './rate-limit'
 import {
@@ -44,6 +45,7 @@ import {
 import {
   renderAdminAccountPage,
   renderAdminLoginPage,
+  renderAdminSetupPage,
   renderReviewBatchPage,
   renderDashboardPage,
   renderEntryPage,
@@ -143,10 +145,64 @@ function clientIp(c: { req: { header: (name: string) => string | undefined } }):
   return c.req.header('x-real-ip')?.trim() || 'unknown'
 }
 
+admin.get('/admin/setup', (c) => {
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next: '/admin' }), 503)
+  }
+  if (hasAnyAdminUser()) {
+    return c.redirect('/admin/login', 302)
+  }
+  return c.html(renderAdminSetupPage())
+})
+
+admin.post('/admin/setup', async (c) => {
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next: '/admin' }), 503)
+  }
+  if (hasAnyAdminUser()) {
+    return c.redirect('/admin/login', 302)
+  }
+
+  const body = await c.req.parseBody()
+  const email = typeof body.email === 'string' ? body.email : ''
+  const password = typeof body.password === 'string' ? body.password : ''
+  const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : ''
+
+  if (!email.trim()) {
+    return c.html(renderAdminSetupPage({ error: 'Email is required.' }), 400)
+  }
+  if (password.length < 12) {
+    return c.html(renderAdminSetupPage({ error: 'Password must be at least 12 characters.' }), 400)
+  }
+  if (password !== confirmPassword) {
+    return c.html(renderAdminSetupPage({ error: 'Passwords do not match.' }), 400)
+  }
+
+  try {
+    await createAdminUser(email, password)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create account.'
+    return c.html(renderAdminSetupPage({ error: message }), 400)
+  }
+
+  const ip = clientIp(c)
+  const userAgent = c.req.header('user-agent') ?? null
+  const result = await attemptLogin(email, password, { userAgent, ip })
+  if (result) {
+    setAuthCookies(c, result.accessToken, result.refreshToken)
+    return c.redirect('/admin', 303)
+  }
+
+  return c.redirect('/admin/login', 303)
+})
+
 admin.get('/admin/login', async (c) => {
   const next = normalizeAdminNextPath(c.req.query('next'))
   if (!isAdminEnabled()) {
     return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
+  }
+  if (!hasAnyAdminUser()) {
+    return c.redirect('/admin/setup', 302)
   }
   const user = await getAuthenticatedUser(c)
   if (user) {
