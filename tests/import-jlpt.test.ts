@@ -3,7 +3,7 @@ import { enrichCoreWithJlpt } from '../scripts/import/jlpt'
 
 describe('enrichCoreWithJlpt', () => {
   test('keeps the highest existing JLPT level during merge imports', () => {
-    const coreEntries = {
+    const coreEntries: Record<string, { jlpt: number | null }> = {
       '食べる:たべる': { jlpt: 5 },
       '走る:はしる': { jlpt: null },
     }

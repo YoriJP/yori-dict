@@ -22,7 +22,7 @@ import {
 } from './helpers/admin-auth'
 
 let tempDir = ''
-let app: { fetch: (request: Request) => Promise<Response> }
+let app: { fetch: (request: Request) => Response | Promise<Response> }
 let session: { cookie: string }
 
 function makeSnapshot(): ReleaseSnapshot {

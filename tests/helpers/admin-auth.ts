@@ -24,7 +24,7 @@ export interface LoggedInSession {
 }
 
 export async function loginAsTestAdmin(
-  app: { fetch: (request: Request) => Promise<Response> }
+  app: { fetch: (request: Request) => Response | Promise<Response> }
 ): Promise<LoggedInSession> {
   resetRateLimiterForTesting()
   const res = await app.fetch(

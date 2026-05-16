@@ -20,7 +20,7 @@ import {
 } from './helpers/admin-auth'
 
 let tempDir = ''
-let app: { fetch: (request: Request) => Promise<Response> }
+let app: { fetch: (request: Request) => Response | Promise<Response> }
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init))

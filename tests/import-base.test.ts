@@ -291,7 +291,7 @@ describe('mergeDictEntries — diff mode', () => {
   })
 
   test('does NOT mutate the target', () => {
-    const target = { 'a:b': makeEntry({ word: 'a', reading: 'b' }) }
+    const target: Record<string, ReturnType<typeof makeEntry>> = { 'a:b': makeEntry({ word: 'a', reading: 'b' }) }
     const originalDefs = JSON.stringify(target['a:b'].definitions)
 
     const source = {
