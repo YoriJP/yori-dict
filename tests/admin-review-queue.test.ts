@@ -316,7 +316,7 @@ describe('bulk AI review queue', () => {
     })
     expect(dashboardRes.status).toBe(200)
     const dashboardHtml = await dashboardRes.text()
-    expect(dashboardHtml.includes('Queue Summary')).toBe(true)
+    expect(dashboardHtml.includes('Pending')).toBe(true)
     expect(dashboardHtml.includes('/admin/review/batch/1')).toBe(true)
     expect(dashboardHtml.includes('Override source conflict')).toBe(true)
 
