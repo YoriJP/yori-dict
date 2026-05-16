@@ -37,10 +37,8 @@ function basicAuth(token: string): string {
   return `Basic ${Buffer.from(`admin:${token}`).toString('base64')}`
 }
 
-async function request(path: string, token?: string): Promise<Response> {
-  return app.fetch(new Request(`http://localhost${path}`, {
-    headers: token ? { authorization: basicAuth(token) } : {},
-  }))
+async function request(path: string, init?: RequestInit): Promise<Response> {
+  return app.fetch(new Request(`http://localhost${path}`, init))
 }
 
 beforeAll(async () => {
@@ -106,20 +104,150 @@ describe('admin routes', () => {
     expect(res.status).toBe(401)
   })
 
+  test('login page renders when admin is enabled', async () => {
+    const res = await request('/admin/login')
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('dictionary admin console')
+  })
+
+  test('malformed unrelated cookies do not break admin auth checks', async () => {
+    const loginRes = await request('/admin/login', {
+      headers: {
+        cookie: 'theme=100%; bad=%E0%A4%A',
+      },
+    })
+    expect(loginRes.status).toBe(200)
+    expect(await loginRes.text()).toContain('dictionary admin console')
+
+    const protectedRes = await request('/admin/new-word', {
+      headers: {
+        cookie: 'theme=100%; bad=%E0%A4%A',
+      },
+    })
+    expect(protectedRes.status).toBe(302)
+    expect(protectedRes.headers.get('location')).toBe('/admin/login?next=%2Fadmin%2Fnew-word')
+  })
+
+  test('protected page routes redirect to login and preserve the destination', async () => {
+    const res = await request('/admin/new-word')
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/admin/login?next=%2Fadmin%2Fnew-word')
+  })
+
+  test('successful login sets a session cookie and grants page access', async () => {
+    const loginRes = await request('/admin/login', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        next: '/admin/new-word',
+        password: 'secret-token',
+      }).toString(),
+    })
+
+    expect(loginRes.status).toBe(303)
+    expect(loginRes.headers.get('location')).toBe('/admin/new-word')
+    const sessionCookie = loginRes.headers.get('set-cookie')
+    expect(sessionCookie).toContain('yori_admin_session=')
+    expect(sessionCookie).toContain('HttpOnly')
+
+    const pageRes = await request('/admin/new-word', {
+      headers: {
+        cookie: sessionCookie ?? '',
+      },
+    })
+    expect(pageRes.status).toBe(200)
+    expect(await pageRes.text()).toContain('Create a new deterministic dictionary entry')
+
+    const apiRes = await request('/admin/api/summary', {
+      headers: {
+        cookie: sessionCookie ?? '',
+      },
+    })
+    expect(apiRes.status).toBe(200)
+  })
+
+  test('failed login stays on the login page with an inline error', async () => {
+    const res = await request('/admin/login', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        next: '/admin',
+        password: 'wrong-token',
+      }).toString(),
+    })
+
+    expect(res.status).toBe(401)
+    const html = await res.text()
+    expect(html).toContain('Access denied')
+    expect(html).toContain('did not match this environment')
+  })
+
+  test('logout clears the session cookie and blocks further page access', async () => {
+    const loginRes = await request('/admin/login', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        next: '/admin',
+        password: 'secret-token',
+      }).toString(),
+    })
+    const sessionCookie = loginRes.headers.get('set-cookie') ?? ''
+
+    const logoutRes = await request('/admin/logout', {
+      method: 'POST',
+      headers: {
+        cookie: sessionCookie,
+      },
+    })
+
+    expect(logoutRes.status).toBe(303)
+    expect(logoutRes.headers.get('location')).toBe('/admin/login')
+    expect(logoutRes.headers.get('set-cookie')).toContain('Max-Age=0')
+
+    const pageRes = await request('/admin/new-word')
+    expect(pageRes.status).toBe(302)
+  })
+
+  test('login page shows a friendly disabled state when admin token is missing', async () => {
+    delete process.env.ADMIN_TOKEN
+    const res = await request('/admin/login')
+    expect(res.status).toBe(503)
+    expect(await res.text()).toContain('Admin UI is offline')
+    process.env.ADMIN_TOKEN = 'secret-token'
+  })
+
   test('admin summary works with token', async () => {
-    const res = await request('/admin/api/summary', 'secret-token')
+    const res = await request('/admin/api/summary', {
+      headers: {
+        authorization: basicAuth('secret-token'),
+      },
+    })
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.activeReleaseVersion).toBe('admin-test-release')
   })
 
   test('approve endpoint makes pending AI visible to lookup inspector', async () => {
-    const reviewRes = await request('/admin/api/review/ai', 'secret-token')
+    const reviewRes = await request('/admin/api/review/ai', {
+      headers: {
+        authorization: basicAuth('secret-token'),
+      },
+    })
     const queue = await reviewRes.json()
     expect(queue.translations).toHaveLength(1)
     const updateId = queue.translations[0].id
 
-    const beforeRes = await request('/admin/api/entries?word=食べる&lang=en', 'secret-token')
+    const beforeRes = await request('/admin/api/entries?word=食べる&lang=en', {
+      headers: {
+        authorization: basicAuth('secret-token'),
+      },
+    })
     const before = await beforeRes.json()
     expect(before.effective.definitions).toEqual(['to eat'])
 
@@ -133,7 +261,11 @@ describe('admin routes', () => {
     }))
     expect(approveRes.status).toBe(200)
 
-    const afterRes = await request('/admin/api/entries?word=食べる&lang=en', 'secret-token')
+    const afterRes = await request('/admin/api/entries?word=食べる&lang=en', {
+      headers: {
+        authorization: basicAuth('secret-token'),
+      },
+    })
     const after = await afterRes.json()
     expect(after.effective.definitions).toEqual(['to consume food'])
   })

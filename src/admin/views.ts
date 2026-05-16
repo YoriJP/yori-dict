@@ -2,6 +2,7 @@ import type {
   AdminBatchDetailResponse,
   AdminEntryInspectionResponse,
   AdminNewWordResponse,
+  AdminReviewBatchSummaryResponse,
   AdminReviewBatchPageResponse,
   AdminReleaseListResponse,
   AdminReviewQueueResponseV2,
@@ -95,10 +96,29 @@ const NAV_ITEMS = [
   { href: '/admin/jobs', label: 'Jobs', match: 'Jobs' },
 ]
 
-function renderPage(title: string, body: string): string {
+type RenderPageOptions = {
+  includeScripts?: boolean
+  standalone?: boolean
+  utilityHtml?: string
+}
+
+function renderPage(title: string, body: string, options: RenderPageOptions = {}): string {
+  const includeScripts = options.includeScripts ?? true
+  const standalone = options.standalone ?? false
   const navHtml = NAV_ITEMS.map(item =>
     `<a href="${item.href}" ${title.includes(item.match) ? 'aria-current="page"' : ''}>${item.label}</a>`
   ).join('\n          ')
+  const utilityHtml = options.utilityHtml ?? `
+    <div class="content-header">
+      <div class="content-utility">
+        <span class="content-utility-label">Internal Admin</span>
+        <span class="content-utility-copy">Release operations, review queues, and data maintenance.</span>
+      </div>
+      <form action="/admin/logout" method="POST" class="shell-utility-form">
+        <button type="submit" class="secondary sm">Log out</button>
+      </form>
+    </div>
+  `
 
   return `<!doctype html>
 <html lang="en">
@@ -177,6 +197,12 @@ function renderPage(title: string, body: string): string {
         background: var(--surface-0);
         line-height: 1.55;
         -webkit-font-smoothing: antialiased;
+      }
+      body.standalone-body {
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, oklch(96% 0.03 var(--hue)) 0, transparent 34%),
+          linear-gradient(180deg, oklch(98% 0.01 var(--hue)) 0%, var(--surface-0) 100%);
       }
 
       /* -- Layout shell -- */
@@ -260,6 +286,34 @@ function renderPage(title: string, body: string): string {
       .content {
         padding: var(--space-7) var(--space-7) var(--space-8);
         max-width: 1000px;
+      }
+      .content-header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: var(--space-4);
+        margin-bottom: var(--space-6);
+        padding-bottom: var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .content-utility {
+        display: grid;
+        gap: var(--space-1);
+      }
+      .content-utility-label {
+        font-size: var(--text-xs);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+      .content-utility-copy {
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        max-width: 34rem;
+      }
+      .shell-utility-form {
+        display: block;
       }
 
       /* -- Typography -- */
@@ -625,6 +679,172 @@ function renderPage(title: string, body: string): string {
         flex-wrap: wrap;
         margin-top: var(--space-4);
       }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+      .eyebrow::before {
+        content: '';
+        display: inline-block;
+        width: 20px;
+        height: 1px;
+        background: var(--border-strong);
+      }
+      /* -- Login page -- */
+      .auth-page {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 1fr min(520px, 100%) 1fr;
+        align-content: center;
+        padding: clamp(32px, 6vh, 80px) clamp(20px, 4vw, 48px);
+        position: relative;
+        overflow: hidden;
+      }
+      .auth-page > * {
+        grid-column: 2;
+      }
+      .auth-watermark {
+        position: fixed;
+        right: -4vw;
+        bottom: -6vh;
+        font-family: var(--font-jp);
+        font-size: clamp(18rem, 28vw, 36rem);
+        font-weight: 700;
+        line-height: 1;
+        color: oklch(92% 0.02 var(--hue));
+        pointer-events: none;
+        user-select: none;
+        z-index: 0;
+      }
+      .auth-content {
+        position: relative;
+        z-index: 1;
+      }
+      .auth-headword {
+        font-family: var(--font-display);
+        font-size: clamp(3.5rem, 7vw, 5.5rem);
+        font-weight: 700;
+        line-height: 0.9;
+        letter-spacing: -0.03em;
+        color: var(--text-primary);
+      }
+      .auth-reading {
+        font-family: var(--font-jp);
+        font-size: var(--text-lg);
+        color: var(--text-tertiary);
+        margin-top: var(--space-2);
+      }
+      .auth-pos {
+        display: inline-flex;
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+      }
+      .auth-pos span {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-tertiary);
+        padding: 2px var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+      }
+      .auth-divider {
+        width: 100%;
+        height: 2px;
+        background: var(--border);
+        margin: var(--space-6) 0;
+        border: none;
+      }
+      .auth-def-number {
+        font-family: var(--font-display);
+        font-size: var(--text-sm);
+        font-weight: 700;
+        color: var(--accent);
+        margin-right: var(--space-2);
+      }
+      .auth-definition {
+        font-size: var(--text-lg);
+        line-height: 1.5;
+        color: var(--text-primary);
+        margin-bottom: var(--space-2);
+      }
+      .auth-context {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-style: italic;
+        margin-bottom: var(--space-6);
+      }
+      .auth-form {
+        margin-top: var(--space-5);
+        display: grid;
+        gap: var(--space-3);
+      }
+      .auth-form label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+      }
+      .auth-form input[type="password"] {
+        font-size: var(--text-base);
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        font-family: var(--font-mono);
+        letter-spacing: 0.08em;
+        transition: border-color 150ms, box-shadow 150ms;
+      }
+      .auth-form input[type="password"]:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px oklch(52% 0.16 45 / 10%);
+      }
+      .auth-form button[type="submit"] {
+        justify-self: start;
+        min-height: 44px;
+        padding: var(--space-2) var(--space-6);
+      }
+      .auth-footnote {
+        margin-top: var(--space-6);
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+        max-width: 36rem;
+        line-height: 1.6;
+      }
+      .auth-disabled {
+        margin-top: var(--space-5);
+      }
+      .auth-env {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-top: var(--space-5);
+        padding-top: var(--space-5);
+        border-top: 1px solid var(--border);
+      }
+      .auth-env::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+      }
+      .auth-env.available::before {
+        background: var(--positive);
+      }
+      .auth-env.unavailable::before {
+        background: var(--negative);
+      }
       .selection-bar {
         display: flex;
         gap: var(--space-3);
@@ -989,6 +1209,10 @@ function renderPage(title: string, body: string): string {
         .content {
           padding: var(--space-7) var(--space-4) var(--space-8);
         }
+        .content-header {
+          flex-direction: column;
+          align-items: stretch;
+        }
         .two-col {
           grid-template-columns: 1fr;
         }
@@ -1016,10 +1240,28 @@ function renderPage(title: string, body: string): string {
         .list-row {
           grid-template-columns: 1fr;
         }
+        .auth-page {
+          grid-template-columns: 1fr;
+          padding: var(--space-6) var(--space-4);
+        }
+        .auth-page > * {
+          grid-column: 1;
+        }
+        .auth-headword {
+          font-size: clamp(2.5rem, 10vw, 4rem);
+        }
+        .auth-watermark {
+          font-size: clamp(10rem, 40vw, 18rem);
+          right: -8vw;
+          bottom: -3vh;
+        }
       }
     </style>
   </head>
-  <body>
+  <body class="${standalone ? 'standalone-body' : ''}">
+    ${standalone
+      ? body
+      : `
     <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">Menu</button>
     <div class="shell">
       <aside class="sidebar">
@@ -1032,10 +1274,11 @@ function renderPage(title: string, body: string): string {
         </nav>
       </aside>
       <main class="content">
+        ${utilityHtml}
         ${body}
       </main>
-    </div>
-    <script>
+    </div>`}
+    ${includeScripts ? `<script>
       async function submitJsonForm(event) {
         if (event.defaultPrevented) return;
         event.preventDefault();
@@ -1392,7 +1635,7 @@ function renderPage(title: string, body: string): string {
       for (const button of document.querySelectorAll('[data-review-clear-all]')) {
         button.addEventListener('click', () => toggleAllReviewUnits(false));
       }
-    </script>
+    </script>` : ''}
   </body>
 </html>`
 }
@@ -1636,6 +1879,72 @@ function renderReviewUnit(unit: ReviewUnit): string {
       <a href="/admin/entry?word=${encodeURIComponent(inspectorLabel)}&lang=${encodeURIComponent(unit.lang)}">Open Inspector</a>
     </div>
   </div>`
+}
+
+export function renderAdminLoginPage(options: {
+  disabled?: boolean
+  error?: string | null
+  next?: string | null
+} = {}): string {
+  const disabled = options.disabled ?? false
+  const next = escapeHtml(options.next ?? '/admin')
+  const errorHtml = options.error
+    ? `<div class="alert error"><h3>Access denied</h3><p>${escapeHtml(options.error)}</p></div>`
+    : ''
+
+  const formSection = disabled
+    ? `
+      <div class="auth-disabled">
+        <div class="alert warning">
+          <h3>Admin UI is offline</h3>
+          <p>Set <code>ADMIN_TOKEN</code> in the runtime environment, then redeploy.</p>
+        </div>
+      </div>
+      <p class="auth-footnote">The public API continues to serve lookups. Only the admin console requires the token.</p>
+    `
+    : `
+      ${errorHtml}
+      <form action="/admin/login" method="POST" class="auth-form">
+        <input type="hidden" name="next" value="${next}" />
+        <label>Access code
+          <input type="password" name="password" autocomplete="current-password" autofocus placeholder="Shared admin token" />
+        </label>
+        <button type="submit">Sign in</button>
+      </form>
+      <p class="auth-footnote">Session persists until the browser closes. API callers can authenticate via Bearer token or Basic auth header instead.</p>
+    `
+
+  return renderPage('Admin Login', `
+    <div class="auth-page">
+      <div class="auth-watermark">辞</div>
+      <div class="auth-content">
+        <div class="auth-headword">Yori</div>
+        <div class="auth-reading">よりじてん — dictionary admin console</div>
+        <div class="auth-pos">
+          <span>noun</span>
+          <span>internal tool</span>
+        </div>
+
+        <hr class="auth-divider" />
+
+        <div class="auth-definition">
+          <span class="auth-def-number">1.</span>
+          An operational interface for managing immutable releases, reviewing AI-generated translations, and maintaining multilingual dictionary data.
+        </div>
+        <div class="auth-context">"Release control, review queues, and data quality — from one place."</div>
+
+        ${formSection}
+
+        <div class="auth-env ${disabled ? 'unavailable' : 'available'}">
+          ${disabled ? 'Admin token not configured' : 'Token available — ready to authenticate'}
+        </div>
+      </div>
+    </div>
+  `, {
+    includeScripts: false,
+    standalone: true,
+    utilityHtml: '',
+  })
 }
 
 function renderReviewUnitList(items: ReviewUnit[]): string {

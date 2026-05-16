@@ -79,7 +79,8 @@ afterEach(() => {
 describe('admin new word flow', () => {
   test('new word page requires auth', async () => {
     const res = await request('/admin/new-word')
-    expect(res.status).toBe(401)
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/admin/login?next=%2Fadmin%2Fnew-word')
   })
 
   test('new word page only offers entry inspector after the release is built', async () => {

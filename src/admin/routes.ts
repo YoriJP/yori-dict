@@ -1,5 +1,15 @@
 import { Hono } from 'hono'
-import { requireAdminAuth, getAdminActor } from './auth'
+import {
+  clearAdminSessionCookie,
+  getAdminActor,
+  isAdminAuthenticated,
+  isAdminEnabled,
+  normalizeAdminNextPath,
+  requireAdminApiAuth,
+  requireAdminPageAuth,
+  setAdminSessionCookie,
+  verifyAdminPassword,
+} from './auth'
 import {
   applyBulkReviewAction,
   approveExampleSetReview,
@@ -24,6 +34,7 @@ import {
   runAdminSourceUpdate,
 } from './service'
 import {
+  renderAdminLoginPage,
   renderReviewBatchPage,
   renderDashboardPage,
   renderEntryPage,
@@ -39,6 +50,8 @@ import type { GeminiRunOptions } from '../../scripts/import/gemini'
 import type { ReviewRiskLevel, ReviewUnitShape } from './types'
 
 const admin = new Hono()
+const adminPages = new Hono()
+const adminApi = new Hono()
 
 function parseLanguage(raw: string | undefined, fallback: Language = 'en'): Language {
   if (!raw) return fallback
@@ -115,18 +128,55 @@ async function readJsonBody<T extends Record<string, unknown>>(request: Request)
   return await request.json() as T
 }
 
-admin.use('/admin', requireAdminAuth)
-admin.use('/admin/*', requireAdminAuth)
+admin.get('/admin/login', (c) => {
+  const next = normalizeAdminNextPath(c.req.query('next'))
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
+  }
+  if (isAdminAuthenticated(c)) {
+    return c.redirect(next, 302)
+  }
+  return c.html(renderAdminLoginPage({ next }))
+})
 
-admin.get('/admin', (c) => c.html(renderDashboardPage(getAdminSummary())))
+admin.post('/admin/login', async (c) => {
+  const body = await c.req.parseBody()
+  const password = typeof body.password === 'string' ? body.password : ''
+  const next = normalizeAdminNextPath(typeof body.next === 'string' ? body.next : null)
 
-admin.get('/admin/entry', (c) => {
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
+  }
+
+  if (!verifyAdminPassword(password)) {
+    return c.html(renderAdminLoginPage({
+      error: 'The access code did not match this environment.',
+      next,
+    }), 401)
+  }
+
+  setAdminSessionCookie(c)
+  return c.redirect(next, 303)
+})
+
+admin.post('/admin/logout', (c) => {
+  clearAdminSessionCookie(c)
+  return c.redirect('/admin/login', 303)
+})
+
+adminPages.use('/admin', requireAdminPageAuth)
+adminPages.use('/admin/*', requireAdminPageAuth)
+adminApi.use('/admin/api/*', requireAdminApiAuth)
+
+adminPages.get('/admin', (c) => c.html(renderDashboardPage(getAdminSummary())))
+
+adminPages.get('/admin/entry', (c) => {
   const word = c.req.query('word') ?? ''
   const lang = parseLanguage(c.req.query('lang'))
   return c.html(renderEntryPage(inspectEntry(word, lang)))
 })
 
-admin.get('/admin/review', (c) => {
+adminPages.get('/admin/review', (c) => {
   return c.html(renderReviewPage(getReviewQueue({
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
     risk: parseReviewRisk(c.req.query('risk')),
@@ -137,7 +187,7 @@ admin.get('/admin/review', (c) => {
   })))
 })
 
-admin.get('/admin/review/batch/:id', (c) => {
+adminPages.get('/admin/review/batch/:id', (c) => {
   return c.html(renderReviewBatchPage(getReviewBatchPage(Number(c.req.param('id')), {
     risk: parseReviewRisk(c.req.query('risk')),
     shape: parseReviewShape(c.req.query('shape')),
@@ -147,11 +197,11 @@ admin.get('/admin/review/batch/:id', (c) => {
   })))
 })
 
-admin.get('/admin/new-word', (c) => c.html(renderNewWordPage()))
+adminPages.get('/admin/new-word', (c) => c.html(renderNewWordPage()))
 
-admin.get('/admin/releases', (c) => c.html(renderReleasesPage(getAdminReleaseList())))
+adminPages.get('/admin/releases', (c) => c.html(renderReleasesPage(getAdminReleaseList())))
 
-admin.get('/admin/jobs', (c) => {
+adminPages.get('/admin/jobs', (c) => {
   const updatesDb = initUpdatesDatabase()
   const batchId = parseOptionalNumber(c.req.query('batchId'))
   const batches = listUpdateBatches(updatesDb, 20)
@@ -159,7 +209,7 @@ admin.get('/admin/jobs', (c) => {
   return c.html(renderJobsPage(batches, batchId ? getBatchDetail(batchId) : null))
 })
 
-admin.get('/admin/updates', (c) => {
+adminPages.get('/admin/updates', (c) => {
   const response = getUpdatesExplorer({
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
     sourceType: (c.req.query('sourceType') as 'source' | 'ai' | undefined) ?? null,
@@ -169,16 +219,16 @@ admin.get('/admin/updates', (c) => {
   return c.html(renderUpdatesPage(response))
 })
 
-admin.get('/admin/api/summary', (c) => c.json(getAdminSummary()))
-admin.get('/admin/api/releases', (c) => c.json(getAdminReleaseList()))
-admin.get('/admin/api/releases/:version', (c) => {
+adminApi.get('/admin/api/summary', (c) => c.json(getAdminSummary()))
+adminApi.get('/admin/api/releases', (c) => c.json(getAdminReleaseList()))
+adminApi.get('/admin/api/releases/:version', (c) => {
   const version = c.req.param('version')
   const release = getAdminReleaseList().releases.find((item) => item.version === version) ?? null
   if (!release) return c.json({ error: 'Release not found' }, 404)
   return c.json(release)
 })
 
-admin.post('/admin/api/releases/build', async (c) => {
+adminApi.post('/admin/api/releases/build', async (c) => {
   const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
   try {
     const result = await runAdminBuildRelease({
@@ -194,7 +244,7 @@ admin.post('/admin/api/releases/build', async (c) => {
   }
 })
 
-admin.post('/admin/api/new-word', async (c) => {
+adminApi.post('/admin/api/new-word', async (c) => {
   const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
   const result = await createAdminNewWord({
     word: typeof body.word === 'string' ? body.word : '',
@@ -227,7 +277,7 @@ admin.post('/admin/api/new-word', async (c) => {
   return c.json(result)
 })
 
-admin.post('/admin/api/new-word/build-release', async (c) => {
+adminApi.post('/admin/api/new-word/build-release', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const createdWordId = typeof body.createdWordId === 'string' ? body.createdWordId.trim() : ''
   if (!createdWordId) {
@@ -248,11 +298,11 @@ admin.post('/admin/api/new-word/build-release', async (c) => {
   }
 })
 
-admin.post('/admin/api/releases/:version/activate', (c) => {
+adminApi.post('/admin/api/releases/:version/activate', (c) => {
   return c.json(runAdminActivateRelease(c.req.param('version'), getAdminActor(c)))
 })
 
-admin.post('/admin/api/releases/promote', (c) => {
+adminApi.post('/admin/api/releases/promote', (c) => {
   return c.req.raw.json()
     .catch(() => ({}))
     .then((body: Record<string, unknown>) => {
@@ -271,13 +321,13 @@ admin.post('/admin/api/releases/promote', (c) => {
     })
 })
 
-admin.get('/admin/api/entries', (c) => {
+adminApi.get('/admin/api/entries', (c) => {
   const word = c.req.query('word')
   if (!word) return c.json({ error: 'Missing query parameter: word' }, 400)
   return c.json(inspectEntry(word, parseLanguage(c.req.query('lang'))))
 })
 
-admin.get('/admin/api/updates', (c) => {
+adminApi.get('/admin/api/updates', (c) => {
   return c.json(getUpdatesExplorer({
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
     sourceType: (c.req.query('sourceType') as 'source' | 'ai' | undefined) ?? null,
@@ -286,12 +336,12 @@ admin.get('/admin/api/updates', (c) => {
   }))
 })
 
-admin.get('/admin/api/review/ai', (c) => {
+adminApi.get('/admin/api/review/ai', (c) => {
   const lang = normalizeLanguage(c.req.query('lang') ?? '')
   return c.json(getAiReviewQueue(lang))
 })
 
-admin.get('/admin/api/review/queue', (c) => {
+adminApi.get('/admin/api/review/queue', (c) => {
   return c.json(getReviewQueue({
     batchId: parseOptionalNumber(c.req.query('batchId')),
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
@@ -303,39 +353,39 @@ admin.get('/admin/api/review/queue', (c) => {
   }))
 })
 
-admin.get('/admin/api/review/batches/:id/summary', (c) => {
+adminApi.get('/admin/api/review/batches/:id/summary', (c) => {
   return c.json(getReviewBatchSummary(Number(c.req.param('id'))))
 })
 
-admin.post('/admin/api/review/translation/:id/approve', async (c) => {
+adminApi.post('/admin/api/review/translation/:id/approve', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = approveTranslationReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Translation update not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/translation/:id/reject', async (c) => {
+adminApi.post('/admin/api/review/translation/:id/reject', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = rejectTranslationReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Translation update not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/example-set/:id/approve', async (c) => {
+adminApi.post('/admin/api/review/example-set/:id/approve', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = approveExampleSetReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Example update set not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/example-set/:id/reject', async (c) => {
+adminApi.post('/admin/api/review/example-set/:id/reject', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = rejectExampleSetReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Example update set not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/units/approve', async (c) => {
+adminApi.post('/admin/api/review/units/approve', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = applyBulkReviewAction('approved', {
     unitIds: parseUnitIds(body.unitIds),
@@ -347,7 +397,7 @@ admin.post('/admin/api/review/units/approve', async (c) => {
   return c.json(result)
 })
 
-admin.post('/admin/api/review/units/reject', async (c) => {
+adminApi.post('/admin/api/review/units/reject', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = applyBulkReviewAction('rejected', {
     unitIds: parseUnitIds(body.unitIds),
@@ -359,7 +409,7 @@ admin.post('/admin/api/review/units/reject', async (c) => {
   return c.json(result)
 })
 
-admin.post('/admin/api/jobs/source-update', async (c) => {
+adminApi.post('/admin/api/jobs/source-update', async (c) => {
   const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
   const result = await runAdminSourceUpdate({
     langs: parseLangList(body.langs),
@@ -369,7 +419,7 @@ admin.post('/admin/api/jobs/source-update', async (c) => {
   return c.json(result)
 })
 
-admin.post('/admin/api/jobs/gemini-import', async (c) => {
+adminApi.post('/admin/api/jobs/gemini-import', async (c) => {
   const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
   const result = await runAdminGeminiImport({
     actor: getAdminActor(c),
@@ -386,8 +436,11 @@ admin.post('/admin/api/jobs/gemini-import', async (c) => {
   return c.json(result)
 })
 
-admin.get('/admin/api/batches/:id', (c) => {
+adminApi.get('/admin/api/batches/:id', (c) => {
   return c.json(getBatchDetail(Number(c.req.param('id'))))
 })
+
+admin.route('/', adminApi)
+admin.route('/', adminPages)
 
 export default admin
