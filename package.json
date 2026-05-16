@@ -13,6 +13,7 @@
     "release:build": "bun run scripts/release/build.ts",
     "release:activate": "bun run scripts/release/activate.ts",
     "release:promote": "bun run scripts/release/promote.ts",
+    "release:cleanup": "bun run scripts/release/cleanup.ts",
     "import:jmdict": "bun run scripts/import/jmdict.ts",
     "import:jmdict-examples": "bun run scripts/import/jmdict-examples.ts",
     "import:jitendex": "bun run scripts/import/jitendex.ts",
