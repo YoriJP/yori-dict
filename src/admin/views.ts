@@ -376,6 +376,11 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         color: var(--text-tertiary);
         font-weight: 600;
       }
+      .metric-subtitle {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-weight: 400;
+      }
 
       /* -- Sections -- */
       .section {
@@ -1329,8 +1334,8 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
           else if (typeof payload[key] === 'string' && /^\\d+$/.test(payload[key])) payload[key] = Number(payload[key]);
         }
         try {
-          const action = submitter && submitter.formAction ? submitter.formAction : form.action;
-          const method = submitter && submitter.formMethod ? submitter.formMethod : (form.method || 'POST');
+          const action = submitter && submitter.hasAttribute('formaction') ? submitter.formAction : form.action;
+          const method = submitter && submitter.hasAttribute('formmethod') ? submitter.formMethod : (form.method || 'POST');
           const res = await fetch(action, {
             method,
             headers: { 'content-type': 'application/json' },
@@ -2099,69 +2104,176 @@ function buildReviewPageLink(basePath: string, params: Record<string, string | n
   return serialized ? `${basePath}?${serialized}` : basePath
 }
 
-export function renderDashboardPage(data: AdminSummaryResponse): string {
+function renderDashboardMetrics(data: AdminSummaryResponse): string {
   const pendingCount = (data.reviewCounts['translation:pending'] ?? 0) + (data.reviewCounts['example:pending'] ?? 0)
+  return `
+    <div class="metric-strip">
+      <div class="metric-item">
+        <span class="metric-label">Release</span>
+        <span class="metric-value">${escapeHtml(data.activeReleaseVersion)}</span>
+        <span class="metric-subtitle">${escapeHtml(data.releaseWordCount.toLocaleString())} words</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Awaiting review</span>
+        <span class="metric-value">${escapeHtml(pendingCount)}</span>
+        <span class="metric-subtitle">translations + examples</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Unmatched updates</span>
+        <span class="metric-value">${escapeHtml(data.orphanedWordIdsCount)}</span>
+        <span class="metric-subtitle">not in current release</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">AI approved</span>
+        <span class="metric-value">${escapeHtml(data.activeReviewedAiCount)}</span>
+        <span class="metric-subtitle">reviewed and live</span>
+      </div>
+    </div>`
+}
+
+function renderDashboardActions(data: AdminSummaryResponse): string {
+  const pendingCount = (data.reviewCounts['translation:pending'] ?? 0) + (data.reviewCounts['example:pending'] ?? 0)
+  const emptyRelease = data.releaseWordCount === 0
+  const hasOrphaned = data.orphanedWordIdsCount > 0
+
+  const links: Array<{ href: string; label: string; desc: string }> = []
+
+  const reviewDesc = pendingCount > 0
+    ? `${pendingCount} to review`
+    : 'All clear'
+  const releasesDesc = hasOrphaned
+    ? `Build and promote — ${data.orphanedWordIdsCount} unmatched`
+    : 'Build and promote'
+
+  if (emptyRelease) {
+    links.push(
+      { href: '/admin/jobs', label: 'Jobs', desc: 'Run a source update to import data' },
+      { href: '/admin/releases', label: 'Releases', desc: 'Build your first release' },
+      { href: '/admin/review', label: 'AI Review Queue', desc: reviewDesc },
+      { href: '/admin/entry', label: 'Entry Inspector', desc: 'Look up any word' },
+      { href: '/admin/new-word', label: 'New Word', desc: 'Add to snapshot' },
+    )
+  } else if (pendingCount > 0) {
+    links.push(
+      { href: '/admin/review', label: 'AI Review Queue', desc: reviewDesc },
+      { href: '/admin/entry', label: 'Entry Inspector', desc: 'Look up any word' },
+      { href: '/admin/new-word', label: 'New Word', desc: 'Add to snapshot' },
+      { href: '/admin/releases', label: 'Releases', desc: releasesDesc },
+      { href: '/admin/jobs', label: 'Jobs', desc: 'Source updates, Gemini' },
+    )
+  } else {
+    links.push(
+      { href: '/admin/entry', label: 'Entry Inspector', desc: 'Look up any word' },
+      { href: '/admin/review', label: 'AI Review Queue', desc: reviewDesc },
+      { href: '/admin/new-word', label: 'New Word', desc: 'Add to snapshot' },
+      { href: '/admin/releases', label: 'Releases', desc: releasesDesc },
+      { href: '/admin/jobs', label: 'Jobs', desc: 'Source updates, Gemini' },
+    )
+  }
+
+  const guidance = emptyRelease
+    ? '<p class="text-muted text-sm">The active release has no words. Start by running a source update from Jobs, then build a release.</p>'
+    : ''
+
+  return `
+    <div class="section">
+      <h2>Quick Actions</h2>
+      ${guidance}
+      <div class="quick-links">
+        ${links.map((l) => `<a href="${l.href}"><span>${escapeHtml(l.label)}</span><span class="link-desc">${escapeHtml(l.desc)}</span></a>`).join('')}
+      </div>
+    </div>`
+}
+
+function renderDashboardStatus(data: AdminSummaryResponse): string {
+  type StatRow = [string, number]
+  const filterNonZero = (rows: StatRow[]): StatRow[] => rows.filter(([, count]) => count > 0)
+
+  const attentionRows = filterNonZero([
+    ['Pending translations', data.translationCounts['pending'] ?? 0],
+    ['Pending examples', data.exampleSetCounts['pending'] ?? 0],
+    ['Translation reviews pending', data.reviewCounts['translation:pending'] ?? 0],
+    ['Example reviews pending', data.reviewCounts['example:pending'] ?? 0],
+    ['Rejected translation reviews', data.reviewCounts['translation:rejected'] ?? 0],
+    ['Rejected example reviews', data.reviewCounts['example:rejected'] ?? 0],
+    ['Unmatched updates', data.orphanedWordIdsCount],
+  ])
+
+  const completedRows = filterNonZero([
+    ['Active translations', data.translationCounts['active'] ?? 0],
+    ['Active examples', data.exampleSetCounts['active'] ?? 0],
+    ['Superseded translations', data.translationCounts['superseded'] ?? 0],
+    ['Superseded examples', data.exampleSetCounts['superseded'] ?? 0],
+    ['Approved reviews', (data.reviewCounts['translation:approved'] ?? 0) + (data.reviewCounts['example:approved'] ?? 0)],
+    ['Approved (not required)', (data.reviewCounts['translation:not_required'] ?? 0) + (data.reviewCounts['example:not_required'] ?? 0)],
+    ['AI content live', data.activeReviewedAiCount],
+  ])
+
+  const knownTranslationKeys = new Set(['active', 'pending', 'superseded'])
+  const knownExampleKeys = new Set(['active', 'pending', 'superseded'])
+  const knownReviewKeys = new Set(['translation:pending', 'translation:approved', 'translation:rejected', 'translation:not_required', 'example:pending', 'example:approved', 'example:rejected', 'example:not_required'])
+
+  const otherRows: StatRow[] = []
+  for (const [key, val] of Object.entries(data.translationCounts)) {
+    if (!knownTranslationKeys.has(key)) otherRows.push([`Translations: ${key}`, val])
+  }
+  for (const [key, val] of Object.entries(data.exampleSetCounts)) {
+    if (!knownExampleKeys.has(key)) otherRows.push([`Examples: ${key}`, val])
+  }
+  for (const [key, val] of Object.entries(data.reviewCounts)) {
+    if (!knownReviewKeys.has(key)) otherRows.push([`Reviews: ${key}`, val])
+  }
+
+  function renderStatRows(rows: StatRow[]): string {
+    if (rows.length === 0) return ''
+    return `<dl class="stat-list">${rows.map(([label, val]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(val)}</dd>`).join('')}</dl>`
+  }
+
+  const attentionHtml = attentionRows.length > 0
+    ? `<h3>Needs attention</h3>${renderStatRows(attentionRows)}`
+    : '<p class="text-muted text-sm">Nothing needs attention right now.</p>'
+
+  const completedHtml = completedRows.length > 0
+    ? `<h3 style="margin-top: var(--space-5)">Completed</h3>${renderStatRows(completedRows)}`
+    : ''
+
+  const otherHtml = otherRows.length > 0
+    ? `<h3 style="margin-top: var(--space-5)">Other</h3>${renderStatRows(otherRows)}`
+    : ''
+
+  return `
+    <div class="section">
+      <h2>Status</h2>
+      ${attentionHtml}
+      ${completedHtml}
+      ${otherHtml}
+    </div>`
+}
+
+function isFreshInstall(data: AdminSummaryResponse): boolean {
+  return data.releaseWordCount === 0
+    && Object.keys(data.translationCounts).length === 0
+    && Object.keys(data.exampleSetCounts).length === 0
+    && Object.keys(data.reviewCounts).length === 0
+}
+
+export function renderDashboardPage(data: AdminSummaryResponse): string {
+  const gettingStarted = isFreshInstall(data)
+    ? '<p class="text-muted text-sm" style="margin-bottom: var(--space-5)">Getting started: run a source update to import dictionary data, build a release, then run a Gemini import to generate AI translations. Review AI content from the review queue before it goes live.</p>'
+    : ''
+
   return renderPage('Dashboard', `
     <div class="page-header">
       <h1>Dashboard</h1>
     </div>
 
-    <div class="metric-strip">
-      <div class="metric-item">
-        <span class="metric-label">Active Release</span>
-        <span class="metric-value">${escapeHtml(data.activeReleaseVersion)}</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-label">Pending Review</span>
-        <span class="metric-value">${escapeHtml(pendingCount)}</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-label">Orphaned</span>
-        <span class="metric-value">${escapeHtml(data.orphanedWordIdsCount)}</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-label">Reviewed AI</span>
-        <span class="metric-value">${escapeHtml(data.activeReviewedAiCount)}</span>
-      </div>
-    </div>
-
-    <div class="section">
-      <h2>Quick Actions</h2>
-      <div class="quick-links">
-        <a href="/admin/review">
-          <span>AI Review Queue</span>
-          <span class="link-desc">${pendingCount} pending</span>
-        </a>
-        <a href="/admin/entry">
-          <span>Entry Inspector</span>
-          <span class="link-desc">Look up any word</span>
-        </a>
-        <a href="/admin/new-word">
-          <span>New Word</span>
-          <span class="link-desc">Add to snapshot</span>
-        </a>
-        <a href="/admin/releases">
-          <span>Releases</span>
-          <span class="link-desc">Build and promote</span>
-        </a>
-        <a href="/admin/jobs">
-          <span>Jobs</span>
-          <span class="link-desc">Source updates, Gemini</span>
-        </a>
-      </div>
-    </div>
+    ${renderDashboardMetrics(data)}
+    ${gettingStarted}
+    ${renderDashboardActions(data)}
 
     <div class="two-col">
       <div class="stack">
-        <div class="section">
-          <h2>Status</h2>
-          <h3>Translations</h3>
-          ${renderDefinitionList(data.translationCounts)}
-          <h3 style="margin-top: var(--space-5)">Example Sets</h3>
-          ${renderDefinitionList(data.exampleSetCounts)}
-          <h3 style="margin-top: var(--space-5)">Reviews</h3>
-          ${renderDefinitionList(data.reviewCounts)}
-        </div>
+        ${renderDashboardStatus(data)}
       </div>
       <div class="stack">
         <div class="section">

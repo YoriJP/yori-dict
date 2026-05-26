@@ -486,10 +486,12 @@ export function getAdminSummary(): AdminSummaryResponse {
   const { db: releaseDb, version, mode } = openReleaseDb()
   const updatesDb = initUpdatesDatabase()
 
-  const verification = verifyUpdatesAgainstWordIds(updatesDb, getValidWordIds(releaseDb))
+  const validWordIds = getValidWordIds(releaseDb)
+  const verification = verifyUpdatesAgainstWordIds(updatesDb, validWordIds)
   const response: AdminSummaryResponse = {
     activeReleaseVersion: version,
     activeReleaseMode: mode,
+    releaseWordCount: validWordIds.size,
     translationCounts: verification.translationCounts,
     exampleSetCounts: verification.exampleSetCounts,
     reviewCounts: verification.reviewCounts,
