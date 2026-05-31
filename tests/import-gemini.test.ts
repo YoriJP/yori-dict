@@ -47,7 +47,7 @@ describe('parseArgs', () => {
       '--report-file', 'reports/gemini.json',
     ])
 
-    expect(opts.model).toBe('gemini-3.1-flash-lite-preview')
+    expect(opts.model).toBe('gemini-3.1-flash-lite')
     expect(opts.langs).toEqual(['zh-tw'])
     expect(opts.commonOnly).toBe(true)
     expect(opts.minFrequency).toBe(5000)

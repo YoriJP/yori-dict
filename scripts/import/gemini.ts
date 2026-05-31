@@ -198,7 +198,7 @@ const STYLE_HINT: Record<TargetLang, string> = {
 }
 
 const MODEL_PRICING: Record<string, PricingConfig> = {
-  'gemini-3.1-flash-lite-preview': {
+  'gemini-3.1-flash-lite': {
     inputUsdPerMillion: 0.25,
     outputUsdPerMillion: 1.5,
   },
@@ -275,7 +275,7 @@ export function defaultCliOptions(): CliOptions {
     langs: [...ALL_LANGS],
     seedLang: 'en',
     outputMode: 'updates-db',
-    model: 'gemini-3.1-flash-lite-preview',
+    model: 'gemini-3.1-flash-lite',
     batchSize: 20,
     maxDefs: 3,
     saveEvery: 10,
@@ -401,7 +401,7 @@ Options:
   --langs <list>             Comma-separated targets (default: en,de,ko,zh-cn,zh-tw)
   --seed-lang <lang>         Master key/definition source language (default: en, use "none" to disable)
   --output-mode <mode>       json | updates-db (default: updates-db)
-  --model <name>             Gemini model for SDK calls (default: gemini-3.1-flash-lite-preview)
+  --model <name>             Gemini model for SDK calls (default: gemini-3.1-flash-lite)
   --batch-size <n>           Entries per API call (default: 20)
   --max-defs <n>             Max generated definitions per entry (default: 3)
   --save-every <n>           Save every N batches (default: 10)

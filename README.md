@@ -880,7 +880,7 @@ Imports are split into three stages:
 
 > **Note:** `import:gemini` is intentionally not included in `import:enrichment` or `rebuild:all`. It is API-backed, rate-limited, cost-bearing, and non-deterministic. It uses the official `@google/genai` SDK and requires `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
-> **Aligning KO / ZH with German coverage:** Use `import:gemini` with `--seed-lang en` (default) so missing keys match the English master list. Korean and Traditional Chinese need roughly **~98k** and **~94k** new definitions, respectively, to cover the same JMdict-backed keys as German (`de` has ~128k defined entries; `ko`/`zh-tw` currently ~32–40k). Run in batches (`--limit`) and prefer a cost-efficient model, e.g. `--model gemini-2.5-flash-lite`.
+> **Aligning KO / ZH with German coverage:** Use `import:gemini` with `--seed-lang en` (default) so missing keys match the English master list. Korean and Traditional Chinese need roughly **~98k** and **~94k** new definitions, respectively, to cover the same JMdict-backed keys as German (`de` has ~128k defined entries; `ko`/`zh-tw` currently ~32–40k). Run in batches (`--limit`) and prefer a cost-efficient model, e.g. `--model gemini-3.1-flash-lite`.
 
 > **zh-cn from zh-tw:** After expanding `zh-tw`, run `bun run sync:zh-cn-from-tw` (preview) then `bun run sync:zh-cn-from-tw --apply` to merge **Simplified** glosses from **Traditional** via OpenCC (`zh-tw-opencc` source tag), without a second Gemini pass for Chinese variants.
 

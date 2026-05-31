@@ -2843,7 +2843,7 @@ export function renderJobsPage(
               <input type="text" name="seedLang" value="en" />
             </label>
             <label>Model
-              <input type="text" name="model" value="gemini-2.5-flash-lite" />
+              <input type="text" name="model" value="gemini-3.1-flash-lite" />
             </label>
             <label>Limit
               <input type="text" name="limit" value="100" />
