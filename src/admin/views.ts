@@ -1351,6 +1351,33 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
       </main>
     </div>`}
     ${includeScripts ? `<script>
+      function redirectToAdminLogin() {
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = '/admin/login?next=' + next;
+      }
+
+      async function refreshAdminSession() {
+        try {
+          const res = await fetch('/admin/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+          return res.ok;
+        } catch (error) {
+          return false;
+        }
+      }
+
+      // Fetch wrapper that transparently recovers from an expired access token:
+      // on a 401 it refreshes the session once and retries, falling back to login.
+      async function adminFetch(input, init) {
+        let res = await fetch(input, init);
+        if (res.status !== 401) return res;
+        if (await refreshAdminSession()) {
+          res = await fetch(input, init);
+          if (res.status !== 401) return res;
+        }
+        redirectToAdminLogin();
+        return null;
+      }
+
       async function submitJsonForm(event) {
         if (event.defaultPrevented) return;
         event.preventDefault();
@@ -1383,11 +1410,13 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         try {
           const action = submitter && submitter.hasAttribute('formaction') ? submitter.formAction : form.action;
           const method = submitter && submitter.hasAttribute('formmethod') ? submitter.formMethod : (form.method || 'POST');
-          const res = await fetch(action, {
+          const res = await adminFetch(action, {
             method,
+            credentials: 'same-origin',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(payload),
           });
+          if (!res) return;
           const text = await res.text();
           if (result) {
             result.textContent = text;
@@ -1610,11 +1639,13 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         if (buildButton) {
           buildButton.addEventListener('click', async () => {
             buildButton.disabled = true;
-            const res = await fetch(response.nextActions.buildReleaseUrl, {
+            const res = await adminFetch(response.nextActions.buildReleaseUrl, {
               method: 'POST',
+              credentials: 'same-origin',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ activate: true, createdWordId: response.wordId }),
             });
+            if (!res) return;
             const data = await res.json();
             if (res.ok) {
               success.innerHTML = [
@@ -1647,11 +1678,13 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         if (success) success.innerHTML = '';
         form.setAttribute('aria-busy', 'true');
         try {
-          const res = await fetch(form.action, {
+          const res = await adminFetch(form.action, {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(collectNewWordPayload(form)),
           });
+          if (!res) return;
           const data = await res.json();
           if (!res.ok) {
             renderFieldErrors(errors, data.fieldErrors || {});
