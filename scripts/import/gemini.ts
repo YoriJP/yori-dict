@@ -430,6 +430,41 @@ Examples:
 `)
 }
 
+function installInterruptHandler(getState: () => {
+  updatesDb: Database | null
+  updateBatchId: number | null
+}): () => void {
+  const handleInterrupt = (signal: string): never => {
+    const { updatesDb, updateBatchId } = getState()
+    if (updatesDb && updateBatchId !== null) {
+      const message = `Interrupted by ${signal}`
+      try {
+        finalizeUpdateBatch(updatesDb, updateBatchId, 'failed', message)
+        console.error(`\n${message}; marked batch ${updateBatchId} as failed.`)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        console.error(`\n${message}; failed to mark batch ${updateBatchId}: ${detail}`)
+      }
+    }
+
+    try {
+      updatesDb?.close()
+    } catch {
+      // Process is exiting after an interrupt; ignore close failures.
+    }
+
+    process.exit(signal === 'SIGINT' ? 130 : 143)
+  }
+
+  process.once('SIGINT', handleInterrupt)
+  process.once('SIGTERM', handleInterrupt)
+
+  return () => {
+    process.off('SIGINT', handleInterrupt)
+    process.off('SIGTERM', handleInterrupt)
+  }
+}
+
 export function buildSelectionFilters(opts: CliOptions): SelectionFilters {
   let excludePattern: RegExp | null = null
 
@@ -679,6 +714,32 @@ function parseGeminiResult(
   return map
 }
 
+function buildResponseJsonSchema(maxDefs: number): unknown {
+  return {
+    type: 'object',
+    properties: {
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            definitions: {
+              type: 'array',
+              items: { type: 'string' },
+              maxItems: maxDefs,
+            },
+          },
+          required: ['id', 'definitions'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['items'],
+    additionalProperties: false,
+  }
+}
+
 function buildPrompt(
   lang: TargetLang,
   sourceLang: SeedLang,
@@ -738,7 +799,8 @@ async function callGemini(
   model: string,
   prompt: string,
   temperature: number,
-  retries: number
+  retries: number,
+  maxDefs: number
 ): Promise<GenerateResult> {
   let lastError: Error | null = null
 
@@ -750,6 +812,7 @@ async function callGemini(
         config: {
           temperature,
           responseMimeType: 'application/json',
+          responseJsonSchema: buildResponseJsonSchema(maxDefs),
         },
       })
       const text = getResponseText(response).trim()
@@ -1057,16 +1120,39 @@ async function processLanguage(
         }
       }
 
-      const raw = await callGemini(client, opts.model, prompt, opts.temperature, opts.retries)
-      localTotals.generateRequests++
-      globalTotals.generateRequests++
+      let result: Map<string, string[]> | null = null
+      let lastParseError: Error | null = null
+
+      for (let parseAttempt = 1; parseAttempt <= opts.retries; parseAttempt++) {
+        const raw = await callGemini(client, opts.model, prompt, opts.temperature, opts.retries, opts.maxDefs)
+        localTotals.generateRequests++
+        globalTotals.generateRequests++
+
+        mergeUsageIntoTotals(localTotals, raw.usage, pricing)
+        mergeUsageIntoTotals(globalTotals, raw.usage, pricing)
+
+        try {
+          result = parseGeminiResult(raw.text, allowedIds, opts.maxDefs)
+          lastParseError = null
+          break
+        } catch (error) {
+          lastParseError = error instanceof Error ? error : new Error(String(error))
+          if (parseAttempt < opts.retries) {
+            console.log(
+              `\n  Batch ${batches.toLocaleString()} returned invalid JSON; ` +
+              `retrying generation (${parseAttempt + 1}/${opts.retries})`
+            )
+            await sleep(Math.min(15000, 500 * 2 ** (parseAttempt - 1)))
+          }
+        }
+      }
+
+      if (!result) {
+        throw lastParseError ?? new Error('Gemini response was not valid JSON')
+      }
+
       localTotals.generatedEntries += batchKeys.length
       globalTotals.generatedEntries += batchKeys.length
-
-      mergeUsageIntoTotals(localTotals, raw.usage, pricing)
-      mergeUsageIntoTotals(globalTotals, raw.usage, pricing)
-
-      const result = parseGeminiResult(raw.text, allowedIds, opts.maxDefs)
 
       for (const key of batchKeys) {
         const defs = result.get(key) ?? []
@@ -1182,9 +1268,6 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
   const pricing = resolvePricing(opts)
   const filters = buildSelectionFilters(opts)
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null
-  const client = !opts.dryRun
-    ? new GoogleGenAI(apiKey ? { apiKey } : {})
-    : null
 
   console.log('=== [AI] Gemini Definition Backfill ===')
   console.log(`Languages: ${opts.langs.join(', ')}`)
@@ -1213,6 +1296,16 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
   if (!opts.dryRun && !apiKey) {
     throw new Error('Set GEMINI_API_KEY (or GOOGLE_API_KEY) before running this script')
   }
+  if (!opts.dryRun && opts.maxCostUsd !== null && !pricing) {
+    throw new Error(
+      `No pricing preset found for model "${opts.model}". ` +
+      'Pass --input-price-per-1m and --output-price-per-1m to use --max-cost-usd.'
+    )
+  }
+
+  const client = !opts.dryRun
+    ? new GoogleGenAI({ apiKey: apiKey ?? undefined })
+    : null
 
   await mkdir(DATA_DIR, { recursive: true })
   await mkdir(LANG_DIR, { recursive: true })
@@ -1223,6 +1316,7 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
   const targetViews = new Map<TargetLang, LangFile>()
   let updatesDb: Database | null = null
   let updateBatchId: number | null = null
+  const disposeInterruptHandler = installInterruptHandler(() => ({ updatesDb, updateBatchId }))
 
   try {
     if (opts.outputMode === 'updates-db') {
@@ -1370,6 +1464,7 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
     }
     throw error
   } finally {
+    disposeInterruptHandler()
     updatesDb?.close()
   }
 }

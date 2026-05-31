@@ -620,20 +620,32 @@ adminApi.post('/admin/api/jobs/source-update', async (c) => {
 })
 
 adminApi.post('/admin/api/jobs/gemini-import', async (c) => {
-  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
-  const result = await runAdminGeminiImport({
-    actor: getAdminActor(c),
-    langs: parseLangList(body.langs) ?? undefined,
-    seedLang: typeof body.seedLang === 'string' ? body.seedLang as GeminiRunOptions['seedLang'] : undefined,
-    model: typeof body.model === 'string' ? body.model : undefined,
-    limit: parseOptionalNumber(body.limit) ?? undefined,
-    minFrequency: parseOptionalNumber(body.minFrequency) ?? undefined,
-    jlptMax: parseOptionalNumber(body.jlptMax) ?? undefined,
-    maxCostUsd: parseOptionalNumber(body.maxCostUsd) ?? undefined,
-    commonOnly: parseBoolean(body.commonOnly, false),
-    dryRun: parseBoolean(body.dryRun, true),
-  })
-  return c.json(result)
+  try {
+    const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+    const result = await runAdminGeminiImport({
+      actor: getAdminActor(c),
+      langs: parseLangList(body.langs) ?? undefined,
+      seedLang: typeof body.seedLang === 'string' ? body.seedLang as GeminiRunOptions['seedLang'] : undefined,
+      model: typeof body.model === 'string' ? body.model : undefined,
+      limit: parseOptionalNumber(body.limit) ?? undefined,
+      minFrequency: parseOptionalNumber(body.minFrequency) ?? undefined,
+      jlptMax: parseOptionalNumber(body.jlptMax) ?? undefined,
+      maxCostUsd: parseOptionalNumber(body.maxCostUsd) ?? undefined,
+      commonOnly: parseBoolean(body.commonOnly, false),
+      dryRun: parseBoolean(body.dryRun, true),
+    })
+    return c.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const lowerMessage = message.toLowerCase()
+    const status = message.includes('GEMINI_API_KEY')
+      || message.includes('GOOGLE_API_KEY')
+      || lowerMessage.includes('api key')
+      || message.startsWith('No pricing preset found')
+      ? 400
+      : 500
+    return c.json({ error: message }, status)
+  }
 })
 
 adminApi.get('/admin/api/batches/:id', (c) => {

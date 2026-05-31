@@ -983,6 +983,15 @@ export async function runAdminGeminiImport(
     ...defaults,
     ...input,
     langs: input.langs ?? defaults.langs,
+    seedLang: input.seedLang ?? defaults.seedLang,
+    outputMode: input.outputMode ?? defaults.outputMode,
+    model: input.model ?? defaults.model,
+    limit: input.limit ?? defaults.limit,
+    minFrequency: input.minFrequency ?? defaults.minFrequency,
+    jlptMax: input.jlptMax ?? defaults.jlptMax,
+    maxCostUsd: input.maxCostUsd ?? defaults.maxCostUsd,
+    commonOnly: input.commonOnly ?? defaults.commonOnly,
+    dryRun: input.dryRun ?? defaults.dryRun,
     actor: input.actor,
   })
 }
