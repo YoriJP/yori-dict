@@ -608,6 +608,18 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         padding: var(--space-1) var(--space-3);
         min-height: 28px;
       }
+      button:disabled, .btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      button:disabled:hover, .btn:disabled:hover {
+        background: var(--accent);
+      }
+      button.secondary:disabled:hover {
+        background: transparent;
+        border-color: var(--border);
+        color: var(--text-secondary);
+      }
       .btn-group {
         display: flex;
         gap: var(--space-2);
@@ -882,6 +894,41 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
       }
       .checkbox-inline input {
         width: auto;
+      }
+
+      /* -- Whole-batch action -- */
+      .batch-action {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: var(--space-5);
+      }
+      .batch-action-text {
+        display: grid;
+        gap: 2px;
+      }
+      .batch-action-label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary);
+      }
+      .batch-action-meta {
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .batch-action-meta .conflict-note {
+        color: var(--negative);
+      }
+      .batch-action .inline-form {
+        margin: 0;
+        align-items: center;
       }
 
       /* -- Filter chips -- */
@@ -2606,6 +2653,14 @@ export function renderReviewPage(data: AdminReviewQueueResponseV2): string {
 export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): string {
   const batchId = data.summary.batch?.id ?? ''
   const batchPath = `/admin/review/batch/${batchId}`
+  const pendingUnits = data.summary.pendingUnits
+  const conflictCount = data.summary.sourceConflictCount
+  const hasConflicts = conflictCount > 0
+  const overrideCheckbox = hasConflicts ? `
+    <label class="checkbox-inline">
+      <input type="checkbox" name="overrideSourceConflict" value="true" />
+      Override source conflicts
+    </label>` : ''
   return renderPage('AI Review Batch', `
     <div class="page-header">
       <h1>Batch ${escapeHtml(batchId)}</h1>
@@ -2631,12 +2686,20 @@ export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): strin
         </div>
         <form action="/admin/api/review/units/approve" method="POST" data-json-form="true" data-reload="true" data-review-bulk-form="true" class="inline-form">
           <div data-selected-unit-ids></div>
-          <label class="checkbox-inline">
-            <input type="checkbox" name="overrideSourceConflict" value="true" />
-            Override source conflicts
-          </label>
+          ${overrideCheckbox}
           <button type="submit">Approve selected</button>
           <button type="submit" class="secondary" formaction="/admin/api/review/units/reject" data-confirm="Reject selected review units?">Reject selected</button>
+          <div class="result" data-result></div>
+        </form>
+      </div>
+      <div class="batch-action">
+        <div class="batch-action-text">
+          <span class="batch-action-label">Whole batch</span>
+          <span class="batch-action-meta">${escapeHtml(pendingUnits)} pending${hasConflicts ? ` <span class="conflict-note">· ${escapeHtml(conflictCount)} with source conflicts</span>` : ''}</span>
+        </div>
+        <form action="/admin/api/review/batches/${escapeHtml(batchId)}/approve-all" method="POST" data-json-form="true" data-reload="true" class="inline-form">
+          ${overrideCheckbox}
+          <button type="submit" class="secondary" ${pendingUnits === 0 ? 'disabled' : `data-confirm="Approve all ${escapeHtml(pendingUnits)} pending review units in this batch?"`}>Approve all ${escapeHtml(pendingUnits)}</button>
           <div class="result" data-result></div>
         </form>
       </div>

@@ -312,6 +312,45 @@ describe('bulk AI review queue', () => {
     expect(mixed.error).toContain('multiple batches')
   })
 
+  test('approve all batch action approves every pending unit with conflict override', async () => {
+    const blockedRes = await request('/admin/api/review/batches/1/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+    expect(blockedRes.status).toBe(400)
+    const blocked = await blockedRes.json()
+    expect(blocked.blockedUnitIds).toEqual(['飲む:のむ|en|1'])
+
+    const approveRes = await request('/admin/api/review/batches/1/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        overrideSourceConflict: true,
+        notes: 'approved whole batch',
+      }),
+    })
+    expect(approveRes.status).toBe(200)
+    const approved = await approveRes.json()
+    expect(approved.affected).toEqual({
+      units: 2,
+      translations: 2,
+      exampleSets: 1,
+    })
+
+    const queueRes = await request('/admin/api/review/queue?batchId=1', {
+      headers: { cookie: session.cookie },
+    })
+    const queue = await queueRes.json()
+    expect(queue.summary.pendingUnits).toBe(0)
+  })
+
   test('review pages render queue dashboard and batch actions', async () => {
     const dashboardRes = await request('/admin/review', {
       headers: { cookie: session.cookie },
@@ -328,6 +367,8 @@ describe('bulk AI review queue', () => {
     expect(batchRes.status).toBe(200)
     const batchHtml = await batchRes.text()
     expect(batchHtml.includes('Approve selected')).toBe(true)
+    expect(batchHtml.includes('Approve all')).toBe(true)
+    expect(batchHtml.includes('/admin/api/review/batches/1/approve-all')).toBe(true)
     expect(batchHtml.includes('Select all visible')).toBe(true)
   })
 })

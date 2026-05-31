@@ -21,6 +21,7 @@ import { listActiveSessions } from './refresh-tokens'
 import { checkLoginRate, clearLoginAttempts, recordLoginFailure } from './rate-limit'
 import {
   applyBulkReviewAction,
+  approveAllReviewUnitsInBatch,
   approveExampleSetReview,
   approveTranslationReview,
   createAdminNewWord,
@@ -80,9 +81,11 @@ function parseLangList(raw: unknown): Language[] | null {
 
 function parseBoolean(raw: unknown, fallback = false): boolean {
   if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'number') return raw !== 0
   if (typeof raw === 'string') {
-    if (raw === 'true') return true
-    if (raw === 'false') return false
+    const normalized = raw.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false
   }
   return fallback
 }
@@ -587,6 +590,17 @@ adminApi.post('/admin/api/review/units/reject', async (c) => {
   const body = await c.req.raw.json().catch(() => ({}))
   const result = applyBulkReviewAction('rejected', {
     unitIds: parseUnitIds(body.unitIds),
+    notes: typeof body.notes === 'string' ? body.notes : null,
+    overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
+  }, getAdminActor(c))
+
+  if (!result.ok) return c.json(result, 400)
+  return c.json(result)
+})
+
+adminApi.post('/admin/api/review/batches/:id/approve-all', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
+  const result = approveAllReviewUnitsInBatch(Number(c.req.param('id')), {
     notes: typeof body.notes === 'string' ? body.notes : null,
     overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
   }, getAdminActor(c))
