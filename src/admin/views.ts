@@ -1356,13 +1356,23 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         window.location.href = '/admin/login?next=' + next;
       }
 
-      async function refreshAdminSession() {
-        try {
-          const res = await fetch('/admin/auth/refresh', { method: 'POST', credentials: 'same-origin' });
-          return res.ok;
-        } catch (error) {
-          return false;
-        }
+      // Concurrent 401s must share one refresh: the refresh token rotates on
+      // every call, so a second parallel refresh would replay the old token and
+      // trip reuse detection, revoking every session. Coalesce into one request.
+      let adminRefreshInFlight = null;
+      function refreshAdminSession() {
+        if (adminRefreshInFlight) return adminRefreshInFlight;
+        adminRefreshInFlight = (async () => {
+          try {
+            const res = await fetch('/admin/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+            return res.ok;
+          } catch (error) {
+            return false;
+          } finally {
+            adminRefreshInFlight = null;
+          }
+        })();
+        return adminRefreshInFlight;
       }
 
       // Fetch wrapper that transparently recovers from an expired access token:
