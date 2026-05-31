@@ -28,6 +28,7 @@
     "import:wiktionary": "bun run scripts/import/wiktionary.ts",
     "import:gemini": "bun run scripts/import/gemini.ts",
     "update:ai": "bun run scripts/import/gemini.ts --output-mode updates-db",
+    "review:approve-ai": "bun run scripts/review/approve-ai.ts",
     "update:source": "bun run scripts/update/source.ts",
     "verify:updates": "bun run scripts/verify-updates.ts",
     "import:zhja": "bun run scripts/import/zhja.ts",
