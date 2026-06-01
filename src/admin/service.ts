@@ -486,10 +486,12 @@ export function getAdminSummary(): AdminSummaryResponse {
   const { db: releaseDb, version, mode } = openReleaseDb()
   const updatesDb = initUpdatesDatabase()
 
-  const verification = verifyUpdatesAgainstWordIds(updatesDb, getValidWordIds(releaseDb))
+  const validWordIds = getValidWordIds(releaseDb)
+  const verification = verifyUpdatesAgainstWordIds(updatesDb, validWordIds)
   const response: AdminSummaryResponse = {
     activeReleaseVersion: version,
     activeReleaseMode: mode,
+    releaseWordCount: validWordIds.size,
     translationCounts: verification.translationCounts,
     exampleSetCounts: verification.exampleSetCounts,
     reviewCounts: verification.reviewCounts,
@@ -803,6 +805,100 @@ export function applyBulkReviewAction(
   }
 }
 
+export function approveAllReviewUnitsInBatch(
+  batchId: number,
+  input: { notes?: string | null; overrideSourceConflict?: boolean; allowMultipleLanguages?: boolean },
+  actor: string
+): BulkReviewActionResponse {
+  const { db: releaseDb } = openReleaseDb()
+  const updatesDb = initUpdatesDatabase()
+  const units = buildReviewUnits(releaseDb, updatesDb, {
+    batchId,
+    lang: null,
+    risk: null,
+    shape: null,
+    hasSourceConflict: null,
+  })
+
+  if (units.length === 0) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action: 'approved',
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      error: 'No pending review units found for this batch.',
+    }
+  }
+
+  const langs = new Set(units.map((unit) => unit.lang))
+  if (langs.size > 1 && !input.allowMultipleLanguages) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action: 'approved',
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      error: 'Batch approval spans multiple languages. Use the explicit all-languages approval action.',
+    }
+  }
+
+  const blockedUnitIds = input.overrideSourceConflict
+    ? []
+    : units.filter((unit) => unit.flags.hasSourceConflict).map((unit) => unit.unitId)
+  if (blockedUnitIds.length > 0) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action: 'approved',
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      blockedUnitIds,
+      error: 'Some review units have active source conflicts.',
+    }
+  }
+
+  const translationIds = units.flatMap((unit) => unit.translation ? [unit.translation.id] : [])
+  const exampleSetIds = units.flatMap((unit) => unit.exampleSet ? [unit.exampleSet.id] : [])
+  const mutation = applyBulkReviewStatus(updatesDb, {
+    translationIds,
+    exampleSetIds,
+    reviewStatus: 'approved',
+    actor,
+    notes: input.notes ?? null,
+  })
+
+  recordAdminAction(updatesDb, {
+    actor,
+    action: langs.size > 1 && input.allowMultipleLanguages
+      ? 'review.batch.approve_all_languages'
+      : 'review.batch.approve_all',
+    targetKind: 'batch',
+    targetId: String(batchId),
+    notes: input.notes ?? null,
+  })
+
+  for (const id of mutation.translationIds) {
+    logReviewAction(updatesDb, actor, 'review.translation.approve', String(id), input.notes ?? null)
+  }
+  for (const id of mutation.exampleSetIds) {
+    logReviewAction(updatesDb, actor, 'review.example-set.approve', String(id), input.notes ?? null)
+  }
+
+  releaseDb.close()
+  updatesDb.close()
+
+  return {
+    ok: true,
+    action: 'approved',
+    affected: {
+      units: units.length,
+      translations: mutation.translationIds.length,
+      exampleSets: mutation.exampleSetIds.length,
+    },
+  }
+}
+
 export function getAdminReleaseList(): AdminReleaseListResponse {
   const activeRelease = requireActiveReleaseConfig()
   return {
@@ -901,6 +997,15 @@ export async function runAdminGeminiImport(
     ...defaults,
     ...input,
     langs: input.langs ?? defaults.langs,
+    seedLang: input.seedLang ?? defaults.seedLang,
+    outputMode: input.outputMode ?? defaults.outputMode,
+    model: input.model ?? defaults.model,
+    limit: input.limit ?? defaults.limit,
+    minFrequency: input.minFrequency ?? defaults.minFrequency,
+    jlptMax: input.jlptMax ?? defaults.jlptMax,
+    maxCostUsd: input.maxCostUsd ?? defaults.maxCostUsd,
+    commonOnly: input.commonOnly ?? defaults.commonOnly,
+    dryRun: input.dryRun ?? defaults.dryRun,
     actor: input.actor,
   })
 }

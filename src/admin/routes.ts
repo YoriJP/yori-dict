@@ -1,17 +1,27 @@
 import { Hono } from 'hono'
 import {
-  clearAdminSessionCookie,
+  attemptLogin,
+  changeAdminPassword,
+  clearAuthCookies,
   getAdminActor,
-  isAdminAuthenticated,
+  getAuthenticatedUser,
   isAdminEnabled,
+  logout as logoutAuth,
   normalizeAdminNextPath,
+  readRefreshTokenCookie,
+  refreshSession,
   requireAdminApiAuth,
   requireAdminPageAuth,
-  setAdminSessionCookie,
-  verifyAdminPassword,
+  revokeSessionForUser,
+  setAuthCookies,
 } from './auth'
+import type { AdminUser } from './users'
+import { createAdminUser, hasAnyAdminUser } from './users'
+import { listActiveSessions } from './refresh-tokens'
+import { checkLoginRate, clearLoginAttempts, recordLoginFailure } from './rate-limit'
 import {
   applyBulkReviewAction,
+  approveAllReviewUnitsInBatch,
   approveExampleSetReview,
   approveTranslationReview,
   createAdminNewWord,
@@ -34,7 +44,9 @@ import {
   runAdminSourceUpdate,
 } from './service'
 import {
+  renderAdminAccountPage,
   renderAdminLoginPage,
+  renderAdminSetupPage,
   renderReviewBatchPage,
   renderDashboardPage,
   renderEntryPage,
@@ -69,9 +81,11 @@ function parseLangList(raw: unknown): Language[] | null {
 
 function parseBoolean(raw: unknown, fallback = false): boolean {
   if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'number') return raw !== 0
   if (typeof raw === 'string') {
-    if (raw === 'true') return true
-    if (raw === 'false') return false
+    const normalized = raw.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false
   }
   return fallback
 }
@@ -128,12 +142,73 @@ async function readJsonBody<T extends Record<string, unknown>>(request: Request)
   return await request.json() as T
 }
 
-admin.get('/admin/login', (c) => {
+function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  const forwarded = c.req.header('x-forwarded-for')
+  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown'
+  return c.req.header('x-real-ip')?.trim() || 'unknown'
+}
+
+admin.get('/admin/setup', (c) => {
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next: '/admin' }), 503)
+  }
+  if (hasAnyAdminUser()) {
+    return c.redirect('/admin/login', 302)
+  }
+  return c.html(renderAdminSetupPage())
+})
+
+admin.post('/admin/setup', async (c) => {
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next: '/admin' }), 503)
+  }
+  if (hasAnyAdminUser()) {
+    return c.redirect('/admin/login', 302)
+  }
+
+  const body = await c.req.parseBody()
+  const email = typeof body.email === 'string' ? body.email : ''
+  const password = typeof body.password === 'string' ? body.password : ''
+  const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : ''
+
+  if (!email.trim()) {
+    return c.html(renderAdminSetupPage({ error: 'Email is required.' }), 400)
+  }
+  if (password.length < 12) {
+    return c.html(renderAdminSetupPage({ error: 'Password must be at least 12 characters.' }), 400)
+  }
+  if (password !== confirmPassword) {
+    return c.html(renderAdminSetupPage({ error: 'Passwords do not match.' }), 400)
+  }
+
+  try {
+    await createAdminUser(email, password)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create account.'
+    return c.html(renderAdminSetupPage({ error: message }), 400)
+  }
+
+  const ip = clientIp(c)
+  const userAgent = c.req.header('user-agent') ?? null
+  const result = await attemptLogin(email, password, { userAgent, ip })
+  if (result) {
+    setAuthCookies(c, result.accessToken, result.refreshToken)
+    return c.redirect('/admin', 303)
+  }
+
+  return c.redirect('/admin/login', 303)
+})
+
+admin.get('/admin/login', async (c) => {
   const next = normalizeAdminNextPath(c.req.query('next'))
   if (!isAdminEnabled()) {
     return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
   }
-  if (isAdminAuthenticated(c)) {
+  if (!hasAnyAdminUser()) {
+    return c.redirect('/admin/setup', 302)
+  }
+  const user = await getAuthenticatedUser(c)
+  if (user) {
     return c.redirect(next, 302)
   }
   return c.html(renderAdminLoginPage({ next }))
@@ -141,6 +216,7 @@ admin.get('/admin/login', (c) => {
 
 admin.post('/admin/login', async (c) => {
   const body = await c.req.parseBody()
+  const email = typeof body.email === 'string' ? body.email : ''
   const password = typeof body.password === 'string' ? body.password : ''
   const next = normalizeAdminNextPath(typeof body.next === 'string' ? body.next : null)
 
@@ -148,19 +224,66 @@ admin.post('/admin/login', async (c) => {
     return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
   }
 
-  if (!verifyAdminPassword(password)) {
-    return c.html(renderAdminLoginPage({
-      error: 'The access code did not match this environment.',
-      next,
-    }), 401)
+  const ip = clientIp(c)
+  const rate = checkLoginRate(ip)
+  if (!rate.allowed) {
+    c.header('Retry-After', String(rate.retryAfterSeconds))
+    return c.html(
+      renderAdminLoginPage({
+        error: `Too many failed attempts. Try again in ${rate.retryAfterSeconds} seconds.`,
+        next,
+      }),
+      429
+    )
   }
 
-  setAdminSessionCookie(c)
+  const userAgent = c.req.header('user-agent') ?? null
+  const result = await attemptLogin(email, password, { userAgent, ip })
+
+  if (!result) {
+    recordLoginFailure(ip)
+    return c.html(
+      renderAdminLoginPage({
+        error: 'Invalid email or password.',
+        next,
+      }),
+      401
+    )
+  }
+
+  clearLoginAttempts(ip)
+  setAuthCookies(c, result.accessToken, result.refreshToken)
   return c.redirect(next, 303)
 })
 
-admin.post('/admin/logout', (c) => {
-  clearAdminSessionCookie(c)
+admin.post('/admin/auth/refresh', async (c) => {
+  if (!isAdminEnabled()) {
+    return c.json({ error: 'Admin UI is disabled.' }, 503)
+  }
+  const refreshToken = readRefreshTokenCookie(c)
+  if (!refreshToken) {
+    return c.json({ error: 'No refresh token' }, 401)
+  }
+  const userAgent = c.req.header('user-agent') ?? null
+  const ip = clientIp(c)
+  const result = await refreshSession(refreshToken, { userAgent, ip })
+  if (!result) {
+    clearAuthCookies(c)
+    return c.json({ error: 'Invalid or expired refresh token' }, 401)
+  }
+  setAuthCookies(c, result.accessToken, result.refreshToken)
+  return c.json({ ok: true })
+})
+
+admin.post('/admin/logout', async (c) => {
+  const refreshToken = readRefreshTokenCookie(c)
+  const user = await getAuthenticatedUser(c)
+  logoutAuth(refreshToken, {
+    actor: user?.email,
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+  clearAuthCookies(c)
   return c.redirect('/admin/login', 303)
 })
 
@@ -169,6 +292,72 @@ adminPages.use('/admin/*', requireAdminPageAuth)
 adminApi.use('/admin/api/*', requireAdminApiAuth)
 
 adminPages.get('/admin', (c) => c.html(renderDashboardPage(getAdminSummary())))
+
+function renderAccountPageFor(user: AdminUser, flash: { kind: 'success' | 'error'; message: string } | null = null): string {
+  return renderAdminAccountPage({
+    email: user.email,
+    lastLoginAt: user.lastLoginAt,
+    sessions: listActiveSessions(user.id),
+    flash,
+  })
+}
+
+adminPages.get('/admin/account', (c) => {
+  const user = c.get('adminUser') as AdminUser
+  return c.html(renderAccountPageFor(user))
+})
+
+adminPages.post('/admin/account/change-password', async (c) => {
+  const user = c.get('adminUser') as AdminUser
+  const body = await c.req.parseBody()
+  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : ''
+  const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : ''
+
+  if (newPassword !== confirmPassword) {
+    return c.html(
+      renderAccountPageFor(user, { kind: 'error', message: 'New password and confirmation do not match.' }),
+      400
+    )
+  }
+
+  const result = await changeAdminPassword(user, currentPassword, newPassword, {
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+
+  if (!result.ok) {
+    const message =
+      result.reason === 'wrong_current'
+        ? 'Current password is incorrect.'
+        : 'New password must be at least 12 characters.'
+    return c.html(renderAccountPageFor(user, { kind: 'error', message }), 400)
+  }
+
+  clearAuthCookies(c)
+  const loginUrl = new URL('/admin/login', c.req.url)
+  loginUrl.searchParams.set('next', '/admin/account')
+  return c.redirect(loginUrl.pathname + loginUrl.search, 303)
+})
+
+adminPages.post('/admin/account/sessions/:id/revoke', (c) => {
+  const user = c.get('adminUser') as AdminUser
+  const sessionId = Number(c.req.param('id'))
+  if (!Number.isFinite(sessionId)) {
+    return c.html(renderAccountPageFor(user, { kind: 'error', message: 'Invalid session id.' }), 400)
+  }
+  const ok = revokeSessionForUser(user, sessionId, {
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+  return c.html(
+    renderAccountPageFor(user, {
+      kind: ok ? 'success' : 'error',
+      message: ok ? 'Session revoked.' : 'Session not found or already revoked.',
+    }),
+    ok ? 200 : 404
+  )
+})
 
 adminPages.get('/admin/entry', (c) => {
   const word = c.req.query('word') ?? ''
@@ -409,6 +598,18 @@ adminApi.post('/admin/api/review/units/reject', async (c) => {
   return c.json(result)
 })
 
+adminApi.post('/admin/api/review/batches/:id/approve-all', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
+  const result = approveAllReviewUnitsInBatch(Number(c.req.param('id')), {
+    notes: typeof body.notes === 'string' ? body.notes : null,
+    overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
+    allowMultipleLanguages: parseBoolean(body.allowMultipleLanguages, false),
+  }, getAdminActor(c))
+
+  if (!result.ok) return c.json(result, 400)
+  return c.json(result)
+})
+
 adminApi.post('/admin/api/jobs/source-update', async (c) => {
   const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
   const result = await runAdminSourceUpdate({
@@ -420,20 +621,32 @@ adminApi.post('/admin/api/jobs/source-update', async (c) => {
 })
 
 adminApi.post('/admin/api/jobs/gemini-import', async (c) => {
-  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
-  const result = await runAdminGeminiImport({
-    actor: getAdminActor(c),
-    langs: parseLangList(body.langs) ?? undefined,
-    seedLang: typeof body.seedLang === 'string' ? body.seedLang as GeminiRunOptions['seedLang'] : undefined,
-    model: typeof body.model === 'string' ? body.model : undefined,
-    limit: parseOptionalNumber(body.limit) ?? undefined,
-    minFrequency: parseOptionalNumber(body.minFrequency) ?? undefined,
-    jlptMax: parseOptionalNumber(body.jlptMax) ?? undefined,
-    maxCostUsd: parseOptionalNumber(body.maxCostUsd) ?? undefined,
-    commonOnly: parseBoolean(body.commonOnly, false),
-    dryRun: parseBoolean(body.dryRun, true),
-  })
-  return c.json(result)
+  try {
+    const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+    const result = await runAdminGeminiImport({
+      actor: getAdminActor(c),
+      langs: parseLangList(body.langs) ?? undefined,
+      seedLang: typeof body.seedLang === 'string' ? body.seedLang as GeminiRunOptions['seedLang'] : undefined,
+      model: typeof body.model === 'string' ? body.model : undefined,
+      limit: parseOptionalNumber(body.limit) ?? undefined,
+      minFrequency: parseOptionalNumber(body.minFrequency) ?? undefined,
+      jlptMax: parseOptionalNumber(body.jlptMax) ?? undefined,
+      maxCostUsd: parseOptionalNumber(body.maxCostUsd) ?? undefined,
+      commonOnly: parseBoolean(body.commonOnly, false),
+      dryRun: parseBoolean(body.dryRun, true),
+    })
+    return c.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const lowerMessage = message.toLowerCase()
+    const status = message.includes('GEMINI_API_KEY')
+      || message.includes('GOOGLE_API_KEY')
+      || lowerMessage.includes('api key')
+      || message.startsWith('No pricing preset found')
+      ? 400
+      : 500
+    return c.json({ error: message }, status)
+  }
 })
 
 adminApi.get('/admin/api/batches/:id', (c) => {

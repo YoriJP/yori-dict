@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-16T00:00:00Z",
+  "title": "Design System: Yori Admin",
+  "extensions": {
+    "colorMeta": {
+      "paper-cream": { "role": "neutral", "displayName": "Paper Cream", "canonical": "oklch(97% 0.008 45)", "tonalRamp": ["oklch(15% 0.008 45)", "oklch(30% 0.008 45)", "oklch(45% 0.008 45)", "oklch(58% 0.008 45)", "oklch(72% 0.008 45)", "oklch(85% 0.008 45)", "oklch(92% 0.008 45)", "oklch(97% 0.008 45)"] },
+      "warm-white": { "role": "neutral", "displayName": "Warm White", "canonical": "oklch(99% 0.005 45)", "tonalRamp": ["oklch(15% 0.005 45)", "oklch(30% 0.005 45)", "oklch(45% 0.005 45)", "oklch(58% 0.005 45)", "oklch(72% 0.005 45)", "oklch(85% 0.005 45)", "oklch(93% 0.005 45)", "oklch(99% 0.005 45)"] },
+      "parchment": { "role": "neutral", "displayName": "Parchment", "canonical": "oklch(94.5% 0.012 45)", "tonalRamp": ["oklch(15% 0.012 45)", "oklch(30% 0.012 45)", "oklch(45% 0.012 45)", "oklch(58% 0.012 45)", "oklch(72% 0.012 45)", "oklch(85% 0.012 45)", "oklch(90% 0.012 45)", "oklch(94.5% 0.012 45)"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(22% 0.02 45)", "tonalRamp": ["oklch(15% 0.02 45)", "oklch(22% 0.02 45)", "oklch(30% 0.02 45)", "oklch(40% 0.02 45)", "oklch(52% 0.02 45)", "oklch(65% 0.02 45)", "oklch(78% 0.02 45)", "oklch(90% 0.02 45)"] },
+      "ash": { "role": "neutral", "displayName": "Ash", "canonical": "oklch(45% 0.03 45)", "tonalRamp": ["oklch(15% 0.03 45)", "oklch(25% 0.03 45)", "oklch(35% 0.03 45)", "oklch(45% 0.03 45)", "oklch(55% 0.03 45)", "oklch(68% 0.03 45)", "oklch(80% 0.03 45)", "oklch(92% 0.03 45)"] },
+      "stone": { "role": "neutral", "displayName": "Stone", "canonical": "oklch(58% 0.025 45)", "tonalRamp": ["oklch(15% 0.025 45)", "oklch(28% 0.025 45)", "oklch(40% 0.025 45)", "oklch(52% 0.025 45)", "oklch(58% 0.025 45)", "oklch(70% 0.025 45)", "oklch(82% 0.025 45)", "oklch(94% 0.025 45)"] },
+      "marigold": { "role": "primary", "displayName": "Marigold", "canonical": "oklch(52% 0.16 45)", "tonalRamp": ["oklch(18% 0.06 45)", "oklch(28% 0.1 45)", "oklch(38% 0.14 45)", "oklch(46% 0.17 45)", "oklch(52% 0.16 45)", "oklch(62% 0.12 45)", "oklch(78% 0.06 45)", "oklch(93% 0.035 45)"] },
+      "marigold-deep": { "role": "primary", "displayName": "Marigold Deep", "canonical": "oklch(46% 0.17 45)", "tonalRamp": ["oklch(18% 0.06 45)", "oklch(28% 0.1 45)", "oklch(38% 0.14 45)", "oklch(46% 0.17 45)", "oklch(52% 0.16 45)", "oklch(62% 0.12 45)", "oklch(78% 0.06 45)", "oklch(93% 0.035 45)"] },
+      "marigold-wash": { "role": "primary", "displayName": "Marigold Wash", "canonical": "oklch(93% 0.035 45)", "tonalRamp": ["oklch(18% 0.06 45)", "oklch(28% 0.1 45)", "oklch(38% 0.14 45)", "oklch(46% 0.17 45)", "oklch(52% 0.16 45)", "oklch(62% 0.12 45)", "oklch(78% 0.06 45)", "oklch(93% 0.035 45)"] },
+      "moss": { "role": "tertiary", "displayName": "Moss", "canonical": "oklch(45% 0.12 155)", "tonalRamp": ["oklch(15% 0.04 155)", "oklch(25% 0.08 155)", "oklch(35% 0.1 155)", "oklch(45% 0.12 155)", "oklch(55% 0.1 155)", "oklch(68% 0.07 155)", "oklch(82% 0.04 155)", "oklch(95% 0.025 155)"] },
+      "ochre": { "role": "tertiary", "displayName": "Ochre", "canonical": "oklch(52% 0.12 85)", "tonalRamp": ["oklch(15% 0.04 85)", "oklch(25% 0.08 85)", "oklch(38% 0.1 85)", "oklch(52% 0.12 85)", "oklch(60% 0.1 85)", "oklch(72% 0.06 85)", "oklch(84% 0.04 85)", "oklch(95% 0.03 85)"] },
+      "terracotta": { "role": "tertiary", "displayName": "Terracotta", "canonical": "oklch(48% 0.14 25)", "tonalRamp": ["oklch(15% 0.04 25)", "oklch(25% 0.08 25)", "oklch(36% 0.12 25)", "oklch(48% 0.14 25)", "oklch(58% 0.1 25)", "oklch(70% 0.06 25)", "oklch(82% 0.04 25)", "oklch(95% 0.025 25)"] },
+      "rule": { "role": "neutral", "displayName": "Rule", "canonical": "oklch(88% 0.012 45)", "tonalRamp": ["oklch(15% 0.012 45)", "oklch(30% 0.012 45)", "oklch(45% 0.012 45)", "oklch(58% 0.012 45)", "oklch(72% 0.012 45)", "oklch(82% 0.012 45)", "oklch(88% 0.012 45)", "oklch(95% 0.012 45)"] },
+      "rule-strong": { "role": "neutral", "displayName": "Rule Strong", "canonical": "oklch(78% 0.018 45)", "tonalRamp": ["oklch(15% 0.018 45)", "oklch(30% 0.018 45)", "oklch(45% 0.018 45)", "oklch(58% 0.018 45)", "oklch(68% 0.018 45)", "oklch(78% 0.018 45)", "oklch(88% 0.018 45)", "oklch(95% 0.018 45)"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page titles, login headword. The largest typographic element on any screen." },
+      "headline": { "displayName": "Headline", "purpose": "Section headings, metric values. Carries weight without competing with Display." },
+      "title": { "displayName": "Title", "purpose": "Sub-section headers, card titles." },
+      "body": { "displayName": "Body", "purpose": "Running text, table cells, form values. Cap line length at 65ch." },
+      "label": { "displayName": "Label", "purpose": "Form labels, eyebrows, metadata, badge text. The workhorse of information density." }
+    },
+    "shadows": [
+      { "name": "focus-ring", "value": "0 0 0 3px oklch(52% 0.16 45 / 10%)", "purpose": "Focus indicator on interactive elements. The only shadow in the system." }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "120ms ease-out", "purpose": "Button hover, nav highlight, link color shifts." },
+      { "name": "state-medium", "value": "150ms ease-out", "purpose": "Input focus, border-color transitions." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "768px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The main action button. Marigold background, the only saturated surface on any given screen.",
+      "html": "<button class=\"ds-btn-primary\">Approve</button>",
+      "css": ".ds-btn-primary { font-family: 'Source Sans 3', system-ui, sans-serif; font-size: clamp(0.8125rem, 0.78rem + 0.15vw, 0.875rem); font-weight: 600; background: oklch(52% 0.16 45); color: oklch(99% 0.005 45); border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; white-space: nowrap; transition: background 120ms ease-out; } .ds-btn-primary:hover { background: oklch(46% 0.17 45); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px oklch(52% 0.16 45 / 10%); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Ghost button for secondary actions. Transparent with a rule border.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { font-family: 'Source Sans 3', system-ui, sans-serif; font-size: clamp(0.8125rem, 0.78rem + 0.15vw, 0.875rem); font-weight: 600; background: transparent; color: oklch(45% 0.03 45); border: 1px solid oklch(88% 0.012 45); border-radius: 4px; padding: 8px 16px; cursor: pointer; white-space: nowrap; transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out; } .ds-btn-secondary:hover { background: oklch(94.5% 0.012 45); border-color: oklch(78% 0.018 45); color: oklch(22% 0.02 45); } .ds-btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px oklch(52% 0.16 45 / 10%); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Standard form input. Warm-white background, rule border, marigold focus ring.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Search entries...\" />",
+      "css": ".ds-input { font-family: 'Source Sans 3', system-ui, sans-serif; font-size: clamp(0.8125rem, 0.78rem + 0.15vw, 0.875rem); background: oklch(99% 0.005 45); color: oklch(22% 0.02 45); border: 1px solid oklch(88% 0.012 45); border-radius: 4px; padding: 8px 12px; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; } .ds-input:focus { outline: none; border-color: oklch(52% 0.16 45); box-shadow: 0 0 0 3px oklch(52% 0.16 45 / 10%); } .ds-input::placeholder { color: oklch(58% 0.025 45); }"
+    },
+    {
+      "name": "Badge (Positive)",
+      "kind": "chip",
+      "refersTo": "badge-positive",
+      "description": "Status badge for approved, active, and succeeded states.",
+      "html": "<span class=\"ds-badge ds-badge-positive\"><span class=\"ds-badge-dot\"></span>Approved</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-family: 'Source Sans 3', system-ui, sans-serif; font-size: clamp(0.6875rem, 0.65rem + 0.15vw, 0.75rem); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; line-height: 1.4; } .ds-badge-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; } .ds-badge-positive { background: oklch(95% 0.025 155); color: oklch(45% 0.12 155); } .ds-badge-positive .ds-badge-dot { background: oklch(45% 0.12 155); }"
+    },
+    {
+      "name": "Badge (Caution)",
+      "kind": "chip",
+      "refersTo": "badge-caution",
+      "description": "Status badge for pending and running states.",
+      "html": "<span class=\"ds-badge ds-badge-caution\"><span class=\"ds-badge-dot\"></span>Pending</span>",
+      "css": ".ds-badge-caution { background: oklch(95% 0.03 85); color: oklch(52% 0.12 85); } .ds-badge-caution .ds-badge-dot { background: oklch(52% 0.12 85); }"
+    },
+    {
+      "name": "Badge (Negative)",
+      "kind": "chip",
+      "refersTo": "badge-negative",
+      "description": "Status badge for failed and rejected states.",
+      "html": "<span class=\"ds-badge ds-badge-negative\"><span class=\"ds-badge-dot\"></span>Failed</span>",
+      "css": ".ds-badge-negative { background: oklch(95% 0.025 25); color: oklch(48% 0.14 25); } .ds-badge-negative .ds-badge-dot { background: oklch(48% 0.14 25); }"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip-filter",
+      "description": "Pill-shaped filter control for queue and list views.",
+      "html": "<a class=\"ds-chip\" href=\"#\">English</a><a class=\"ds-chip ds-chip-active\" href=\"#\" aria-current=\"page\">Korean</a>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid oklch(88% 0.012 45); border-radius: 999px; text-decoration: none; color: oklch(45% 0.03 45); background: oklch(99% 0.005 45); font-family: 'Source Sans 3', system-ui, sans-serif; font-size: clamp(0.6875rem, 0.65rem + 0.15vw, 0.75rem); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; transition: border-color 120ms ease-out, background 120ms ease-out; } .ds-chip:hover { border-color: oklch(78% 0.018 45); } .ds-chip-active { color: oklch(52% 0.16 45); border-color: oklch(83% 0.04 45); background: oklch(93% 0.035 45); }"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Dark sidebar with warm-ink navigation items. Active state marked with a marigold left border.",
+      "html": "<nav class=\"ds-sidebar-nav\"><a class=\"ds-nav-item\" href=\"#\">Dashboard</a><a class=\"ds-nav-item ds-nav-active\" href=\"#\" aria-current=\"page\">AI Review</a><a class=\"ds-nav-item\" href=\"#\">Releases</a></nav>",
+      "css": ".ds-sidebar-nav { display: flex; flex-direction: column; gap: 2px; background: oklch(22% 0.018 45); padding: 8px 0; border-radius: 8px; } .ds-nav-item { display: block; padding: 12px 24px; color: oklch(72% 0.015 45); text-decoration: none; font-family: 'Source Sans 3', system-ui, sans-serif; font-size: clamp(0.8125rem, 0.78rem + 0.15vw, 0.875rem); font-weight: 400; border-left: 3px solid transparent; transition: color 120ms ease-out, background 120ms ease-out, border-color 120ms ease-out; } .ds-nav-item:hover { color: oklch(90% 0.01 45); background: oklch(28% 0.015 45); } .ds-nav-active { color: oklch(90% 0.01 45); background: oklch(28% 0.02 45); border-left-color: oklch(52% 0.16 45); font-weight: 600; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Proof Sheet",
+    "overview": "Like a typesetter's proof: precise, structured, type-forward. Every element is set with the same care a compositor gives to a page of reference text. The medium is the message; the typography is the interface.\n\nYori Admin is the working console for a multilingual Japanese dictionary. It serves a single curator doing operational work: reviewing AI translations, shipping releases, inspecting entries. The aesthetic is editorial meets tech: the typographic sophistication and information hierarchy of quality publishing, applied with the interaction speed of a modern tool. It is not retro or nostalgic. It is contemporary editorial precision.\n\nThe system uses a warm neutral palette anchored to OKLCH hue 45 (paper-cream, ink, stone). One accent color, marigold, marks the single most important action on each screen. Surfaces are flat at rest. Depth appears only through tonal layering and subtle border shifts on interaction.",
+    "keyCharacteristics": [
+      "Serif + sans pairing as primary brand signal",
+      "Warm OKLCH neutrals tinted to hue 45; no pure black, no pure white",
+      "Single marigold accent used with restraint",
+      "Flat surfaces, no shadows; depth from tonal shifts and hairline rules",
+      "Information density that adapts to the task at hand",
+      "CJK-ready typography with dedicated font stacks"
+    ],
+    "rules": [
+      { "name": "The Single Pot Rule", "body": "Marigold is the only chromatic accent outside semantic status colors. If a screen has more than one marigold-highlighted element competing for attention, one of them is wrong.", "section": "colors" },
+      { "name": "The Tinted Neutral Rule", "body": "Every neutral is tinted toward hue 45. Pure #000 and pure #fff are forbidden.", "section": "colors" },
+      { "name": "The Proof Reader's Rule", "body": "Fraunces is for headings and display elements only. Body text, labels, and interactive elements use Source Sans 3.", "section": "typography" },
+      { "name": "The CJK Parity Rule", "body": "Japanese, Korean, and Chinese text must use the dedicated Noto Sans stacks and remain legible at body sizes. Never fall back to the serif stack for CJK body text.", "section": "typography" },
+      { "name": "The No Shadow Rule", "body": "No box-shadow for ambient depth, card elevation, or surface layering. The only permitted shadow is the focus ring on interactive elements.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use Fraunces for headings and display elements only; keep body text and UI chrome in Source Sans 3.",
+      "Do use OKLCH for all color definitions, with hue 45 as the shared warmth anchor.",
+      "Do vary information density by context: dense for review queues, spacious for login and single-entry views.",
+      "Do use hairline rules and tonal shifts to create visual separation between sections.",
+      "Do test all screens with mixed Japanese-English content at body sizes.",
+      "Do use the focus ring (3px marigold at 10% opacity) on every interactive element."
+    ],
+    "donts": [
+      "Don't use AI/dark-mode tech aesthetic: no cyan-on-dark, neon accents, purple gradients, glassmorphism, or glow effects.",
+      "Don't add decorative Japanese theming: no kanji watermarks on operational screens, no ornamental borders, no shrine-gate motifs, no cherry blossom backgrounds.",
+      "Don't write wordy, hand-holding copy: no long help text under every field, no intro paragraphs that restate the heading.",
+      "Don't style anything to read as 'AI startup' or generic 'developer tool.'",
+      "Don't use box-shadow for surface elevation. The only shadow is the focus ring.",
+      "Don't use pure #000 or #fff. Every neutral carries hue-45 warmth.",
+      "Don't use border-left or border-right greater than 1px as a colored accent stripe.",
+      "Don't highlight more than one element per screen with marigold.",
+      "Don't use gradient text (background-clip: text).",
+      "Don't use card grids where every card is the same size with icon + heading + text repeated."
+    ]
+  }
+}

@@ -16,6 +16,7 @@ export interface AdminSummaryResponse {
   translationCounts: Record<string, number>
   exampleSetCounts: Record<string, number>
   reviewCounts: Record<string, number>
+  releaseWordCount: number
   orphanedWordIdsCount: number
   activeReviewedAiCount: number
   recentBatches: UpdateBatchRecord[]

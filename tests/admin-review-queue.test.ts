@@ -14,9 +14,16 @@ import {
   insertUpdateBatch,
 } from '../src/update-store'
 import adminRoutes from '../src/admin/routes'
+import {
+  clearTestAuthEnv,
+  loginAsTestAdmin,
+  seedTestAdmin,
+  setTestAuthEnv,
+} from './helpers/admin-auth'
 
 let tempDir = ''
-let app: { fetch: (request: Request) => Promise<Response> }
+let app: { fetch: (request: Request) => Response | Promise<Response> }
+let session: { cookie: string }
 
 function makeSnapshot(): ReleaseSnapshot {
   const snapshot = createEmptySnapshot()
@@ -73,16 +80,13 @@ function makeSnapshot(): ReleaseSnapshot {
   return snapshot
 }
 
-function basicAuth(token: string): string {
-  return `Basic ${Buffer.from(`admin:${token}`).toString('base64')}`
-}
-
 async function request(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init))
 }
 
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'yori-admin-review-'))
+  process.env.YORI_PROJECT_ROOT = tempDir
   const releaseDbPath = join(tempDir, 'release.sqlite')
   const updatesDbPath = join(tempDir, 'updates.sqlite')
   const manifestPath = join(tempDir, 'manifest.json')
@@ -101,7 +105,7 @@ beforeEach(async () => {
   process.env.RELEASE_VERSION = 'admin-review-release'
   process.env.RELEASE_MANIFEST_PATH = manifestPath
   process.env.UPDATES_DATABASE_PATH = updatesDbPath
-  process.env.ADMIN_TOKEN = 'secret-token'
+  setTestAuthEnv()
 
   const updatesDb = initUpdatesDatabase(updatesDbPath)
   const batchOne = insertUpdateBatch(updatesDb, {
@@ -177,22 +181,26 @@ beforeEach(async () => {
   const hono = new Hono()
   hono.route('/', adminRoutes)
   app = { fetch: hono.fetch }
+
+  await seedTestAdmin()
+  session = await loginAsTestAdmin(app)
 })
 
 afterEach(() => {
   closeDb()
+  delete process.env.YORI_PROJECT_ROOT
   delete process.env.RELEASE_DB_PATH
   delete process.env.RELEASE_VERSION
   delete process.env.RELEASE_MANIFEST_PATH
   delete process.env.UPDATES_DATABASE_PATH
-  delete process.env.ADMIN_TOKEN
+  clearTestAuthEnv()
   if (tempDir) rmSync(tempDir, { recursive: true, force: true })
 })
 
 describe('bulk AI review queue', () => {
   test('queue api aggregates review units and exposes batch summaries', async () => {
     const res = await request('/admin/api/review/queue', {
-      headers: { authorization: basicAuth('secret-token') },
+      headers: { cookie: session.cookie },
     })
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -209,7 +217,7 @@ describe('bulk AI review queue', () => {
     expect(conflictUnit.flags.hasSourceConflict).toBe(true)
 
     const batchSummaryRes = await request('/admin/api/review/batches/1/summary', {
-      headers: { authorization: basicAuth('secret-token') },
+      headers: { cookie: session.cookie },
     })
     expect(batchSummaryRes.status).toBe(200)
     const batchSummary = await batchSummaryRes.json()
@@ -222,7 +230,7 @@ describe('bulk AI review queue', () => {
     const approveRes = await request('/admin/api/review/units/approve', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -245,7 +253,7 @@ describe('bulk AI review queue', () => {
     const blockedRes = await request('/admin/api/review/units/approve', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -259,7 +267,7 @@ describe('bulk AI review queue', () => {
     const overrideRes = await request('/admin/api/review/units/approve', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -274,7 +282,7 @@ describe('bulk AI review queue', () => {
     const res = await request('/admin/api/review/units/approve', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -292,7 +300,7 @@ describe('bulk AI review queue', () => {
     const mixedRes = await request('/admin/api/review/units/reject', {
       method: 'POST',
       headers: {
-        authorization: basicAuth('secret-token'),
+        cookie: session.cookie,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -304,22 +312,141 @@ describe('bulk AI review queue', () => {
     expect(mixed.error).toContain('multiple batches')
   })
 
+  test('approve all batch action approves every pending unit with conflict override', async () => {
+    const blockedRes = await request('/admin/api/review/batches/1/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+    expect(blockedRes.status).toBe(400)
+    const blocked = await blockedRes.json()
+    expect(blocked.blockedUnitIds).toEqual(['飲む:のむ|en|1'])
+
+    const approveRes = await request('/admin/api/review/batches/1/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        overrideSourceConflict: true,
+        notes: 'approved whole batch',
+      }),
+    })
+    expect(approveRes.status).toBe(200)
+    const approved = await approveRes.json()
+    expect(approved.affected).toEqual({
+      units: 2,
+      translations: 2,
+      exampleSets: 1,
+    })
+
+    const queueRes = await request('/admin/api/review/queue?batchId=1', {
+      headers: { cookie: session.cookie },
+    })
+    const queue = await queueRes.json()
+    expect(queue.summary.pendingUnits).toBe(0)
+  })
+
+  test('approve all batch action requires explicit all-languages approval for mixed-language batches', async () => {
+    const updatesDb = initUpdatesDatabase(process.env.UPDATES_DATABASE_PATH)
+    insertTranslationUpdate(updatesDb, {
+      wordId: '飲む:のむ',
+      lang: 'ko',
+      definitions: ['마시다'],
+      sources: ['ai'],
+      sourceType: 'ai',
+      batchId: 2,
+      reviewStatus: 'pending',
+    })
+    updatesDb.close()
+
+    const blockedRes = await request('/admin/api/review/batches/2/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+    expect(blockedRes.status).toBe(400)
+    const blocked = await blockedRes.json()
+    expect(blocked.error).toContain('explicit all-languages')
+
+    const batchPageRes = await request('/admin/review/batch/2', {
+      headers: { cookie: session.cookie },
+    })
+    const batchPageHtml = await batchPageRes.text()
+    expect(batchPageHtml.includes('Approve all languages 2')).toBe(true)
+    expect(batchPageHtml.includes('name="allowMultipleLanguages" value="true"')).toBe(true)
+    expect(batchPageHtml.includes('Select visible de (1)')).toBe(true)
+    expect(batchPageHtml.includes('Select visible ko (1)')).toBe(true)
+    expect(batchPageHtml.includes('Select all visible')).toBe(false)
+
+    const singleLanguagePageRes = await request('/admin/review/batch/1', {
+      headers: { cookie: session.cookie },
+    })
+    const singleLanguagePageHtml = await singleLanguagePageRes.text()
+    expect(singleLanguagePageHtml.includes('Approve all languages')).toBe(false)
+    expect(singleLanguagePageHtml.includes('name="allowMultipleLanguages" value="true"')).toBe(false)
+
+    const approveRes = await request('/admin/api/review/batches/2/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        allowMultipleLanguages: true,
+        notes: 'approved all languages',
+      }),
+    })
+    expect(approveRes.status).toBe(200)
+    const approved = await approveRes.json()
+    expect(approved.affected).toEqual({
+      units: 2,
+      translations: 1,
+      exampleSets: 1,
+    })
+
+    const db = initUpdatesDatabase(process.env.UPDATES_DATABASE_PATH)
+    const auditRow = db.query<{ action: string; target_id: string; notes: string }, []>(`
+      SELECT action, target_id, notes
+      FROM admin_actions
+      WHERE action = 'review.batch.approve_all_languages'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get()
+    db.close()
+
+    expect(auditRow).toEqual({
+      action: 'review.batch.approve_all_languages',
+      target_id: '2',
+      notes: 'approved all languages',
+    })
+  })
+
   test('review pages render queue dashboard and batch actions', async () => {
     const dashboardRes = await request('/admin/review', {
-      headers: { authorization: basicAuth('secret-token') },
+      headers: { cookie: session.cookie },
     })
     expect(dashboardRes.status).toBe(200)
     const dashboardHtml = await dashboardRes.text()
-    expect(dashboardHtml.includes('Queue Summary')).toBe(true)
+    expect(dashboardHtml.includes('Pending')).toBe(true)
     expect(dashboardHtml.includes('/admin/review/batch/1')).toBe(true)
     expect(dashboardHtml.includes('Override source conflict')).toBe(true)
 
     const batchRes = await request('/admin/review/batch/1', {
-      headers: { authorization: basicAuth('secret-token') },
+      headers: { cookie: session.cookie },
     })
     expect(batchRes.status).toBe(200)
     const batchHtml = await batchRes.text()
     expect(batchHtml.includes('Approve selected')).toBe(true)
+    expect(batchHtml.includes('Approve all')).toBe(true)
+    expect(batchHtml.includes('/admin/api/review/batches/1/approve-all')).toBe(true)
     expect(batchHtml.includes('Select all visible')).toBe(true)
   })
 })

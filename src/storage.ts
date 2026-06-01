@@ -249,6 +249,32 @@ export function createUpdatesSchema(db: Database): void {
       notes TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_refresh_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      user_agent TEXT,
+      ip TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_user
+      ON admin_refresh_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_hash
+      ON admin_refresh_tokens(token_hash);
   `)
 
   ensureUpdatesSchemaCompatibility(db)
