@@ -1462,9 +1462,21 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
         return values.length;
       }
 
+      function selectedReviewLanguages() {
+        return new Set(Array.from(document.querySelectorAll('[data-review-unit-checkbox]:checked'))
+          .map((input) => input.dataset.lang)
+          .filter(Boolean));
+      }
+
       function toggleAllReviewUnits(checked) {
         for (const input of document.querySelectorAll('[data-review-unit-checkbox]')) {
           input.checked = checked;
+        }
+      }
+
+      function toggleReviewUnitsForLanguage(lang) {
+        for (const input of document.querySelectorAll('[data-review-unit-checkbox]')) {
+          input.checked = input.dataset.lang === lang;
         }
       }
 
@@ -1730,6 +1742,16 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
               }
               return;
             }
+            const selectedLangs = selectedReviewLanguages();
+            if (selectedLangs.size > 1) {
+              event.preventDefault();
+              const result = form.querySelector('[data-result]');
+              if (result) {
+                result.textContent = 'Selected review units span multiple languages. Review one language at a time.';
+                result.classList.add('visible');
+              }
+              return;
+            }
           });
         }
         form.addEventListener('submit', submitJsonForm);
@@ -1746,6 +1768,9 @@ function renderPage(title: string, body: string, options: RenderPageOptions = {}
       }
       for (const button of document.querySelectorAll('[data-review-select-all]')) {
         button.addEventListener('click', () => toggleAllReviewUnits(true));
+      }
+      for (const button of document.querySelectorAll('[data-review-select-language]')) {
+        button.addEventListener('click', () => toggleReviewUnitsForLanguage(button.dataset.reviewSelectLanguage));
       }
       for (const button of document.querySelectorAll('[data-review-clear-all]')) {
         button.addEventListener('click', () => toggleAllReviewUnits(false));
@@ -1877,7 +1902,7 @@ function renderReviewUnit(unit: ReviewUnit): string {
   return `<div class="item">
     <div class="item-header">
       <div style="display:flex; align-items:center; gap: var(--space-2); flex-wrap:wrap">
-        <label class="unit-selection"><input type="checkbox" data-review-unit-checkbox value="${escapeHtml(unit.unitId)}" /></label>
+        <label class="unit-selection"><input type="checkbox" data-review-unit-checkbox data-lang="${escapeHtml(unit.lang)}" value="${escapeHtml(unit.unitId)}" /></label>
         <span class="item-word">${escapeHtml(unit.word?.word ?? unit.wordId)}</span>
         <span class="item-lang">${escapeHtml(unit.lang)}</span>
       </div>
@@ -2699,6 +2724,28 @@ export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): strin
   const pendingUnits = data.summary.pendingUnits
   const conflictCount = data.summary.sourceConflictCount
   const hasConflicts = conflictCount > 0
+  const languageEntries = Object.entries(data.summary.byLanguage).filter(([, count]) => count > 0)
+  const languageCount = languageEntries.length
+  const languageSummary = languageEntries.map(([lang, count]) => `${lang}:${count}`).join(', ')
+  const visibleLanguageCounts = data.items.reduce<Record<string, number>>((counts, item) => {
+    counts[item.lang] = (counts[item.lang] ?? 0) + 1
+    return counts
+  }, {})
+  const visibleLanguageEntries = Object.entries(visibleLanguageCounts)
+  const selectionButtons = visibleLanguageEntries.length > 1
+    ? visibleLanguageEntries.map(([lang, count]) => `
+          <button type="button" class="secondary" data-review-select-language="${escapeHtml(lang)}">Select visible ${escapeHtml(lang)} (${escapeHtml(count)})</button>
+        `).join('')
+    : '<button type="button" class="secondary" data-review-select-all>Select all visible</button>'
+  const approveAllLabel = languageCount > 1
+    ? `Approve all languages ${pendingUnits}`
+    : `Approve all ${pendingUnits}`
+  const approveAllConfirm = languageCount > 1
+    ? `Approve all ${pendingUnits} pending review units across ${languageCount} languages in this batch? ${languageSummary}`
+    : `Approve all ${pendingUnits} pending review units in this batch?`
+  const allowMultipleLanguagesInput = languageCount > 1
+    ? '<input type="hidden" name="allowMultipleLanguages" value="true" />'
+    : ''
   const overrideCheckbox = hasConflicts ? `
     <label class="checkbox-inline">
       <input type="checkbox" name="overrideSourceConflict" value="true" />
@@ -2724,7 +2771,7 @@ export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): strin
       })}
       <div class="selection-bar">
         <div class="btn-group">
-          <button type="button" class="secondary" data-review-select-all>Select all visible</button>
+          ${selectionButtons}
           <button type="button" class="secondary" data-review-clear-all>Clear</button>
         </div>
         <form action="/admin/api/review/units/approve" method="POST" data-json-form="true" data-reload="true" data-review-bulk-form="true" class="inline-form">
@@ -2738,11 +2785,12 @@ export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): strin
       <div class="batch-action">
         <div class="batch-action-text">
           <span class="batch-action-label">Whole batch</span>
-          <span class="batch-action-meta">${escapeHtml(pendingUnits)} pending${hasConflicts ? ` <span class="conflict-note">· ${escapeHtml(conflictCount)} with source conflicts</span>` : ''}</span>
+          <span class="batch-action-meta">${escapeHtml(pendingUnits)} pending${languageCount > 1 ? ` across ${escapeHtml(languageCount)} languages (${escapeHtml(languageSummary)})` : ''}${hasConflicts ? ` <span class="conflict-note">· ${escapeHtml(conflictCount)} with source conflicts</span>` : ''}</span>
         </div>
         <form action="/admin/api/review/batches/${escapeHtml(batchId)}/approve-all" method="POST" data-json-form="true" data-reload="true" class="inline-form">
+          ${allowMultipleLanguagesInput}
           ${overrideCheckbox}
-          <button type="submit" class="secondary" ${pendingUnits === 0 ? 'disabled' : `data-confirm="Approve all ${escapeHtml(pendingUnits)} pending review units in this batch?"`}>Approve all ${escapeHtml(pendingUnits)}</button>
+          <button type="submit" class="secondary" ${pendingUnits === 0 ? 'disabled' : `data-confirm="${escapeHtml(approveAllConfirm)}"`}>${escapeHtml(approveAllLabel)}</button>
           <div class="result" data-result></div>
         </form>
       </div>

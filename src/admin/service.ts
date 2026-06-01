@@ -807,7 +807,7 @@ export function applyBulkReviewAction(
 
 export function approveAllReviewUnitsInBatch(
   batchId: number,
-  input: { notes?: string | null; overrideSourceConflict?: boolean },
+  input: { notes?: string | null; overrideSourceConflict?: boolean; allowMultipleLanguages?: boolean },
   actor: string
 ): BulkReviewActionResponse {
   const { db: releaseDb } = openReleaseDb()
@@ -828,6 +828,18 @@ export function approveAllReviewUnitsInBatch(
       action: 'approved',
       affected: { units: 0, translations: 0, exampleSets: 0 },
       error: 'No pending review units found for this batch.',
+    }
+  }
+
+  const langs = new Set(units.map((unit) => unit.lang))
+  if (langs.size > 1 && !input.allowMultipleLanguages) {
+    releaseDb.close()
+    updatesDb.close()
+    return {
+      ok: false,
+      action: 'approved',
+      affected: { units: 0, translations: 0, exampleSets: 0 },
+      error: 'Batch approval spans multiple languages. Use the explicit all-languages approval action.',
     }
   }
 
@@ -858,7 +870,9 @@ export function approveAllReviewUnitsInBatch(
 
   recordAdminAction(updatesDb, {
     actor,
-    action: 'review.batch.approve_all',
+    action: langs.size > 1 && input.allowMultipleLanguages
+      ? 'review.batch.approve_all_languages'
+      : 'review.batch.approve_all',
     targetKind: 'batch',
     targetId: String(batchId),
     notes: input.notes ?? null,

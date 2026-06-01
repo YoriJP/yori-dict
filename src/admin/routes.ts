@@ -603,6 +603,7 @@ adminApi.post('/admin/api/review/batches/:id/approve-all', async (c) => {
   const result = approveAllReviewUnitsInBatch(Number(c.req.param('id')), {
     notes: typeof body.notes === 'string' ? body.notes : null,
     overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
+    allowMultipleLanguages: parseBoolean(body.allowMultipleLanguages, false),
   }, getAdminActor(c))
 
   if (!result.ok) return c.json(result, 400)

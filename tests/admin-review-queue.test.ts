@@ -351,6 +351,84 @@ describe('bulk AI review queue', () => {
     expect(queue.summary.pendingUnits).toBe(0)
   })
 
+  test('approve all batch action requires explicit all-languages approval for mixed-language batches', async () => {
+    const updatesDb = initUpdatesDatabase(process.env.UPDATES_DATABASE_PATH)
+    insertTranslationUpdate(updatesDb, {
+      wordId: '飲む:のむ',
+      lang: 'ko',
+      definitions: ['마시다'],
+      sources: ['ai'],
+      sourceType: 'ai',
+      batchId: 2,
+      reviewStatus: 'pending',
+    })
+    updatesDb.close()
+
+    const blockedRes = await request('/admin/api/review/batches/2/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+    expect(blockedRes.status).toBe(400)
+    const blocked = await blockedRes.json()
+    expect(blocked.error).toContain('explicit all-languages')
+
+    const batchPageRes = await request('/admin/review/batch/2', {
+      headers: { cookie: session.cookie },
+    })
+    const batchPageHtml = await batchPageRes.text()
+    expect(batchPageHtml.includes('Approve all languages 2')).toBe(true)
+    expect(batchPageHtml.includes('name="allowMultipleLanguages" value="true"')).toBe(true)
+    expect(batchPageHtml.includes('Select visible de (1)')).toBe(true)
+    expect(batchPageHtml.includes('Select visible ko (1)')).toBe(true)
+    expect(batchPageHtml.includes('Select all visible')).toBe(false)
+
+    const singleLanguagePageRes = await request('/admin/review/batch/1', {
+      headers: { cookie: session.cookie },
+    })
+    const singleLanguagePageHtml = await singleLanguagePageRes.text()
+    expect(singleLanguagePageHtml.includes('Approve all languages')).toBe(false)
+    expect(singleLanguagePageHtml.includes('name="allowMultipleLanguages" value="true"')).toBe(false)
+
+    const approveRes = await request('/admin/api/review/batches/2/approve-all', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        allowMultipleLanguages: true,
+        notes: 'approved all languages',
+      }),
+    })
+    expect(approveRes.status).toBe(200)
+    const approved = await approveRes.json()
+    expect(approved.affected).toEqual({
+      units: 2,
+      translations: 1,
+      exampleSets: 1,
+    })
+
+    const db = initUpdatesDatabase(process.env.UPDATES_DATABASE_PATH)
+    const auditRow = db.query<{ action: string; target_id: string; notes: string }, []>(`
+      SELECT action, target_id, notes
+      FROM admin_actions
+      WHERE action = 'review.batch.approve_all_languages'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get()
+    db.close()
+
+    expect(auditRow).toEqual({
+      action: 'review.batch.approve_all_languages',
+      target_id: '2',
+      notes: 'approved all languages',
+    })
+  })
+
   test('review pages render queue dashboard and batch actions', async () => {
     const dashboardRes = await request('/admin/review', {
       headers: { cookie: session.cookie },
