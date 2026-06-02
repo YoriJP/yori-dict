@@ -16,6 +16,9 @@ data/reports/
 # Build output
 dist/
 
+# Local notes and generated planning docs
+docs/
+
 # Environment
 .env
 .env.local
