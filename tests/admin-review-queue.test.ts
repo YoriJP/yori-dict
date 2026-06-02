@@ -25,6 +25,10 @@ let tempDir = ''
 let app: { fetch: (request: Request) => Response | Promise<Response> }
 let session: { cookie: string }
 
+function reviewUnitId(wordId: string, lang: string, batchId: number): string {
+  return `${encodeURIComponent(wordId)}|${lang}|${batchId}`
+}
+
 function makeSnapshot(): ReleaseSnapshot {
   const snapshot = createEmptySnapshot()
   snapshot.words.set('食べる:たべる', {
@@ -44,6 +48,15 @@ function makeSnapshot(): ReleaseSnapshot {
     common: true,
     jlpt: [5],
     frequency: 20,
+  })
+  snapshot.words.set('区切り|語:くぎり', {
+    id: '区切り|語:くぎり',
+    word: '区切り|語',
+    reading: 'くぎり',
+    partOfSpeech: ['noun'],
+    common: false,
+    jlpt: [],
+    frequency: null,
   })
   snapshot.translations.set('食べる:たべる\u0000en', {
     wordId: '食べる:たべる',
@@ -75,6 +88,12 @@ function makeSnapshot(): ReleaseSnapshot {
     wordId: '食べる:たべる',
     lang: 'de',
     definitions: ['essen'],
+    sources: ['seed'],
+  })
+  snapshot.translations.set('区切り|語:くぎり\u0000en', {
+    wordId: '区切り|語:くぎり',
+    lang: 'en',
+    definitions: ['separator word'],
     sources: ['seed'],
   })
   return snapshot
@@ -209,11 +228,11 @@ describe('bulk AI review queue', () => {
     expect(body.summary.recentBatches[1].pendingUnits).toBe(2)
     expect(body.items).toHaveLength(3)
 
-    const pairUnit = body.items.find((item: { unitId: string }) => item.unitId === '食べる:たべる|en|1')
+    const pairUnit = body.items.find((item: { unitId: string }) => item.unitId === reviewUnitId('食べる:たべる', 'en', 1))
     expect(pairUnit.translation).not.toBeNull()
     expect(pairUnit.exampleSet).not.toBeNull()
 
-    const conflictUnit = body.items.find((item: { unitId: string }) => item.unitId === '飲む:のむ|en|1')
+    const conflictUnit = body.items.find((item: { unitId: string }) => item.unitId === reviewUnitId('飲む:のむ', 'en', 1))
     expect(conflictUnit.flags.hasSourceConflict).toBe(true)
 
     const batchSummaryRes = await request('/admin/api/review/batches/1/summary', {
@@ -234,7 +253,7 @@ describe('bulk AI review queue', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        unitIds: ['食べる:たべる|en|1'],
+        unitIds: [reviewUnitId('食べる:たべる', 'en', 1)],
         notes: 'approved in bulk',
       }),
     })
@@ -257,12 +276,12 @@ describe('bulk AI review queue', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        unitIds: ['飲む:のむ|en|1'],
+        unitIds: [reviewUnitId('飲む:のむ', 'en', 1)],
       }),
     })
     expect(blockedRes.status).toBe(400)
     const blocked = await blockedRes.json()
-    expect(blocked.blockedUnitIds).toEqual(['飲む:のむ|en|1'])
+    expect(blocked.blockedUnitIds).toEqual([reviewUnitId('飲む:のむ', 'en', 1)])
 
     const overrideRes = await request('/admin/api/review/units/approve', {
       method: 'POST',
@@ -271,7 +290,7 @@ describe('bulk AI review queue', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        unitIds: ['飲む:のむ|en|1'],
+        unitIds: [reviewUnitId('飲む:のむ', 'en', 1)],
         overrideSourceConflict: true,
       }),
     })
@@ -286,7 +305,10 @@ describe('bulk AI review queue', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        unitIds: '食べる:たべる|en|1,飲む:のむ|en|1',
+        unitIds: [
+          reviewUnitId('食べる:たべる', 'en', 1),
+          reviewUnitId('飲む:のむ', 'en', 1),
+        ].join(','),
         overrideSourceConflict: true,
       }),
     })
@@ -294,6 +316,49 @@ describe('bulk AI review queue', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.affected.units).toBe(2)
+  })
+
+  test('bulk review handles word ids containing delimiter characters', async () => {
+    const updatesDb = initUpdatesDatabase(process.env.UPDATES_DATABASE_PATH)
+    const batchId = insertUpdateBatch(updatesDb, {
+      kind: 'ai_import',
+      inputManifest: { name: 'delimiter-batch' },
+      notes: 'delimiter word id',
+    })
+    insertTranslationUpdate(updatesDb, {
+      wordId: '区切り|語:くぎり',
+      lang: 'en',
+      definitions: ['word with separator'],
+      sources: ['ai'],
+      sourceType: 'ai',
+      batchId,
+      reviewStatus: 'pending',
+    })
+    updatesDb.close()
+
+    const unitId = reviewUnitId('区切り|語:くぎり', 'en', batchId)
+    const approveRes = await request('/admin/api/review/units/approve', {
+      method: 'POST',
+      headers: { cookie: session.cookie },
+      body: JSON.stringify({ unitIds: [unitId] }),
+    })
+    expect(approveRes.status).toBe(200)
+    const approveBody = await approveRes.json()
+    expect(approveBody.affected.units).toBe(1)
+  })
+
+  test('admin JSON endpoints return 400 for malformed JSON', async () => {
+    const res = await request('/admin/api/jobs/source-update', {
+      method: 'POST',
+      headers: {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+      },
+      body: '{',
+    })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toContain('Invalid JSON')
   })
 
   test('bulk review rejects mixed batch or language selections', async () => {
@@ -304,7 +369,10 @@ describe('bulk AI review queue', () => {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        unitIds: ['飲む:のむ|en|1', '食べる:たべる|de|2'],
+        unitIds: [
+          reviewUnitId('飲む:のむ', 'en', 1),
+          reviewUnitId('食べる:たべる', 'de', 2),
+        ],
       }),
     })
     expect(mixedRes.status).toBe(400)
@@ -323,7 +391,7 @@ describe('bulk AI review queue', () => {
     })
     expect(blockedRes.status).toBe(400)
     const blocked = await blockedRes.json()
-    expect(blocked.blockedUnitIds).toEqual(['飲む:のむ|en|1'])
+    expect(blocked.blockedUnitIds).toEqual([reviewUnitId('飲む:のむ', 'en', 1)])
 
     const approveRes = await request('/admin/api/review/batches/1/approve-all', {
       method: 'POST',

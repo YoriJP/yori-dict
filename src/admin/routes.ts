@@ -65,6 +65,20 @@ const admin = new Hono()
 const adminPages = new Hono()
 const adminApi = new Hono()
 
+class InvalidJsonBodyError extends Error {
+  constructor() {
+    super('Invalid JSON body.')
+    this.name = 'InvalidJsonBodyError'
+  }
+}
+
+admin.onError((error, c) => {
+  if (error instanceof InvalidJsonBodyError) {
+    return c.json({ error: error.message }, 400)
+  }
+  throw error
+})
+
 function parseLanguage(raw: string | undefined, fallback: Language = 'en'): Language {
   if (!raw) return fallback
   return normalizeLanguage(raw) ?? fallback
@@ -139,7 +153,11 @@ function parseUnitIds(raw: unknown): string[] {
 }
 
 async function readJsonBody<T extends Record<string, unknown>>(request: Request): Promise<T> {
-  return await request.json() as T
+  try {
+    return await request.json() as T
+  } catch {
+    throw new InvalidJsonBodyError()
+  }
 }
 
 function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
@@ -639,7 +657,9 @@ adminApi.post('/admin/api/jobs/gemini-import', async (c) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const lowerMessage = message.toLowerCase()
-    const status = message.includes('GEMINI_API_KEY')
+    const status = error instanceof InvalidJsonBodyError
+      ? 400
+      : message.includes('GEMINI_API_KEY')
       || message.includes('GOOGLE_API_KEY')
       || lowerMessage.includes('api key')
       || message.startsWith('No pricing preset found')
