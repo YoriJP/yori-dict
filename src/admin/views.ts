@@ -3,6 +3,7 @@ import type {
   AdminEntryInspectionResponse,
   AdminNewWordResponse,
   AdminReviewBatchPageResponse,
+  AdminReviewBatchSummaryResponse,
   AdminReleaseListResponse,
   AdminReviewQueueResponseV2,
   AdminReviewQueueResponse,

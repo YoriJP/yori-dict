@@ -36,9 +36,10 @@ import {
 import { normalizeLanguage, type Language } from '../types'
 import { initUpdatesDatabase, listUpdateBatches } from '../update-store'
 import type { GeminiRunOptions } from '../../scripts/import/gemini'
-import type { ReviewRiskLevel, ReviewUnitShape } from './types'
+import type { AdminNewWordFormData, ReviewRiskLevel, ReviewUnitShape } from './types'
 
 const admin = new Hono()
+type JsonObject = Record<string, unknown>
 
 function parseLanguage(raw: string | undefined, fallback: Language = 'en'): Language {
   if (!raw) return fallback
@@ -67,6 +68,12 @@ function parseOptionalNumber(raw: unknown): number | null {
   if (raw === undefined || raw === null || raw === '') return null
   const parsed = Number(raw)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function asObject(value: unknown): JsonObject | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as JsonObject
+    : null
 }
 
 function mapAdminBuildError(
@@ -111,8 +118,48 @@ function parseUnitIds(raw: unknown): string[] {
     .filter(Boolean)
 }
 
-async function readJsonBody<T extends Record<string, unknown>>(request: Request): Promise<T> {
-  return await request.json() as T
+async function readJsonObject(request: Request): Promise<JsonObject> {
+  const body = await request.json().catch(() => ({}))
+  return asObject(body) ?? {}
+}
+
+function parseStringList(raw: unknown): string[] {
+  const values = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : []
+  return values
+    .map((value) => String(value).trim())
+    .filter(Boolean)
+}
+
+function parseNewWordInput(body: JsonObject): AdminNewWordFormData {
+  const rawTranslations = Array.isArray(body.translations) ? body.translations : []
+
+  return {
+    word: typeof body.word === 'string' ? body.word : '',
+    reading: typeof body.reading === 'string' ? body.reading : '',
+    partOfSpeech: parseStringList(body.partOfSpeech),
+    common: parseBoolean(body.common, false),
+    jlpt: parseOptionalNumber(body.jlpt),
+    translations: rawTranslations.map((raw): AdminNewWordFormData['translations'][number] => {
+      const row = asObject(raw) ?? {}
+      const lang = typeof row.lang === 'string'
+        ? normalizeLanguage(row.lang) ?? 'en'
+        : 'en'
+
+      return {
+        lang,
+        definitions: parseStringList(row.definitions),
+        examples: Array.isArray(row.examples)
+          ? row.examples.map((rawExample) => {
+              const example = asObject(rawExample) ?? {}
+              return {
+                japanese: typeof example.japanese === 'string' ? example.japanese : '',
+                translation: typeof example.translation === 'string' ? example.translation : '',
+              }
+            })
+          : [],
+      }
+    }),
+  }
 }
 
 admin.use('/admin', requireAdminAuth)
@@ -179,7 +226,7 @@ admin.get('/admin/api/releases/:version', (c) => {
 })
 
 admin.post('/admin/api/releases/build', async (c) => {
-  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+  const body = await readJsonObject(c.req.raw)
   try {
     const result = await runAdminBuildRelease({
       version: typeof body.version === 'string' ? body.version : null,
@@ -195,32 +242,8 @@ admin.post('/admin/api/releases/build', async (c) => {
 })
 
 admin.post('/admin/api/new-word', async (c) => {
-  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
-  const result = await createAdminNewWord({
-    word: typeof body.word === 'string' ? body.word : '',
-    reading: typeof body.reading === 'string' ? body.reading : '',
-    partOfSpeech: Array.isArray(body.partOfSpeech)
-      ? body.partOfSpeech.map((value) => String(value))
-      : typeof body.partOfSpeech === 'string'
-        ? [body.partOfSpeech]
-        : [],
-    common: parseBoolean(body.common, false),
-    jlpt: parseOptionalNumber(body.jlpt),
-    translations: Array.isArray(body.translations)
-      ? body.translations.map((row) => ({
-          lang: typeof row === 'object' && row && 'lang' in row ? String((row as Record<string, unknown>).lang) as Language : 'en',
-          definitions: typeof row === 'object' && row && Array.isArray((row as Record<string, unknown>).definitions)
-            ? ((row as Record<string, unknown>).definitions as unknown[]).map((value) => String(value))
-            : [],
-          examples: typeof row === 'object' && row && Array.isArray((row as Record<string, unknown>).examples)
-            ? ((row as Record<string, unknown>).examples as Record<string, unknown>[]).map((item) => ({
-                japanese: String(item.japanese ?? ''),
-                translation: String(item.translation ?? ''),
-              }))
-            : [],
-        }))
-      : [],
-  }, getAdminActor(c))
+  const body = await readJsonObject(c.req.raw)
+  const result = await createAdminNewWord(parseNewWordInput(body), getAdminActor(c))
 
   if (!result.created && result.conflictWordId) return c.json(result, 409)
   if (!result.created) return c.json(result, 400)
@@ -228,7 +251,7 @@ admin.post('/admin/api/new-word', async (c) => {
 })
 
 admin.post('/admin/api/new-word/build-release', async (c) => {
-  const body = await c.req.raw.json().catch(() => ({}))
+  const body = await readJsonObject(c.req.raw)
   const createdWordId = typeof body.createdWordId === 'string' ? body.createdWordId.trim() : ''
   if (!createdWordId) {
     return c.json({ error: 'createdWordId is required.' }, 400)
@@ -252,23 +275,20 @@ admin.post('/admin/api/releases/:version/activate', (c) => {
   return c.json(runAdminActivateRelease(c.req.param('version'), getAdminActor(c)))
 })
 
-admin.post('/admin/api/releases/promote', (c) => {
-  return c.req.raw.json()
-    .catch(() => ({}))
-    .then((body: Record<string, unknown>) => {
-      try {
-        const result = runAdminPromoteRelease({
-          version: typeof body.version === 'string' ? body.version : null,
-          activate: parseBoolean(body.activate, true),
-          actor: getAdminActor(c),
-        })
-        return c.json(result)
-      } catch (error) {
-        const response = mapAdminBuildError(c, error)
-        if (response) return response
-        throw error
-      }
+admin.post('/admin/api/releases/promote', async (c) => {
+  const body = await readJsonObject(c.req.raw)
+  try {
+    const result = runAdminPromoteRelease({
+      version: typeof body.version === 'string' ? body.version : null,
+      activate: parseBoolean(body.activate, true),
+      actor: getAdminActor(c),
     })
+    return c.json(result)
+  } catch (error) {
+    const response = mapAdminBuildError(c, error)
+    if (response) return response
+    throw error
+  }
 })
 
 admin.get('/admin/api/entries', (c) => {
@@ -308,35 +328,35 @@ admin.get('/admin/api/review/batches/:id/summary', (c) => {
 })
 
 admin.post('/admin/api/review/translation/:id/approve', async (c) => {
-  const body = await c.req.raw.json().catch(() => ({}))
+  const body = await readJsonObject(c.req.raw)
   const result = approveTranslationReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Translation update not found' }, 404)
   return c.json(result)
 })
 
 admin.post('/admin/api/review/translation/:id/reject', async (c) => {
-  const body = await c.req.raw.json().catch(() => ({}))
+  const body = await readJsonObject(c.req.raw)
   const result = rejectTranslationReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Translation update not found' }, 404)
   return c.json(result)
 })
 
 admin.post('/admin/api/review/example-set/:id/approve', async (c) => {
-  const body = await c.req.raw.json().catch(() => ({}))
+  const body = await readJsonObject(c.req.raw)
   const result = approveExampleSetReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Example update set not found' }, 404)
   return c.json(result)
 })
 
 admin.post('/admin/api/review/example-set/:id/reject', async (c) => {
-  const body = await c.req.raw.json().catch(() => ({}))
+  const body = await readJsonObject(c.req.raw)
   const result = rejectExampleSetReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Example update set not found' }, 404)
   return c.json(result)
 })
 
 admin.post('/admin/api/review/units/approve', async (c) => {
-  const body = await c.req.raw.json().catch(() => ({}))
+  const body = await readJsonObject(c.req.raw)
   const result = applyBulkReviewAction('approved', {
     unitIds: parseUnitIds(body.unitIds),
     notes: typeof body.notes === 'string' ? body.notes : null,
@@ -348,7 +368,7 @@ admin.post('/admin/api/review/units/approve', async (c) => {
 })
 
 admin.post('/admin/api/review/units/reject', async (c) => {
-  const body = await c.req.raw.json().catch(() => ({}))
+  const body = await readJsonObject(c.req.raw)
   const result = applyBulkReviewAction('rejected', {
     unitIds: parseUnitIds(body.unitIds),
     notes: typeof body.notes === 'string' ? body.notes : null,
@@ -360,7 +380,7 @@ admin.post('/admin/api/review/units/reject', async (c) => {
 })
 
 admin.post('/admin/api/jobs/source-update', async (c) => {
-  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+  const body = await readJsonObject(c.req.raw)
   const result = await runAdminSourceUpdate({
     langs: parseLangList(body.langs),
     dryRun: parseBoolean(body.dryRun, false),
@@ -370,7 +390,7 @@ admin.post('/admin/api/jobs/source-update', async (c) => {
 })
 
 admin.post('/admin/api/jobs/gemini-import', async (c) => {
-  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+  const body = await readJsonObject(c.req.raw)
   const result = await runAdminGeminiImport({
     actor: getAdminActor(c),
     langs: parseLangList(body.langs) ?? undefined,

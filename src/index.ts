@@ -12,45 +12,35 @@ import {
 
 const app = new Hono()
 
-// Initialize database schema on startup
 initSchema()
 
-// Load OpenAPI spec once at startup with an absolute path (cwd-independent)
 const openapiSpec = readFileSync(resolve(import.meta.dir, '../openapi.yaml'), 'utf-8')
 
-// Middleware
 app.use('*', cors())
 
-// Serve OpenAPI spec
 app.get('/openapi.yaml', (c) => {
   return c.text(openapiSpec, 200, {
     'Content-Type': 'text/plain; charset=utf-8',
   })
 })
 
-// Scalar API reference UI
 app.get('/docs', apiReference({ url: '/openapi.yaml' }))
 
-// Health check
 app.get('/health', (c) => {
   return c.json({ status: 'ok' })
 })
 
 app.route('/', adminRoutes)
 
-// Main lookup endpoint
 app.get('/v1/lookup', (c) => {
-  // Get query parameters
   const word = c.req.query('word')
   const rawLang = c.req.query('lang')
   const lang = rawLang ? normalizeLanguage(rawLang) : 'en'
 
-  // Validate word parameter
   if (!word || word.trim() === '') {
     return c.json({ error: 'Missing required parameter: word' }, 400)
   }
 
-  // Validate language parameter
   if (!lang) {
     return c.json(
       { error: `Invalid language. Supported: ${SUPPORTED_LANGUAGES.join(', ')}` },
@@ -58,7 +48,6 @@ app.get('/v1/lookup', (c) => {
     )
   }
 
-  // Lookup word
   const result = lookupWord(word.trim(), lang)
 
   if (!result) {
@@ -68,18 +57,15 @@ app.get('/v1/lookup', (c) => {
   return c.json(result)
 })
 
-// 404 handler
 app.notFound((c) => {
   return c.json({ error: 'Not found' }, 404)
 })
 
-// Error handler
 app.onError((err, c) => {
   console.error('Error:', err)
   return c.json({ error: 'Internal server error' }, 500)
 })
 
-// Export for Bun
 export default {
   port: process.env.PORT || 3000,
   fetch: app.fetch,

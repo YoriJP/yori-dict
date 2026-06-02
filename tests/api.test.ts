@@ -1,24 +1,180 @@
 import { afterAll, beforeAll, describe, test, expect } from 'bun:test'
+import { mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { closeDb } from '../src/db'
+import type { Language } from '../src/types'
+import type { ReleaseSnapshot } from '../src/storage'
+import { createEmptySnapshot } from '../src/storage'
+import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
 
 let app: { fetch: (request: Request) => Response | Promise<Response> }
+let tempDir = ''
 let originalReleaseDbPath: string | undefined
 let originalReleaseVersion: string | undefined
 let originalReleaseManifestPath: string | undefined
+let originalUpdatesDatabasePath: string | undefined
 
-// Helper to make requests to the app
 async function request(path: string): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`))
+}
+
+function addWord(
+  snapshot: ReleaseSnapshot,
+  entry: {
+    id: string
+    word: string
+    reading: string
+    partOfSpeech: string[]
+    common?: boolean
+    jlpt?: number[]
+    frequency?: number | null
+    translations: Partial<Record<Language, string[]>>
+    examples?: Partial<Record<Language, Array<{ japanese: string; translation: string }>>>
+  }
+): void {
+  snapshot.words.set(entry.id, {
+    id: entry.id,
+    word: entry.word,
+    reading: entry.reading,
+    partOfSpeech: entry.partOfSpeech,
+    common: entry.common ?? true,
+    jlpt: entry.jlpt ?? [],
+    frequency: entry.frequency ?? null,
+  })
+
+  for (const [lang, definitions] of Object.entries(entry.translations) as Array<[Language, string[]]>) {
+    snapshot.translations.set(`${entry.id}\u0000${lang}`, {
+      wordId: entry.id,
+      lang,
+      definitions,
+      sources: ['fixture'],
+    })
+  }
+
+  for (const [lang, examples] of Object.entries(entry.examples ?? {}) as Array<[Language, Array<{ japanese: string; translation: string }>]>) {
+    snapshot.examples.set(`${entry.id}\u0000${lang}`, examples.map((example) => ({
+      wordId: entry.id,
+      lang,
+      japanese: example.japanese,
+      translation: example.translation,
+      source: 'fixture',
+    })))
+  }
+}
+
+function makeSnapshot(): ReleaseSnapshot {
+  const snapshot = createEmptySnapshot()
+
+  addWord(snapshot, {
+    id: '食べる:たべる',
+    word: '食べる',
+    reading: 'たべる',
+    partOfSpeech: ['ichidan verb', 'transitive verb'],
+    jlpt: [5],
+    frequency: 195,
+    translations: {
+      en: ['to eat'],
+      de: ['essen'],
+      ko: ['먹다'],
+      'zh-cn': ['吃'],
+      'zh-tw': ['吃'],
+    },
+    examples: {
+      en: [{ japanese: '毎朝食べます', translation: 'I eat every morning' }],
+    },
+  })
+
+  addWord(snapshot, {
+    id: '書く:かく',
+    word: '書く',
+    reading: 'かく',
+    partOfSpeech: ['godan verb'],
+    translations: { en: ['to write'] },
+  })
+
+  addWord(snapshot, {
+    id: '猫:ねこ',
+    word: '猫',
+    reading: 'ねこ',
+    partOfSpeech: ['noun'],
+    translations: { en: ['cat'] },
+  })
+
+  addWord(snapshot, {
+    id: '高い:たかい',
+    word: '高い',
+    reading: 'たかい',
+    partOfSpeech: ['i-adjective'],
+    translations: { en: ['high', 'expensive'] },
+  })
+
+  addWord(snapshot, {
+    id: 'いいえ:いいえ',
+    word: 'いいえ',
+    reading: 'いいえ',
+    partOfSpeech: ['interjection'],
+    translations: {
+      en: ['no'],
+      de: ['nein'],
+      ko: ['아니요'],
+      'zh-cn': ['不'],
+      'zh-tw': ['不'],
+    },
+  })
+
+  addWord(snapshot, {
+    id: '彼処:あそこ',
+    word: '彼処',
+    reading: 'あそこ',
+    partOfSpeech: ['pronoun'],
+    translations: { en: ['there'] },
+  })
+
+  addWord(snapshot, {
+    id: '出る:でる',
+    word: '出る',
+    reading: 'でる',
+    partOfSpeech: ['ichidan verb'],
+    translations: { en: ['to leave', 'to appear'] },
+  })
+
+  addWord(snapshot, {
+    id: '飲む:のむ',
+    word: '飲む',
+    reading: 'のむ',
+    partOfSpeech: ['godan verb'],
+    translations: {
+      en: ['to drink'],
+      de: ['trinken'],
+    },
+  })
+
+  addWord(snapshot, {
+    id: '大きい:おおきい',
+    word: '大きい',
+    reading: 'おおきい',
+    partOfSpeech: ['i-adjective'],
+    translations: { en: ['big'] },
+  })
+
+  return snapshot
 }
 
 beforeAll(async () => {
   originalReleaseDbPath = process.env.RELEASE_DB_PATH
   originalReleaseVersion = process.env.RELEASE_VERSION
   originalReleaseManifestPath = process.env.RELEASE_MANIFEST_PATH
+  originalUpdatesDatabasePath = process.env.UPDATES_DATABASE_PATH
 
-  process.env.RELEASE_DB_PATH = './dict.sqlite'
+  tempDir = mkdtempSync(join(tmpdir(), 'yori-api-'))
+  const releaseDbPath = join(tempDir, 'release.sqlite')
+  writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+
+  process.env.RELEASE_DB_PATH = releaseDbPath
   process.env.RELEASE_VERSION = 'api-test'
   delete process.env.RELEASE_MANIFEST_PATH
+  process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
 
   const module = await import('../src/index')
   app = module.default
@@ -35,6 +191,11 @@ afterAll(() => {
 
   if (originalReleaseManifestPath === undefined) delete process.env.RELEASE_MANIFEST_PATH
   else process.env.RELEASE_MANIFEST_PATH = originalReleaseManifestPath
+
+  if (originalUpdatesDatabasePath === undefined) delete process.env.UPDATES_DATABASE_PATH
+  else process.env.UPDATES_DATABASE_PATH = originalUpdatesDatabasePath
+
+  if (tempDir) rmSync(tempDir, { recursive: true, force: true })
 })
 
 describe('Health Check', () => {

@@ -14,9 +14,6 @@ let releaseDb: Database | null = null
 let updatesDb: Database | null = null
 let releaseDbPath: string | null = null
 
-/**
- * Get release database connection.
- */
 export function getReleaseDb(): Database {
   const config = requireActiveReleaseConfig()
 
@@ -31,9 +28,6 @@ export function getReleaseDb(): Database {
   return releaseDb
 }
 
-/**
- * Get updates database connection.
- */
 export function getUpdatesDb(): Database {
   if (!updatesDb) {
     updatesDb = openUpdatesDb()
@@ -41,26 +35,15 @@ export function getUpdatesDb(): Database {
   return updatesDb
 }
 
-/**
- * Initialize database schema
- */
 export function initSchema(): void {
   getReleaseDb()
   getUpdatesDb()
 }
 
-/**
- * Lookup a word and return full response
- */
 export function lookupWord(word: string, lang: Language): LookupResponse | null {
   const db = getReleaseDb()
   const updates = getUpdatesDb()
 
-  // Query word by exact match on word or reading
-  // Order by: common words first, then by lowest JLPT level (most beginner-friendly)
-  // jlpt is JSON array like '[5]' or '[5,4]' - extract first element for sorting
-  // JLPT levels: N5=5 (easiest) to N1=1 (hardest), so lower number = harder
-  // We want easiest first, so sort DESC on the extracted level
   const wordQuery = db.query<WordRow, [string]>(`
     SELECT * FROM words
     WHERE word = ?1 OR reading = ?1
@@ -79,7 +62,6 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
     return null
   }
 
-  // Get translation for the requested language
   const translationQuery = db.query<TranslationRow, [string, string]>(`
     SELECT * FROM translations
     WHERE word_id = ? AND lang = ?
@@ -114,17 +96,11 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
     exampleRows = examplesQuery.all(wordRow.id, lang)
   }
 
-  // Parse JSON fields
   const partOfSpeech: string[] = JSON.parse(wordRow.part_of_speech)
   const definitions = effectiveDefinitions
-
-  // Generate romaji from reading
   const romaji = toRomaji(wordRow.reading)
-
-  // Generate conjugations if applicable
   const conjugations = conjugate(wordRow.word, wordRow.reading, partOfSpeech)
 
-  // Build response
   const response: LookupResponse = {
     word: wordRow.word,
     reading: wordRow.reading,
@@ -137,7 +113,6 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
     })),
   }
 
-  // Only include optional fields if present
   if (wordRow.frequency !== null) {
     response.frequency = wordRow.frequency
   }
@@ -148,9 +123,6 @@ export function lookupWord(word: string, lang: Language): LookupResponse | null 
   return response
 }
 
-/**
- * Close database connection
- */
 export function closeDb(): void {
   if (releaseDb) {
     releaseDb.close()
