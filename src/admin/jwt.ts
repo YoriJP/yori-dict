@@ -15,10 +15,15 @@ export interface AccessTokenPayload {
 let cachedSecret: Uint8Array | null = null
 let cachedSecretSource: string | null = null
 
+const PLACEHOLDER_SECRET_PATTERN = /replace-me/i
+
 function getJwtSecret(): Uint8Array {
   const raw = process.env.JWT_SECRET?.trim()
   if (!raw) throw new Error('JWT_SECRET is not configured')
   if (raw.length < 32) throw new Error('JWT_SECRET must be at least 32 characters')
+  if (PLACEHOLDER_SECRET_PATTERN.test(raw)) {
+    throw new Error('JWT_SECRET is set to an insecure placeholder. Generate one with: openssl rand -base64 32')
+  }
   if (cachedSecret && cachedSecretSource === raw) return cachedSecret
   cachedSecret = new TextEncoder().encode(raw)
   cachedSecretSource = raw
@@ -27,7 +32,7 @@ function getJwtSecret(): Uint8Array {
 
 export function isJwtConfigured(): boolean {
   const raw = process.env.JWT_SECRET?.trim()
-  return !!raw && raw.length >= 32
+  return !!raw && raw.length >= 32 && !PLACEHOLDER_SECRET_PATTERN.test(raw)
 }
 
 export async function signAccessToken(userId: number, email: string): Promise<string> {

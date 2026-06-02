@@ -16,7 +16,8 @@ initSchema()
 
 const openapiSpec = readFileSync(resolve(import.meta.dir, '../openapi.yaml'), 'utf-8')
 
-app.use('*', cors())
+app.use('/v1/*', cors())
+app.use('/openapi.yaml', cors())
 
 app.get('/openapi.yaml', (c) => {
   return c.text(openapiSpec, 200, {

@@ -161,8 +161,13 @@ async function readJsonBody<T extends Record<string, unknown>>(request: Request)
 }
 
 function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  // Trust the right-most entry (proxy-appended); the left-most is client-supplied.
   const forwarded = c.req.header('x-forwarded-for')
-  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown'
+  if (forwarded) {
+    const parts = forwarded.split(',')
+    const last = parts[parts.length - 1]?.trim()
+    if (last) return last
+  }
   return c.req.header('x-real-ip')?.trim() || 'unknown'
 }
 
