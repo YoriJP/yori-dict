@@ -44,10 +44,11 @@ describe('parseArgs', () => {
       '--exclude-regex', '^[a-z]+$',
       '--max-input-tokens', '1200',
       '--max-cost-usd', '2.5',
+      '--request-timeout-ms', '30000',
       '--report-file', 'reports/gemini.json',
     ])
 
-    expect(opts.model).toBe('gemini-3.1-flash-lite-preview')
+    expect(opts.model).toBe('gemini-3.1-flash-lite')
     expect(opts.langs).toEqual(['zh-tw'])
     expect(opts.commonOnly).toBe(true)
     expect(opts.minFrequency).toBe(5000)
@@ -55,6 +56,7 @@ describe('parseArgs', () => {
     expect(opts.excludeRegex).toBe('^[a-z]+$')
     expect(opts.maxInputTokens).toBe(1200)
     expect(opts.maxCostUsd).toBe(2.5)
+    expect(opts.requestTimeoutMs).toBe(30000)
     expect(opts.reportFile).toBe('reports/gemini.json')
   })
 })
@@ -99,6 +101,31 @@ describe('collectMissingKeys', () => {
     expect(result.excludedByFrequency).toBe(1)
     expect(result.excludedByRegex).toBe(1)
     expect(result.keys).toEqual(['初心者:しょしんしゃ', '常用語:じょうようご'])
+  })
+
+  test('skips keys that already have active AI updates', () => {
+    const target = makeLangFile()
+    const masterKeys = ['既存AI:きそんえーあい', '未生成:みせいせい']
+    const coreEntries: Record<string, CoreEntry> = {
+      '既存AI:きそんえーあい': makeCoreEntry({ word: '既存AI', reading: 'きそんえーあい', common: true }),
+      '未生成:みせいせい': makeCoreEntry({ word: '未生成', reading: 'みせいせい', common: true }),
+    }
+    const filters = buildSelectionFilters(parseArgs(['--common-only']))
+
+    const result = collectMissingKeys(
+      masterKeys,
+      target,
+      coreEntries,
+      filters,
+      0,
+      null,
+      new Set(['既存AI:きそんえーあい'])
+    )
+
+    expect(result.totalMissing).toBe(2)
+    expect(result.eligibleMissing).toBe(1)
+    expect(result.excludedByActiveUpdate).toBe(1)
+    expect(result.keys).toEqual(['未生成:みせいせい'])
   })
 })
 

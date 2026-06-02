@@ -9,11 +9,8 @@ import {
   saveCore,
   saveLang,
 } from '../scripts/import/base'
+import { resolveProjectPath } from './storage'
 import { SUPPORTED_LANGUAGES, normalizeLanguage, type Language } from './types'
-
-const DATA_DIR = './data'
-const LANG_DIR = `${DATA_DIR}/lang`
-const CORE_PATH = `${DATA_DIR}/core.json`
 
 const READING_REGEX = /^[\p{Script=Hiragana}\p{Script=Katakana}々ー・\s]+$/u
 
@@ -92,6 +89,14 @@ function pushFieldError(
 
 function dedupeStrings(values: string[]): string[] {
   return [...new Set(values)]
+}
+
+function getLangPath(lang: Language): string {
+  return resolveProjectPath(`data/lang/${lang}.json`)
+}
+
+function getCorePath(): string {
+  return resolveProjectPath('data/core.json')
 }
 
 function normalizeDefinitions(
@@ -270,7 +275,7 @@ function normalizeManualWordInput(
 }
 
 async function findSimilarEntries(word: string, reading: string): Promise<SimilarManualWordEntry[]> {
-  const core = await loadCore(CORE_PATH)
+  const core = await loadCore(getCorePath())
   const results: SimilarManualWordEntry[] = []
 
   for (const [wordId, entry] of Object.entries(core.entries)) {
@@ -299,7 +304,7 @@ export async function createManualWordInSnapshot(
     }
   }
 
-  const core = await loadCore(CORE_PATH)
+  const core = await loadCore(getCorePath())
   const wordId = makeKey(normalized.word, normalized.reading)
   const similarEntries = await findSimilarEntries(normalized.word, normalized.reading)
   const warnings: string[] = []
@@ -329,7 +334,7 @@ export async function createManualWordInSnapshot(
 
   const langFiles = new Map<Language, Awaited<ReturnType<typeof loadLang>>>()
   for (const translation of normalized.translations) {
-    const langPath = `${LANG_DIR}/${translation.lang}.json`
+    const langPath = getLangPath(translation.lang)
     langFiles.set(translation.lang, await loadLang(langPath, translation.lang))
   }
 
@@ -389,17 +394,17 @@ export async function createManualWordInSnapshot(
   )
 
   const snapshotFiles = [
-    ...sortedLangs.map((lang) => `${LANG_DIR}/${lang}.json`),
-    CORE_PATH,
+    ...sortedLangs.map((lang) => getLangPath(lang)),
+    getCorePath(),
   ]
 
   for (const lang of sortedLangs) {
     const langFile = langFiles.get(lang)
     if (langFile) {
-      await saveLang(`${LANG_DIR}/${lang}.json`, langFile)
+      await saveLang(getLangPath(lang), langFile)
     }
   }
-  await saveCore(CORE_PATH, core)
+  await saveCore(getCorePath(), core)
 
   return {
     created: true,

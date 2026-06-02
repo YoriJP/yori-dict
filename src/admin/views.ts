@@ -96,10 +96,25 @@ const NAV_ITEMS = [
   { href: '/admin/jobs', label: 'Jobs', match: 'Jobs' },
 ]
 
-function renderPage(title: string, body: string): string {
+type RenderPageOptions = {
+  includeScripts?: boolean
+  standalone?: boolean
+  utilityHtml?: string
+}
+
+function renderPage(title: string, body: string, options: RenderPageOptions = {}): string {
+  const includeScripts = options.includeScripts ?? true
+  const standalone = options.standalone ?? false
   const navHtml = NAV_ITEMS.map(item =>
     `<a href="${item.href}" ${title.includes(item.match) ? 'aria-current="page"' : ''}>${item.label}</a>`
   ).join('\n          ')
+  const utilityHtml = options.utilityHtml ?? `
+    <div class="content-header">
+      <form action="/admin/logout" method="POST" class="shell-utility-form">
+        <button type="submit" class="secondary sm">Log out</button>
+      </form>
+    </div>
+  `
 
   return `<!doctype html>
 <html lang="en">
@@ -119,12 +134,12 @@ function renderPage(title: string, body: string): string {
         --surface-1: oklch(94.5% 0.012 var(--hue));
         --surface-2: oklch(99% 0.005 var(--hue));
         --surface-code: oklch(18% 0.015 var(--hue));
-        --surface-sidebar: oklch(22% 0.018 var(--hue));
+        --surface-sidebar: oklch(20% 0.02 var(--hue));
 
         --text-primary: oklch(22% 0.02 var(--hue));
         --text-secondary: oklch(45% 0.03 var(--hue));
         --text-tertiary: oklch(58% 0.025 var(--hue));
-        --text-on-dark: oklch(90% 0.01 var(--hue));
+        --text-on-dark: oklch(92% 0.008 var(--hue));
         --text-on-code: oklch(92% 0.015 var(--hue));
 
         --accent: oklch(52% 0.16 var(--hue));
@@ -140,15 +155,15 @@ function renderPage(title: string, body: string): string {
         --info: oklch(52% 0.1 var(--hue));
         --info-subtle: oklch(94% 0.03 var(--hue));
 
-        --border: oklch(88% 0.012 var(--hue));
+        --border: oklch(89% 0.01 var(--hue));
         --border-strong: oklch(78% 0.018 var(--hue));
 
-        --text-xs: clamp(0.6875rem, 0.65rem + 0.15vw, 0.75rem);
-        --text-sm: clamp(0.8125rem, 0.78rem + 0.15vw, 0.875rem);
-        --text-base: clamp(0.9375rem, 0.9rem + 0.2vw, 1rem);
-        --text-lg: clamp(1.125rem, 1rem + 0.4vw, 1.25rem);
-        --text-xl: clamp(1.5rem, 1.2rem + 0.8vw, 1.875rem);
-        --text-2xl: clamp(2rem, 1.5rem + 1.2vw, 2.5rem);
+        --text-xs: 0.75rem;
+        --text-sm: 0.875rem;
+        --text-base: 1rem;
+        --text-lg: 1.25rem;
+        --text-xl: 1.75rem;
+        --text-2xl: 2.25rem;
 
         --font-display: "Fraunces", "Noto Serif JP", "Noto Serif KR", serif;
         --font-body: "Source Sans 3", "Noto Sans JP", "Noto Sans KR", "Noto Sans SC", "Noto Sans TC", system-ui, sans-serif;
@@ -164,9 +179,10 @@ function renderPage(title: string, body: string): string {
         --space-7: 48px;
         --space-8: 64px;
 
-        --radius-sm: 4px;
-        --radius-md: 8px;
-        --radius-lg: 12px;
+        --radius-sm: 3px;
+        --radius-md: 6px;
+
+        --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
       }
 
       *, *::before, *::after { box-sizing: border-box; margin: 0; }
@@ -177,13 +193,19 @@ function renderPage(title: string, body: string): string {
         color: var(--text-primary);
         background: var(--surface-0);
         line-height: 1.55;
+        font-kerning: normal;
+        font-optical-sizing: auto;
         -webkit-font-smoothing: antialiased;
+      }
+      body.standalone-body {
+        min-height: 100vh;
+        background: var(--surface-0);
       }
 
       /* -- Layout shell -- */
       .shell {
         display: grid;
-        grid-template-columns: 220px 1fr;
+        grid-template-columns: 200px 1fr;
         min-height: 100vh;
       }
 
@@ -199,46 +221,46 @@ function renderPage(title: string, body: string): string {
       }
       .sidebar-brand {
         font-family: var(--font-display);
-        font-size: var(--text-xl);
+        font-size: var(--text-lg);
         font-weight: 700;
         color: var(--text-on-dark);
         padding: 0 var(--space-5);
         margin-bottom: var(--space-7);
         letter-spacing: -0.02em;
+        line-height: 1;
       }
       .sidebar-brand span {
-        font-weight: 300;
-        font-size: var(--text-sm);
+        font-family: var(--font-body);
+        font-weight: 400;
+        font-size: var(--text-xs);
         display: block;
-        color: oklch(65% 0.02 var(--hue));
-        margin-top: var(--space-1);
-        letter-spacing: 0.06em;
+        color: oklch(55% 0.02 var(--hue));
+        margin-top: var(--space-2);
+        letter-spacing: 0.08em;
         text-transform: uppercase;
       }
       .sidebar nav {
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 1px;
         flex: 1;
       }
       .sidebar nav a {
         display: block;
-        padding: var(--space-3) var(--space-5);
-        color: oklch(72% 0.015 var(--hue));
+        padding: var(--space-2) var(--space-5);
+        color: oklch(65% 0.015 var(--hue));
         text-decoration: none;
         font-size: var(--text-sm);
         font-weight: 400;
-        border-left: 3px solid transparent;
-        transition: color 120ms, background 120ms, border-color 120ms;
+        transition: color 100ms var(--ease-out), background 100ms var(--ease-out);
       }
       .sidebar nav a:hover {
         color: var(--text-on-dark);
-        background: oklch(28% 0.015 var(--hue));
+        background: oklch(26% 0.018 var(--hue));
       }
       .sidebar nav a[aria-current="page"] {
         color: var(--text-on-dark);
-        background: oklch(28% 0.02 var(--hue));
-        border-left-color: var(--accent);
+        background: oklch(26% 0.022 var(--hue));
         font-weight: 600;
       }
 
@@ -260,19 +282,32 @@ function renderPage(title: string, body: string): string {
 
       .content {
         padding: var(--space-7) var(--space-7) var(--space-8);
-        max-width: 1000px;
+        max-width: 960px;
+      }
+      .content-header {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--space-4);
+        margin-bottom: var(--space-5);
+        padding-bottom: var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .shell-utility-form {
+        display: block;
       }
 
       /* -- Typography -- */
       h1, h2, h3, h4 {
         font-family: var(--font-display);
-        line-height: 1.2;
-        letter-spacing: -0.015em;
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+        text-wrap: balance;
       }
       h1 {
         font-size: var(--text-2xl);
         font-weight: 700;
-        margin-bottom: var(--space-2);
+        margin-bottom: var(--space-1);
       }
       h2 {
         font-size: var(--text-lg);
@@ -280,22 +315,33 @@ function renderPage(title: string, body: string): string {
         margin-bottom: var(--space-4);
       }
       h3 {
-        font-size: var(--text-base);
+        font-family: var(--font-body);
+        font-size: var(--text-sm);
         font-weight: 600;
-        margin-bottom: var(--space-2);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-tertiary);
+        margin-bottom: var(--space-3);
       }
 
       .page-header {
-        margin-bottom: var(--space-7);
+        margin-bottom: var(--space-6);
       }
       .page-header p {
         color: var(--text-secondary);
-        max-width: 600px;
+        font-size: var(--text-sm);
+        max-width: 50ch;
         margin-top: var(--space-2);
+      }
+      .page-header .page-meta {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-top: var(--space-1);
       }
 
       a { color: var(--accent); text-decoration: none; }
       a:hover { text-decoration: underline; }
+      a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
       .text-muted { color: var(--text-secondary); }
       .text-tertiary { color: var(--text-tertiary); }
       .text-sm { font-size: var(--text-sm); }
@@ -305,23 +351,15 @@ function renderPage(title: string, body: string): string {
       /* -- Metric strip -- */
       .metric-strip {
         display: flex;
-        gap: var(--space-6);
+        gap: var(--space-7);
         padding: var(--space-5) 0;
-        border-top: 2px solid var(--border);
-        border-bottom: 1px solid var(--border);
-        margin-bottom: var(--space-6);
-        flex-wrap: wrap;
+        border-top: 2px solid var(--text-primary);
+        margin-bottom: var(--space-7);
       }
       .metric-item {
         display: flex;
         flex-direction: column;
-        gap: var(--space-1);
-        padding-right: var(--space-6);
-        border-right: 1px solid var(--border);
-      }
-      .metric-item:last-child {
-        border-right: none;
-        padding-right: 0;
+        gap: 2px;
       }
       .metric-value {
         font-family: var(--font-display);
@@ -329,13 +367,19 @@ function renderPage(title: string, body: string): string {
         font-weight: 700;
         line-height: 1;
         letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
       }
       .metric-label {
         font-size: var(--text-xs);
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.08em;
         color: var(--text-tertiary);
         font-weight: 600;
+      }
+      .metric-subtitle {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-weight: 400;
       }
 
       /* -- Sections -- */
@@ -352,29 +396,29 @@ function renderPage(title: string, body: string): string {
       .two-col {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: var(--space-6);
+        gap: var(--space-7);
       }
-      .stack { display: grid; gap: var(--space-5); align-content: start; }
+      .stack { display: grid; gap: var(--space-6); align-content: start; }
 
       /* -- Tables -- */
       table {
         width: 100%;
         border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
       }
       th {
+        font-family: var(--font-body);
         font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.06em;
         color: var(--text-tertiary);
-        padding: var(--space-2) var(--space-3);
-        padding-left: 0;
-        border-bottom: 2px solid var(--border);
+        padding: var(--space-2) var(--space-3) var(--space-2) 0;
+        border-bottom: 2px solid var(--text-primary);
         text-align: left;
       }
       td {
-        padding: var(--space-3);
-        padding-left: 0;
+        padding: var(--space-3) var(--space-3) var(--space-3) 0;
         border-bottom: 1px solid var(--border);
         font-size: var(--text-sm);
         vertical-align: baseline;
@@ -395,19 +439,19 @@ function renderPage(title: string, body: string): string {
         display: inline-flex;
         align-items: center;
         gap: var(--space-1);
-        padding: 2px var(--space-2);
+        padding: 1px var(--space-2);
         border-radius: var(--radius-sm);
-        font-size: var(--text-xs);
+        font-size: 0.6875rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         white-space: nowrap;
-        line-height: 1.4;
+        line-height: 1.5;
       }
       .badge::before {
         content: '';
-        width: 6px;
-        height: 6px;
+        width: 5px;
+        height: 5px;
         border-radius: 50%;
         flex-shrink: 0;
       }
@@ -448,7 +492,7 @@ function renderPage(title: string, body: string): string {
       }
       .badge-row {
         display: flex;
-        gap: var(--space-2);
+        gap: var(--space-1);
         flex-wrap: wrap;
         align-items: center;
       }
@@ -461,7 +505,7 @@ function renderPage(title: string, body: string): string {
       .form-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
+        gap: var(--space-4) var(--space-5);
       }
       .inline-form {
         display: flex;
@@ -480,11 +524,11 @@ function renderPage(title: string, body: string): string {
       }
       label {
         display: grid;
-        gap: var(--space-1);
+        gap: 3px;
         font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.06em;
         color: var(--text-secondary);
       }
       input, select, textarea {
@@ -495,12 +539,12 @@ function renderPage(title: string, body: string): string {
         padding: var(--space-2) var(--space-3);
         background: var(--surface-2);
         color: var(--text-primary);
-        transition: border-color 150ms, box-shadow 150ms;
+        transition: border-color 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
       }
       input:focus, select:focus, textarea:focus {
         outline: none;
         border-color: var(--accent);
-        box-shadow: 0 0 0 3px oklch(52% 0.16 45 / 10%);
+        box-shadow: 0 0 0 2px oklch(52% 0.16 45 / 8%);
       }
       input.input-lg {
         font-size: var(--text-lg);
@@ -515,7 +559,7 @@ function renderPage(title: string, body: string): string {
       code, pre {
         font-family: var(--font-mono);
       }
-      button {
+      button, .btn {
         font-family: var(--font-body);
         font-size: var(--text-sm);
         font-weight: 600;
@@ -525,11 +569,20 @@ function renderPage(title: string, body: string): string {
         cursor: pointer;
         background: var(--accent);
         color: var(--surface-2);
-        transition: background 120ms;
+        transition: background 100ms var(--ease-out);
         white-space: nowrap;
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
       }
-      button:hover {
+      button:hover, .btn:hover {
         background: var(--accent-hover);
+      }
+      button:focus-visible, .btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
       button.secondary {
         background: transparent;
@@ -541,9 +594,31 @@ function renderPage(title: string, body: string): string {
         border-color: var(--border-strong);
         color: var(--text-primary);
       }
+      button.danger-button {
+        background: transparent;
+        color: var(--negative);
+        border: 1px solid oklch(85% 0.04 25);
+      }
+      button.danger-button:hover {
+        background: var(--negative-subtle);
+        border-color: var(--negative);
+      }
       button.sm {
         font-size: var(--text-xs);
         padding: var(--space-1) var(--space-3);
+        min-height: 28px;
+      }
+      button:disabled, .btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      button:disabled:hover, .btn:disabled:hover {
+        background: var(--accent);
+      }
+      button.secondary:disabled:hover {
+        background: transparent;
+        border-color: var(--border);
+        color: var(--text-secondary);
       }
       .btn-group {
         display: flex;
@@ -570,18 +645,24 @@ function renderPage(title: string, body: string): string {
       }
       .alert.error {
         background: var(--negative-subtle);
-        border-color: oklch(90% 0.04 25);
+        border-color: oklch(88% 0.04 25);
       }
       .alert.warning {
         background: var(--caution-subtle);
-        border-color: oklch(91% 0.04 85);
+        border-color: oklch(88% 0.04 85);
       }
       .alert.success {
         background: var(--positive-subtle);
-        border-color: oklch(90% 0.04 155);
+        border-color: oklch(88% 0.04 155);
       }
       .alert h3 {
         margin-bottom: var(--space-2);
+        font-family: var(--font-body);
+        font-size: var(--text-sm);
+        font-weight: 700;
+        text-transform: none;
+        letter-spacing: 0;
+        color: inherit;
       }
       .alert ul {
         margin: 0;
@@ -591,10 +672,8 @@ function renderPage(title: string, body: string): string {
         margin-top: var(--space-3);
       }
       .translation-card {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-        background: var(--surface-2);
+        border-top: 1px solid var(--border);
+        padding: var(--space-5) 0;
         display: grid;
         gap: var(--space-4);
       }
@@ -623,19 +702,184 @@ function renderPage(title: string, body: string): string {
       .page-actions {
         display: flex;
         gap: var(--space-3);
+        align-items: center;
         flex-wrap: wrap;
         margin-top: var(--space-4);
       }
+      .eyebrow {
+        font-size: var(--text-xs);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-tertiary);
+      }
+
+      /* -- Login page -- */
+      .auth-page {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 1fr min(480px, 100%) 1fr;
+        align-content: center;
+        padding: clamp(32px, 8vh, 96px) clamp(20px, 4vw, 48px);
+        position: relative;
+        overflow: hidden;
+      }
+      .auth-page > * {
+        grid-column: 2;
+      }
+      .auth-watermark {
+        position: fixed;
+        right: -3vw;
+        bottom: -5vh;
+        font-family: var(--font-jp);
+        font-size: clamp(16rem, 24vw, 32rem);
+        font-weight: 700;
+        line-height: 1;
+        color: oklch(93% 0.015 var(--hue));
+        pointer-events: none;
+        user-select: none;
+        z-index: 0;
+      }
+      .auth-content {
+        position: relative;
+        z-index: 1;
+      }
+      .auth-headword {
+        font-family: var(--font-display);
+        font-size: clamp(3rem, 6vw, 4.5rem);
+        font-weight: 700;
+        line-height: 0.9;
+        letter-spacing: -0.03em;
+        color: var(--text-primary);
+      }
+      .auth-reading {
+        font-family: var(--font-jp);
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+        margin-top: var(--space-2);
+        letter-spacing: 0.02em;
+      }
+      .auth-pos {
+        display: inline-flex;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .auth-pos span {
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        padding: 1px var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+      }
+      .auth-divider {
+        width: 48px;
+        height: 2px;
+        background: var(--accent);
+        margin: var(--space-6) 0;
+        border: none;
+      }
+      .auth-def-number {
+        font-family: var(--font-display);
+        font-size: var(--text-sm);
+        font-weight: 700;
+        color: var(--accent);
+        margin-right: var(--space-2);
+      }
+      .auth-definition {
+        font-size: var(--text-base);
+        line-height: 1.6;
+        color: var(--text-primary);
+        max-width: 42ch;
+      }
+      .auth-context {
+        font-size: var(--text-sm);
+        color: var(--text-tertiary);
+        margin-top: var(--space-3);
+        margin-bottom: var(--space-7);
+      }
+      .auth-form {
+        margin-top: var(--space-5);
+        display: grid;
+        gap: var(--space-4);
+      }
+      .auth-form label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary);
+      }
+      .auth-form input[type="password"],
+      .auth-form input[type="email"] {
+        font-size: var(--text-base);
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        transition: border-color 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
+      }
+      .auth-form input[type="password"] {
+        font-family: var(--font-mono);
+        letter-spacing: 0.1em;
+      }
+      .auth-form input[type="password"]:focus,
+      .auth-form input[type="email"]:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px oklch(52% 0.16 45 / 8%);
+      }
+      .auth-form button[type="submit"] {
+        justify-self: start;
+        min-height: 44px;
+        padding: var(--space-3) var(--space-7);
+        font-size: var(--text-base);
+      }
+      .auth-footnote {
+        margin-top: var(--space-6);
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+        max-width: 38ch;
+        line-height: 1.6;
+      }
+      .auth-disabled {
+        margin-top: var(--space-5);
+      }
+      .auth-env {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-top: var(--space-6);
+        padding-top: var(--space-5);
+        border-top: 1px solid var(--border);
+      }
+      .auth-env::before {
+        content: '';
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+      }
+      .auth-env.available::before {
+        background: var(--positive);
+      }
+      .auth-env.unavailable::before {
+        background: var(--negative);
+      }
+
+      /* -- Selection bar -- */
       .selection-bar {
         display: flex;
         gap: var(--space-3);
         flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
-        padding: var(--space-4);
-        border: 1px solid var(--border);
+        padding: var(--space-3) var(--space-4);
+        background: var(--surface-1);
         border-radius: var(--radius-md);
-        background: var(--surface-2);
         margin-bottom: var(--space-4);
       }
       .selection-bar .inline-form {
@@ -651,6 +895,43 @@ function renderPage(title: string, body: string): string {
       .checkbox-inline input {
         width: auto;
       }
+
+      /* -- Whole-batch action -- */
+      .batch-action {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: var(--space-5);
+      }
+      .batch-action-text {
+        display: grid;
+        gap: 2px;
+      }
+      .batch-action-label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-secondary);
+      }
+      .batch-action-meta {
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .batch-action-meta .conflict-note {
+        color: var(--negative);
+      }
+      .batch-action .inline-form {
+        margin: 0;
+        align-items: center;
+      }
+
+      /* -- Filter chips -- */
       .filter-chips {
         display: flex;
         flex-wrap: wrap;
@@ -660,44 +941,45 @@ function renderPage(title: string, body: string): string {
       .filter-chip {
         display: inline-flex;
         align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-2) var(--space-3);
+        padding: var(--space-1) var(--space-3);
         border: 1px solid var(--border);
         border-radius: 999px;
         text-decoration: none;
         color: var(--text-secondary);
-        background: var(--surface-2);
+        background: transparent;
         font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.03em;
+        letter-spacing: 0.04em;
+        transition: border-color 100ms var(--ease-out), color 100ms var(--ease-out), background 100ms var(--ease-out);
+      }
+      .filter-chip:hover {
+        text-decoration: none;
+        color: var(--text-primary);
+        border-color: var(--border-strong);
       }
       .filter-chip[aria-current="page"] {
         color: var(--accent);
-        border-color: oklch(83% 0.04 var(--hue));
+        border-color: var(--accent);
         background: var(--accent-subtle);
       }
-      .summary-grid {
+
+      /* -- Summary strip (replaces card grid) -- */
+      .summary-strip {
+        display: flex;
+        gap: var(--space-6);
+        padding: var(--space-4) 0;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        margin-bottom: var(--space-5);
+        flex-wrap: wrap;
+      }
+      .summary-strip-item {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-3);
+        gap: 2px;
       }
-      .summary-card {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-        background: var(--surface-2);
-      }
-      .summary-card h3 {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: var(--space-2);
-      }
-      .summary-card .metric-value {
-        display: block;
-        font-size: var(--text-xl);
+      .summary-strip-item h3 {
+        margin-bottom: 0;
       }
 
       /* -- Lists & items -- */
@@ -706,11 +988,11 @@ function renderPage(title: string, body: string): string {
         gap: 0;
       }
       .item {
-        padding: var(--space-4) 0;
+        padding: var(--space-5) 0;
         border-bottom: 1px solid var(--border);
       }
       .item:first-child {
-        padding-top: 0;
+        border-top: 1px solid var(--border);
       }
       .item-header {
         display: flex;
@@ -726,10 +1008,13 @@ function renderPage(title: string, body: string): string {
         font-weight: 700;
       }
       .item-lang {
-        font-size: var(--text-sm);
+        font-size: var(--text-xs);
         color: var(--text-tertiary);
-        font-weight: 400;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
         margin-left: var(--space-2);
+        vertical-align: middle;
       }
       .item-meta {
         font-size: var(--text-xs);
@@ -755,22 +1040,23 @@ function renderPage(title: string, body: string): string {
       }
       .diff-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: var(--space-3);
-        margin-top: var(--space-3);
+        margin-top: var(--space-4);
       }
       .diff-block {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--surface-2);
-        padding: var(--space-3);
+        padding: var(--space-3) 0;
       }
       .diff-block h4 {
+        font-family: var(--font-body);
         font-size: var(--text-xs);
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-secondary);
+        letter-spacing: 0.06em;
+        color: var(--text-tertiary);
         margin-bottom: var(--space-2);
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--border);
       }
       .diff-block ul {
         margin: 0;
@@ -778,6 +1064,7 @@ function renderPage(title: string, body: string): string {
       }
       .diff-block li {
         font-size: var(--text-xs);
+        line-height: 1.5;
       }
 
       /* -- Stat lists -- */
@@ -793,40 +1080,57 @@ function renderPage(title: string, body: string): string {
       .stat-list dd {
         font-family: var(--font-mono);
         font-weight: 500;
+        font-variant-numeric: tabular-nums;
         text-align: right;
+      }
+
+      /* -- Definition list (account page) -- */
+      .definition-list {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: var(--space-2) var(--space-5);
+        font-size: var(--text-sm);
+      }
+      .definition-list dt {
+        color: var(--text-tertiary);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: var(--text-xs);
+        letter-spacing: 0.04em;
+        align-self: center;
+      }
+      .definition-list dd {
+        color: var(--text-primary);
       }
 
       /* -- Quick links -- */
       .quick-links {
         display: grid;
-        gap: var(--space-2);
+        gap: 0;
       }
       .quick-links a {
         display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-2) 0;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: var(--space-3);
+        padding: var(--space-3) 0;
         font-size: var(--text-sm);
         color: var(--text-primary);
         text-decoration: none;
-        transition: color 120ms;
+        border-bottom: 1px solid var(--border);
+        transition: color 100ms var(--ease-out);
+      }
+      .quick-links a:first-child {
+        border-top: 1px solid var(--border);
       }
       .quick-links a:hover {
         color: var(--accent);
         text-decoration: none;
       }
-      .quick-links a::after {
-        content: '\\2192';
-        color: var(--text-tertiary);
-        transition: transform 120ms, color 120ms;
-      }
-      .quick-links a:hover::after {
-        transform: translateX(3px);
-        color: var(--accent);
-      }
       .quick-links .link-desc {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
+        text-align: right;
       }
 
       /* -- JSON blocks / details -- */
@@ -861,7 +1165,7 @@ function renderPage(title: string, body: string): string {
         font-family: var(--font-jp);
         font-size: var(--text-2xl);
         font-weight: 700;
-        line-height: 1.2;
+        line-height: 1.1;
       }
       .entry-reading {
         font-family: var(--font-jp);
@@ -881,12 +1185,6 @@ function renderPage(title: string, body: string): string {
         border-bottom: none;
       }
       .entry-section h3 {
-        font-family: var(--font-body);
-        font-size: var(--text-xs);
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-tertiary);
         margin-bottom: var(--space-3);
       }
       .entry-definitions {
@@ -914,22 +1212,18 @@ function renderPage(title: string, body: string): string {
         font-family: var(--font-jp);
       }
 
-      /* -- Panels (used sparingly) -- */
+      /* -- Panels -- */
       .panel {
-        background: var(--surface-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-5);
+        border-top: 2px solid var(--border-strong);
+        padding: var(--space-5) 0;
       }
 
       /* -- Empty states -- */
       .empty {
-        padding: var(--space-6) var(--space-5);
+        padding: var(--space-5) 0;
         color: var(--text-tertiary);
         font-size: var(--text-sm);
         text-align: left;
-        border: 1px dashed var(--border);
-        border-radius: var(--radius-md);
       }
       .empty a {
         color: var(--accent);
@@ -979,7 +1273,7 @@ function renderPage(title: string, body: string): string {
           left: -260px;
           width: 260px;
           z-index: 99;
-          transition: left 200ms;
+          transition: left 200ms var(--ease-out);
         }
         .sidebar.open {
           left: 0;
@@ -988,7 +1282,11 @@ function renderPage(title: string, body: string): string {
           display: block;
         }
         .content {
-          padding: var(--space-7) var(--space-4) var(--space-8);
+          padding: var(--space-6) var(--space-4) var(--space-8);
+        }
+        .content-header {
+          flex-direction: column;
+          align-items: stretch;
         }
         .two-col {
           grid-template-columns: 1fr;
@@ -1000,15 +1298,9 @@ function renderPage(title: string, body: string): string {
           flex-direction: column;
           gap: var(--space-4);
         }
-        .metric-item {
-          border-right: none;
-          padding-right: 0;
-          border-bottom: 1px solid var(--border);
-          padding-bottom: var(--space-4);
-        }
-        .metric-item:last-child {
-          border-bottom: none;
-          padding-bottom: 0;
+        .summary-strip {
+          flex-direction: column;
+          gap: var(--space-4);
         }
         .entry-example-row {
           grid-template-columns: 1fr;
@@ -1017,10 +1309,31 @@ function renderPage(title: string, body: string): string {
         .list-row {
           grid-template-columns: 1fr;
         }
+        .diff-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        .auth-page {
+          grid-template-columns: 1fr;
+          padding: var(--space-6) var(--space-4);
+        }
+        .auth-page > * {
+          grid-column: 1;
+        }
+        .auth-headword {
+          font-size: clamp(2.5rem, 10vw, 3.5rem);
+        }
+        .auth-watermark {
+          font-size: clamp(10rem, 36vw, 16rem);
+          right: -8vw;
+          bottom: -3vh;
+        }
       }
     </style>
   </head>
-  <body>
+  <body class="${standalone ? 'standalone-body' : ''}">
+    ${standalone
+      ? body
+      : `
     <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">Menu</button>
     <div class="shell">
       <aside class="sidebar">
@@ -1033,10 +1346,48 @@ function renderPage(title: string, body: string): string {
         </nav>
       </aside>
       <main class="content">
+        ${utilityHtml}
         ${body}
       </main>
-    </div>
-    <script>
+    </div>`}
+    ${includeScripts ? `<script>
+      function redirectToAdminLogin() {
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = '/admin/login?next=' + next;
+      }
+
+      // Concurrent 401s must share one refresh: the refresh token rotates on
+      // every call, so a second parallel refresh would replay the old token and
+      // trip reuse detection, revoking every session. Coalesce into one request.
+      let adminRefreshInFlight = null;
+      function refreshAdminSession() {
+        if (adminRefreshInFlight) return adminRefreshInFlight;
+        adminRefreshInFlight = (async () => {
+          try {
+            const res = await fetch('/admin/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+            return res.ok;
+          } catch (error) {
+            return false;
+          } finally {
+            adminRefreshInFlight = null;
+          }
+        })();
+        return adminRefreshInFlight;
+      }
+
+      // Fetch wrapper that transparently recovers from an expired access token:
+      // on a 401 it refreshes the session once and retries, falling back to login.
+      async function adminFetch(input, init) {
+        let res = await fetch(input, init);
+        if (res.status !== 401) return res;
+        if (await refreshAdminSession()) {
+          res = await fetch(input, init);
+          if (res.status !== 401) return res;
+        }
+        redirectToAdminLogin();
+        return null;
+      }
+
       async function submitJsonForm(event) {
         if (event.defaultPrevented) return;
         event.preventDefault();
@@ -1067,13 +1418,15 @@ function renderPage(title: string, body: string): string {
           else if (typeof payload[key] === 'string' && /^\\d+$/.test(payload[key])) payload[key] = Number(payload[key]);
         }
         try {
-          const action = submitter && submitter.formAction ? submitter.formAction : form.action;
-          const method = submitter && submitter.formMethod ? submitter.formMethod : (form.method || 'POST');
-          const res = await fetch(action, {
+          const action = submitter && submitter.hasAttribute('formaction') ? submitter.formAction : form.action;
+          const method = submitter && submitter.hasAttribute('formmethod') ? submitter.formMethod : (form.method || 'POST');
+          const res = await adminFetch(action, {
             method,
+            credentials: 'same-origin',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(payload),
           });
+          if (!res) return;
           const text = await res.text();
           if (result) {
             result.textContent = text;
@@ -1109,9 +1462,21 @@ function renderPage(title: string, body: string): string {
         return values.length;
       }
 
+      function selectedReviewLanguages() {
+        return new Set(Array.from(document.querySelectorAll('[data-review-unit-checkbox]:checked'))
+          .map((input) => input.dataset.lang)
+          .filter(Boolean));
+      }
+
       function toggleAllReviewUnits(checked) {
         for (const input of document.querySelectorAll('[data-review-unit-checkbox]')) {
           input.checked = checked;
+        }
+      }
+
+      function toggleReviewUnitsForLanguage(lang) {
+        for (const input of document.querySelectorAll('[data-review-unit-checkbox]')) {
+          input.checked = input.dataset.lang === lang;
         }
       }
 
@@ -1296,11 +1661,13 @@ function renderPage(title: string, body: string): string {
         if (buildButton) {
           buildButton.addEventListener('click', async () => {
             buildButton.disabled = true;
-            const res = await fetch(response.nextActions.buildReleaseUrl, {
+            const res = await adminFetch(response.nextActions.buildReleaseUrl, {
               method: 'POST',
+              credentials: 'same-origin',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ activate: true, createdWordId: response.wordId }),
             });
+            if (!res) return;
             const data = await res.json();
             if (res.ok) {
               success.innerHTML = [
@@ -1333,11 +1700,13 @@ function renderPage(title: string, body: string): string {
         if (success) success.innerHTML = '';
         form.setAttribute('aria-busy', 'true');
         try {
-          const res = await fetch(form.action, {
+          const res = await adminFetch(form.action, {
             method: 'POST',
+            credentials: 'same-origin',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(collectNewWordPayload(form)),
           });
+          if (!res) return;
           const data = await res.json();
           if (!res.ok) {
             renderFieldErrors(errors, data.fieldErrors || {});
@@ -1373,6 +1742,16 @@ function renderPage(title: string, body: string): string {
               }
               return;
             }
+            const selectedLangs = selectedReviewLanguages();
+            if (selectedLangs.size > 1) {
+              event.preventDefault();
+              const result = form.querySelector('[data-result]');
+              if (result) {
+                result.textContent = 'Selected review units span multiple languages. Review one language at a time.';
+                result.classList.add('visible');
+              }
+              return;
+            }
           });
         }
         form.addEventListener('submit', submitJsonForm);
@@ -1390,10 +1769,13 @@ function renderPage(title: string, body: string): string {
       for (const button of document.querySelectorAll('[data-review-select-all]')) {
         button.addEventListener('click', () => toggleAllReviewUnits(true));
       }
+      for (const button of document.querySelectorAll('[data-review-select-language]')) {
+        button.addEventListener('click', () => toggleReviewUnitsForLanguage(button.dataset.reviewSelectLanguage));
+      }
       for (const button of document.querySelectorAll('[data-review-clear-all]')) {
         button.addEventListener('click', () => toggleAllReviewUnits(false));
       }
-    </script>
+    </script>` : ''}
   </body>
 </html>`
 }
@@ -1520,7 +1902,7 @@ function renderReviewUnit(unit: ReviewUnit): string {
   return `<div class="item">
     <div class="item-header">
       <div style="display:flex; align-items:center; gap: var(--space-2); flex-wrap:wrap">
-        <label class="unit-selection"><input type="checkbox" data-review-unit-checkbox value="${escapeHtml(unit.unitId)}" /></label>
+        <label class="unit-selection"><input type="checkbox" data-review-unit-checkbox data-lang="${escapeHtml(unit.lang)}" value="${escapeHtml(unit.unitId)}" /></label>
         <span class="item-word">${escapeHtml(unit.word?.word ?? unit.wordId)}</span>
         <span class="item-lang">${escapeHtml(unit.lang)}</span>
       </div>
@@ -1639,33 +2021,154 @@ function renderReviewUnit(unit: ReviewUnit): string {
   </div>`
 }
 
+export function renderAdminLoginPage(options: {
+  disabled?: boolean
+  error?: string | null
+  next?: string | null
+} = {}): string {
+  const disabled = options.disabled ?? false
+  const next = escapeHtml(options.next ?? '/admin')
+  const errorHtml = options.error
+    ? `<div class="alert error"><h3>Access denied</h3><p>${escapeHtml(options.error)}</p></div>`
+    : ''
+
+  const formSection = disabled
+    ? `
+      <div class="auth-disabled">
+        <div class="alert warning">
+          <h3>Admin UI is offline</h3>
+          <p>Set <code>JWT_SECRET</code> in the runtime environment and create an admin user via <code>bun run scripts/admin/create-user.ts</code>, then redeploy.</p>
+        </div>
+      </div>
+      <p class="auth-footnote">The public API continues to serve lookups. Only the admin console requires authentication.</p>
+    `
+    : `
+      ${errorHtml}
+      <form action="/admin/login" method="POST" class="auth-form">
+        <input type="hidden" name="next" value="${next}" />
+        <label>Email
+          <input type="email" name="email" autocomplete="username" autofocus placeholder="admin@example.com" />
+        </label>
+        <label>Password
+          <input type="password" name="password" autocomplete="current-password" placeholder="Your admin password" />
+        </label>
+        <button type="submit">Sign in</button>
+      </form>
+      <p class="auth-footnote">Sessions renew silently for 30 days. Sign out to revoke.</p>
+    `
+
+  return renderPage('Admin Login', `
+    <div class="auth-page">
+      <div class="auth-watermark">辞</div>
+      <div class="auth-content">
+        <div class="auth-headword">Yori</div>
+        <div class="auth-reading">よりじてん · dictionary admin</div>
+        <div class="auth-pos">
+          <span>noun</span>
+          <span>internal tool</span>
+        </div>
+
+        <hr class="auth-divider" />
+
+        <div class="auth-definition">
+          <span class="auth-def-number">1.</span>
+          Operational interface for managing releases, reviewing AI translations, and maintaining multilingual dictionary data.
+        </div>
+        <div class="auth-context">Release control, review queues, data quality.</div>
+
+        ${formSection}
+
+        <div class="auth-env ${disabled ? 'unavailable' : 'available'}">
+          ${disabled ? 'JWT secret not configured' : 'Ready to authenticate'}
+        </div>
+      </div>
+    </div>
+  `, {
+    includeScripts: false,
+    standalone: true,
+    utilityHtml: '',
+  })
+}
+
+export function renderAdminSetupPage(options: {
+  error?: string | null
+} = {}): string {
+  const errorHtml = options.error
+    ? `<div class="alert error"><h3>Error</h3><p>${escapeHtml(options.error)}</p></div>`
+    : ''
+
+  return renderPage('Setup — Yori Admin', `
+    <div class="auth-page">
+      <div class="auth-watermark">辞</div>
+      <div class="auth-content">
+        <div class="auth-headword">Yori</div>
+        <div class="auth-reading">よりじてん · first-time setup</div>
+        <div class="auth-pos">
+          <span>noun</span>
+          <span>internal tool</span>
+        </div>
+
+        <hr class="auth-divider" />
+
+        <div class="auth-definition">
+          <span class="auth-def-number">1.</span>
+          Create the first admin account to get started.
+        </div>
+
+        ${errorHtml}
+        <form action="/admin/setup" method="POST" class="auth-form">
+          <label>Email
+            <input type="email" name="email" autocomplete="username" autofocus placeholder="admin@example.com" required />
+          </label>
+          <label>Password
+            <input type="password" name="password" autocomplete="new-password" placeholder="12 characters minimum" minlength="12" required />
+          </label>
+          <label>Confirm password
+            <input type="password" name="confirmPassword" autocomplete="new-password" placeholder="Repeat password" minlength="12" required />
+          </label>
+          <button type="submit">Create account</button>
+        </form>
+        <p class="auth-footnote">This page is available once. After the first account is created, use the login screen.</p>
+      </div>
+    </div>
+  `, {
+    includeScripts: false,
+    standalone: true,
+    utilityHtml: '',
+  })
+}
+
 function renderReviewUnitList(items: ReviewUnit[]): string {
   if (items.length === 0) return '<div class="empty">No pending review units match this view.</div>'
   return `<div class="item-list">${items.map(renderReviewUnit).join('')}</div>`
 }
 
 function renderReviewSummaryCards(summary: AdminReviewQueueResponseV2['summary'] | AdminReviewBatchSummaryResponse): string {
-  const cards: Array<{ title: string; body: string }> = [
-    { title: 'Pending Units', body: `<span class="metric-value">${escapeHtml(summary.pendingUnits)}</span>` },
-    { title: 'Languages', body: renderDefinitionList(summary.byLanguage) },
-    { title: 'Risk', body: renderDefinitionList(summary.byRisk as Record<string, number>) },
-    { title: 'Source Conflict', body: `<span class="metric-value">${escapeHtml(summary.sourceConflictCount)}</span>` },
-  ]
+  const splitHtml = 'translationOnlyCount' in summary
+    ? `<div class="summary-strip-item">
+        <h3>Split</h3>
+        <dl class="stat-list"><dt>Translation only</dt><dd>${escapeHtml(summary.translationOnlyCount)}</dd><dt>Examples only</dt><dd>${escapeHtml(summary.examplesOnlyCount)}</dd></dl>
+      </div>`
+    : ''
 
-  if ('translationOnlyCount' in summary) {
-    cards.push({
-      title: 'Split Units',
-      body: `<dl class="stat-list"><dt>Translation only</dt><dd>${escapeHtml(summary.translationOnlyCount)}</dd><dt>Examples only</dt><dd>${escapeHtml(summary.examplesOnlyCount)}</dd></dl>`,
-    })
-  }
-
-  return `<div class="summary-grid">
-    ${cards.map((card) => `
-      <div class="summary-card">
-        <h3>${escapeHtml(card.title)}</h3>
-        ${card.body}
-      </div>
-    `).join('')}
+  return `<div class="summary-strip">
+    <div class="summary-strip-item">
+      <h3>Pending</h3>
+      <span class="metric-value">${escapeHtml(summary.pendingUnits)}</span>
+    </div>
+    <div class="summary-strip-item">
+      <h3>Conflicts</h3>
+      <span class="metric-value">${escapeHtml(summary.sourceConflictCount)}</span>
+    </div>
+    <div class="summary-strip-item">
+      <h3>By Language</h3>
+      ${renderDefinitionList(summary.byLanguage)}
+    </div>
+    <div class="summary-strip-item">
+      <h3>By Risk</h3>
+      ${renderDefinitionList(summary.byRisk as Record<string, number>)}
+    </div>
+    ${splitHtml}
   </div>`
 }
 
@@ -1716,94 +2219,296 @@ function buildReviewPageLink(basePath: string, params: Record<string, string | n
   return serialized ? `${basePath}?${serialized}` : basePath
 }
 
+function renderDashboardMetrics(data: AdminSummaryResponse): string {
+  const pendingCount = (data.reviewCounts['translation:pending'] ?? 0) + (data.reviewCounts['example:pending'] ?? 0)
+  return `
+    <div class="metric-strip">
+      <div class="metric-item">
+        <span class="metric-label">Release</span>
+        <span class="metric-value">${escapeHtml(data.activeReleaseVersion)}</span>
+        <span class="metric-subtitle">${escapeHtml(data.releaseWordCount.toLocaleString())} words</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Awaiting review</span>
+        <span class="metric-value">${escapeHtml(pendingCount)}</span>
+        <span class="metric-subtitle">translations + examples</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">Unmatched updates</span>
+        <span class="metric-value">${escapeHtml(data.orphanedWordIdsCount)}</span>
+        <span class="metric-subtitle">not in current release</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">AI approved</span>
+        <span class="metric-value">${escapeHtml(data.activeReviewedAiCount)}</span>
+        <span class="metric-subtitle">reviewed and live</span>
+      </div>
+    </div>`
+}
+
+function renderDashboardActions(data: AdminSummaryResponse): string {
+  const pendingCount = (data.reviewCounts['translation:pending'] ?? 0) + (data.reviewCounts['example:pending'] ?? 0)
+  const emptyRelease = data.releaseWordCount === 0
+  const hasOrphaned = data.orphanedWordIdsCount > 0
+
+  const links: Array<{ href: string; label: string; desc: string }> = []
+
+  const reviewDesc = pendingCount > 0
+    ? `${pendingCount} to review`
+    : 'All clear'
+  const releasesDesc = hasOrphaned
+    ? `Build and promote — ${data.orphanedWordIdsCount} unmatched`
+    : 'Build and promote'
+
+  if (emptyRelease) {
+    links.push(
+      { href: '/admin/jobs', label: 'Jobs', desc: 'Run a source update to import data' },
+      { href: '/admin/releases', label: 'Releases', desc: 'Build your first release' },
+      { href: '/admin/review', label: 'AI Review Queue', desc: reviewDesc },
+      { href: '/admin/entry', label: 'Entry Inspector', desc: 'Look up any word' },
+      { href: '/admin/new-word', label: 'New Word', desc: 'Add to snapshot' },
+    )
+  } else if (pendingCount > 0) {
+    links.push(
+      { href: '/admin/review', label: 'AI Review Queue', desc: reviewDesc },
+      { href: '/admin/entry', label: 'Entry Inspector', desc: 'Look up any word' },
+      { href: '/admin/new-word', label: 'New Word', desc: 'Add to snapshot' },
+      { href: '/admin/releases', label: 'Releases', desc: releasesDesc },
+      { href: '/admin/jobs', label: 'Jobs', desc: 'Source updates, Gemini' },
+    )
+  } else {
+    links.push(
+      { href: '/admin/entry', label: 'Entry Inspector', desc: 'Look up any word' },
+      { href: '/admin/review', label: 'AI Review Queue', desc: reviewDesc },
+      { href: '/admin/new-word', label: 'New Word', desc: 'Add to snapshot' },
+      { href: '/admin/releases', label: 'Releases', desc: releasesDesc },
+      { href: '/admin/jobs', label: 'Jobs', desc: 'Source updates, Gemini' },
+    )
+  }
+
+  const guidance = emptyRelease
+    ? '<p class="text-muted text-sm">The active release has no words. Start by running a source update from Jobs, then build a release.</p>'
+    : ''
+
+  return `
+    <div class="section">
+      <h2>Quick Actions</h2>
+      ${guidance}
+      <div class="quick-links">
+        ${links.map((l) => `<a href="${l.href}"><span>${escapeHtml(l.label)}</span><span class="link-desc">${escapeHtml(l.desc)}</span></a>`).join('')}
+      </div>
+    </div>`
+}
+
+function renderDashboardStatus(data: AdminSummaryResponse): string {
+  type StatRow = [string, number]
+  const filterNonZero = (rows: StatRow[]): StatRow[] => rows.filter(([, count]) => count > 0)
+
+  const attentionRows = filterNonZero([
+    ['Pending translations', data.translationCounts['pending'] ?? 0],
+    ['Pending examples', data.exampleSetCounts['pending'] ?? 0],
+    ['Translation reviews pending', data.reviewCounts['translation:pending'] ?? 0],
+    ['Example reviews pending', data.reviewCounts['example:pending'] ?? 0],
+    ['Rejected translation reviews', data.reviewCounts['translation:rejected'] ?? 0],
+    ['Rejected example reviews', data.reviewCounts['example:rejected'] ?? 0],
+    ['Unmatched updates', data.orphanedWordIdsCount],
+  ])
+
+  const completedRows = filterNonZero([
+    ['Active translations', data.translationCounts['active'] ?? 0],
+    ['Active examples', data.exampleSetCounts['active'] ?? 0],
+    ['Superseded translations', data.translationCounts['superseded'] ?? 0],
+    ['Superseded examples', data.exampleSetCounts['superseded'] ?? 0],
+    ['Approved reviews', (data.reviewCounts['translation:approved'] ?? 0) + (data.reviewCounts['example:approved'] ?? 0)],
+    ['Approved (not required)', (data.reviewCounts['translation:not_required'] ?? 0) + (data.reviewCounts['example:not_required'] ?? 0)],
+    ['AI content live', data.activeReviewedAiCount],
+  ])
+
+  const knownTranslationKeys = new Set(['active', 'pending', 'superseded'])
+  const knownExampleKeys = new Set(['active', 'pending', 'superseded'])
+  const knownReviewKeys = new Set(['translation:pending', 'translation:approved', 'translation:rejected', 'translation:not_required', 'example:pending', 'example:approved', 'example:rejected', 'example:not_required'])
+
+  const otherRows: StatRow[] = []
+  for (const [key, val] of Object.entries(data.translationCounts)) {
+    if (!knownTranslationKeys.has(key)) otherRows.push([`Translations: ${key}`, val])
+  }
+  for (const [key, val] of Object.entries(data.exampleSetCounts)) {
+    if (!knownExampleKeys.has(key)) otherRows.push([`Examples: ${key}`, val])
+  }
+  for (const [key, val] of Object.entries(data.reviewCounts)) {
+    if (!knownReviewKeys.has(key)) otherRows.push([`Reviews: ${key}`, val])
+  }
+
+  function renderStatRows(rows: StatRow[]): string {
+    if (rows.length === 0) return ''
+    return `<dl class="stat-list">${rows.map(([label, val]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(val)}</dd>`).join('')}</dl>`
+  }
+
+  const attentionHtml = attentionRows.length > 0
+    ? `<h3>Needs attention</h3>${renderStatRows(attentionRows)}`
+    : '<p class="text-muted text-sm">Nothing needs attention right now.</p>'
+
+  const completedHtml = completedRows.length > 0
+    ? `<h3 style="margin-top: var(--space-5)">Completed</h3>${renderStatRows(completedRows)}`
+    : ''
+
+  const otherHtml = otherRows.length > 0
+    ? `<h3 style="margin-top: var(--space-5)">Other</h3>${renderStatRows(otherRows)}`
+    : ''
+
+  return `
+    <div class="section">
+      <h2>Status</h2>
+      ${attentionHtml}
+      ${completedHtml}
+      ${otherHtml}
+    </div>`
+}
+
+function isFreshInstall(data: AdminSummaryResponse): boolean {
+  return data.releaseWordCount === 0
+    && Object.keys(data.translationCounts).length === 0
+    && Object.keys(data.exampleSetCounts).length === 0
+    && Object.keys(data.reviewCounts).length === 0
+}
+
 export function renderDashboardPage(data: AdminSummaryResponse): string {
+  const gettingStarted = isFreshInstall(data)
+    ? '<p class="text-muted text-sm" style="margin-bottom: var(--space-5)">Getting started: run a source update to import dictionary data, build a release, then run a Gemini import to generate AI translations. Review AI content from the review queue before it goes live.</p>'
+    : ''
+
   return renderPage('Dashboard', `
     <div class="page-header">
       <h1>Dashboard</h1>
-      <p>Overview of releases, AI reviews, and update activity.</p>
     </div>
 
-    <div class="metric-strip">
-      <div class="metric-item">
-        <span class="metric-value">${escapeHtml(data.activeReleaseVersion)}</span>
-        <span class="metric-label">Active Release</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-value">${escapeHtml((data.reviewCounts['translation:pending'] ?? 0) + (data.reviewCounts['example:pending'] ?? 0))}</span>
-        <span class="metric-label">Pending Review</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-value">${escapeHtml(data.orphanedWordIdsCount)}</span>
-        <span class="metric-label">Orphaned Updates</span>
-      </div>
-      <div class="metric-item">
-        <span class="metric-value">${escapeHtml(data.activeReviewedAiCount)}</span>
-        <span class="metric-label">Reviewed AI</span>
-      </div>
-    </div>
+    ${renderDashboardMetrics(data)}
+    ${gettingStarted}
+    ${renderDashboardActions(data)}
 
     <div class="two-col">
       <div class="stack">
-        <div class="section">
-          <h2>Status Breakdown</h2>
-          <h3>Translations</h3>
-          ${renderDefinitionList(data.translationCounts)}
-          <h3 style="margin-top: var(--space-4)">Example Sets</h3>
-          ${renderDefinitionList(data.exampleSetCounts)}
-          <h3 style="margin-top: var(--space-4)">Reviews</h3>
-          ${renderDefinitionList(data.reviewCounts)}
-        </div>
-        <div class="section">
-          <h2>Recent Batches</h2>
-          ${renderBatchTable(data.recentBatches)}
-        </div>
+        ${renderDashboardStatus(data)}
       </div>
       <div class="stack">
         <div class="section">
-          <h2>Quick Actions</h2>
-          <div class="quick-links">
-            <a href="/admin/entry">
-              <div>
-                <div>Entry Inspector</div>
-                <div class="link-desc">Compare release, source, AI, and effective layers</div>
-              </div>
-            </a>
-            <a href="/admin/review">
-              <div>
-                <div>AI Review Queue</div>
-                <div class="link-desc">Approve or reject pending AI translations</div>
-              </div>
-            </a>
-            <a href="/admin/new-word">
-              <div>
-                <div>New Word</div>
-                <div class="link-desc">Create a new deterministic word and add it to the next release</div>
-              </div>
-            </a>
-            <a href="/admin/releases">
-              <div>
-                <div>Release Management</div>
-                <div class="link-desc">Build, activate, and promote releases</div>
-              </div>
-            </a>
-            <a href="/admin/jobs">
-              <div>
-                <div>Jobs</div>
-                <div class="link-desc">Run source updates or Gemini imports</div>
-              </div>
-            </a>
-          </div>
+          <h2>Recent Batches</h2>
+          ${renderBatchTable(data.recentBatches)}
         </div>
       </div>
     </div>
   `)
 }
 
+function shortenUserAgent(ua: string | null): string {
+  if (!ua) return 'Unknown device'
+  const trimmed = ua.length > 80 ? `${ua.slice(0, 80)}…` : ua
+  return trimmed
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false }) + ' UTC'
+  } catch {
+    return iso
+  }
+}
+
+export interface AccountPageData {
+  email: string
+  lastLoginAt: string | null
+  sessions: Array<{
+    id: number
+    createdAt: string
+    expiresAt: string
+    userAgent: string | null
+    ip: string | null
+  }>
+  flash?: { kind: 'success' | 'error'; message: string } | null
+}
+
+export function renderAdminAccountPage(data: AccountPageData): string {
+  const flashHtml = data.flash
+    ? `<div class="alert ${data.flash.kind === 'success' ? 'success' : 'error'}">
+         <p>${escapeHtml(data.flash.message)}</p>
+       </div>`
+    : ''
+
+  const sessionRows =
+    data.sessions.length === 0
+      ? '<div class="empty">No active sessions.</div>'
+      : `<table class="data-table">
+          <thead>
+            <tr><th>Device</th><th>IP</th><th>Created</th><th>Expires</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${data.sessions
+              .map(
+                (session) => `
+                <tr>
+                  <td>${escapeHtml(shortenUserAgent(session.userAgent))}</td>
+                  <td>${escapeHtml(session.ip ?? 'unknown')}</td>
+                  <td>${escapeHtml(formatDate(session.createdAt))}</td>
+                  <td>${escapeHtml(formatDate(session.expiresAt))}</td>
+                  <td>
+                    <form action="/admin/account/sessions/${session.id}/revoke" method="POST" class="inline-form">
+                      <button type="submit" class="danger-button">Revoke</button>
+                    </form>
+                  </td>
+                </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>`
+
+  return renderPage(
+    'Account',
+    `
+    <div class="page-header">
+      <h1>Account</h1>
+    </div>
+
+    ${flashHtml}
+
+    <div class="section">
+      <h2>Profile</h2>
+      <dl class="definition-list">
+        <dt>Email</dt><dd>${escapeHtml(data.email)}</dd>
+        <dt>Last login</dt><dd>${escapeHtml(data.lastLoginAt ? formatDate(data.lastLoginAt) : 'never')}</dd>
+      </dl>
+    </div>
+
+    <div class="section">
+      <h2>Change password</h2>
+      <form action="/admin/account/change-password" method="POST" class="auth-form">
+        <label>Current password
+          <input type="password" name="currentPassword" autocomplete="current-password" required />
+        </label>
+        <label>New password (min 12 characters)
+          <input type="password" name="newPassword" autocomplete="new-password" minlength="12" required />
+        </label>
+        <label>Confirm new password
+          <input type="password" name="confirmPassword" autocomplete="new-password" minlength="12" required />
+        </label>
+        <button type="submit">Update password</button>
+      </form>
+      <p class="auth-footnote">Updates the password and signs you out everywhere.</p>
+    </div>
+
+    <div class="section">
+      <h2>Active sessions</h2>
+      <p class="text-sm text-muted" style="margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-4)">Revoking a session signs that device out on next refresh.</p>
+      ${sessionRows}
+    </div>
+  `
+  )
+}
+
 export function renderNewWordPage(): string {
   return renderPage('New Word', `
     <div class="page-header">
       <h1>New Word</h1>
-      <p>Create a new deterministic dictionary entry. This writes to snapshot JSON only; build a new release afterwards to make the word searchable.</p>
+      <p>Writes to snapshot. Build a release to make it searchable.</p>
     </div>
 
     <form action="/admin/api/new-word" method="POST" data-new-word-form="true">
@@ -1873,7 +2578,6 @@ export function renderEntryPage(data: AdminEntryInspectionResponse): string {
   return renderPage('Entry Inspector', `
     <div class="page-header">
       <h1>Entry Inspector</h1>
-      <p>Look up any word and compare data across release, source, AI, and effective layers.</p>
     </div>
 
     <form method="GET" action="/admin/entry" class="inline-form" style="margin-bottom: var(--space-6)">
@@ -1978,20 +2682,14 @@ export function renderReviewPage(data: AdminReviewQueueResponseV2): string {
   return renderPage('AI Review Queue', `
     <div class="page-header">
       <h1>AI Review</h1>
-      <p>
-        ${data.summary.pendingUnits > 0
-          ? `${data.summary.pendingUnits} review unit${data.summary.pendingUnits === 1 ? '' : 's'} pending.`
-          : 'All caught up.'
-        }
-        Queue is grouped by word, language, and batch so large AI imports can be reviewed in bulk.
-      </p>
-      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Release: ${escapeHtml(data.releaseVersion)}</div>
+      <p>${data.summary.pendingUnits > 0
+        ? `${data.summary.pendingUnits} unit${data.summary.pendingUnits === 1 ? '' : 's'} pending.`
+        : 'All caught up.'
+      }</p>
+      <div class="page-meta">Release ${escapeHtml(data.releaseVersion)}</div>
     </div>
 
-    <div class="section">
-      <h2>Queue Summary</h2>
-      ${renderReviewSummaryCards(data.summary)}
-    </div>
+    ${renderReviewSummaryCards(data.summary)}
 
     <div class="section">
       <h2>Pending Batches</h2>
@@ -1999,7 +2697,7 @@ export function renderReviewPage(data: AdminReviewQueueResponseV2): string {
     </div>
 
     <div class="section">
-      <h2>Visible Units</h2>
+      <h2>Review Units</h2>
       ${renderReviewFilterChips('/admin/review', {
         risk: data.filters.risk,
         shape: data.filters.shape,
@@ -2023,11 +2721,40 @@ export function renderReviewPage(data: AdminReviewQueueResponseV2): string {
 export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): string {
   const batchId = data.summary.batch?.id ?? ''
   const batchPath = `/admin/review/batch/${batchId}`
+  const pendingUnits = data.summary.pendingUnits
+  const conflictCount = data.summary.sourceConflictCount
+  const hasConflicts = conflictCount > 0
+  const languageEntries = Object.entries(data.summary.byLanguage).filter(([, count]) => count > 0)
+  const languageCount = languageEntries.length
+  const languageSummary = languageEntries.map(([lang, count]) => `${lang}:${count}`).join(', ')
+  const visibleLanguageCounts = data.items.reduce<Record<string, number>>((counts, item) => {
+    counts[item.lang] = (counts[item.lang] ?? 0) + 1
+    return counts
+  }, {})
+  const visibleLanguageEntries = Object.entries(visibleLanguageCounts)
+  const selectionButtons = visibleLanguageEntries.length > 1
+    ? visibleLanguageEntries.map(([lang, count]) => `
+          <button type="button" class="secondary" data-review-select-language="${escapeHtml(lang)}">Select visible ${escapeHtml(lang)} (${escapeHtml(count)})</button>
+        `).join('')
+    : '<button type="button" class="secondary" data-review-select-all>Select all visible</button>'
+  const approveAllLabel = languageCount > 1
+    ? `Approve all languages ${pendingUnits}`
+    : `Approve all ${pendingUnits}`
+  const approveAllConfirm = languageCount > 1
+    ? `Approve all ${pendingUnits} pending review units across ${languageCount} languages in this batch? ${languageSummary}`
+    : `Approve all ${pendingUnits} pending review units in this batch?`
+  const allowMultipleLanguagesInput = languageCount > 1
+    ? '<input type="hidden" name="allowMultipleLanguages" value="true" />'
+    : ''
+  const overrideCheckbox = hasConflicts ? `
+    <label class="checkbox-inline">
+      <input type="checkbox" name="overrideSourceConflict" value="true" />
+      Override source conflicts
+    </label>` : ''
   return renderPage('AI Review Batch', `
     <div class="page-header">
-      <h1>Batch Review</h1>
-      <p>Review AI candidates grouped into queue units for a single import batch.</p>
-      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Batch: ${escapeHtml(batchId)} &middot; Release: ${escapeHtml(data.releaseVersion)}</div>
+      <h1>Batch ${escapeHtml(batchId)}</h1>
+      <div class="page-meta">Release ${escapeHtml(data.releaseVersion)}</div>
     </div>
 
     <div class="section">
@@ -2044,17 +2771,26 @@ export function renderReviewBatchPage(data: AdminReviewBatchPageResponse): strin
       })}
       <div class="selection-bar">
         <div class="btn-group">
-          <button type="button" class="secondary" data-review-select-all>Select all visible</button>
+          ${selectionButtons}
           <button type="button" class="secondary" data-review-clear-all>Clear</button>
         </div>
         <form action="/admin/api/review/units/approve" method="POST" data-json-form="true" data-reload="true" data-review-bulk-form="true" class="inline-form">
           <div data-selected-unit-ids></div>
-          <label class="checkbox-inline">
-            <input type="checkbox" name="overrideSourceConflict" value="true" />
-            Override source conflicts
-          </label>
+          ${overrideCheckbox}
           <button type="submit">Approve selected</button>
           <button type="submit" class="secondary" formaction="/admin/api/review/units/reject" data-confirm="Reject selected review units?">Reject selected</button>
+          <div class="result" data-result></div>
+        </form>
+      </div>
+      <div class="batch-action">
+        <div class="batch-action-text">
+          <span class="batch-action-label">Whole batch</span>
+          <span class="batch-action-meta">${escapeHtml(pendingUnits)} pending${languageCount > 1 ? ` across ${escapeHtml(languageCount)} languages (${escapeHtml(languageSummary)})` : ''}${hasConflicts ? ` <span class="conflict-note">· ${escapeHtml(conflictCount)} with source conflicts</span>` : ''}</span>
+        </div>
+        <form action="/admin/api/review/batches/${escapeHtml(batchId)}/approve-all" method="POST" data-json-form="true" data-reload="true" class="inline-form">
+          ${allowMultipleLanguagesInput}
+          ${overrideCheckbox}
+          <button type="submit" class="secondary" ${pendingUnits === 0 ? 'disabled' : `data-confirm="${escapeHtml(approveAllConfirm)}"`}>${escapeHtml(approveAllLabel)}</button>
           <div class="result" data-result></div>
         </form>
       </div>
@@ -2077,8 +2813,7 @@ export function renderReleasesPage(data: AdminReleaseListResponse): string {
   return renderPage('Releases', `
     <div class="page-header">
       <h1>Releases</h1>
-      <p>Build immutable snapshots, promote updates, and manage which release is active.</p>
-      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Active: ${escapeHtml(data.activeReleaseVersion)}</div>
+      <div class="page-meta">Active: ${escapeHtml(data.activeReleaseVersion)}</div>
     </div>
 
     <div class="section">
@@ -2090,32 +2825,35 @@ export function renderReleasesPage(data: AdminReleaseListResponse): string {
       <div class="panel">
         <h2>Build New Release</h2>
         <form action="/admin/api/releases/build" method="POST" data-json-form="true" data-reload="true">
-          <label>Version override
-            <input type="text" name="version" placeholder="auto-generated if empty" />
-          </label>
-          <label>Mode
-            <select name="activate">
-              <option value="true">Build and activate</option>
-              <option value="false">Build only</option>
-            </select>
-          </label>
+          <div class="form-grid">
+            <label>Version override
+              <input type="text" name="version" placeholder="auto-generated" />
+            </label>
+            <label>Mode
+              <select name="activate">
+                <option value="true">Build and activate</option>
+                <option value="false">Build only</option>
+              </select>
+            </label>
+          </div>
           <button type="submit">Build release</button>
           <div class="result" data-result></div>
         </form>
       </div>
       <div class="panel">
         <h2>Promote Updates</h2>
-        <p class="text-sm text-muted" style="margin-bottom: var(--space-3)">Bake current effective updates into a new release.</p>
         <form action="/admin/api/releases/promote" method="POST" data-json-form="true" data-reload="true">
-          <label>Version override
-            <input type="text" name="version" placeholder="auto-generated if empty" />
-          </label>
-          <label>Mode
-            <select name="activate">
-              <option value="true">Promote and activate</option>
-              <option value="false">Promote only</option>
-            </select>
-          </label>
+          <div class="form-grid">
+            <label>Version override
+              <input type="text" name="version" placeholder="auto-generated" />
+            </label>
+            <label>Mode
+              <select name="activate">
+                <option value="true">Promote and activate</option>
+                <option value="false">Promote only</option>
+              </select>
+            </label>
+          </div>
           <button type="submit" data-confirm="Promote current effective updates into a new release?">Promote release</button>
           <div class="result" data-result></div>
         </form>
@@ -2131,30 +2869,29 @@ export function renderJobsPage(
   return renderPage('Jobs', `
     <div class="page-header">
       <h1>Jobs</h1>
-      <p>Trigger source updates or Gemini AI imports, and inspect batch history.</p>
     </div>
 
     <div class="two-col" style="margin-bottom: var(--space-7)">
       <div class="panel">
         <h2>Source Update</h2>
-        <p class="text-sm text-muted" style="margin-bottom: var(--space-3)">Run deterministic updates from upstream data sources.</p>
         <form action="/admin/api/jobs/source-update" method="POST" data-json-form="true">
-          <label>Languages
-            <input type="text" name="langs" placeholder="en,de,ko,zh-cn,zh-tw" />
-          </label>
-          <label>Mode
-            <select name="dryRun">
-              <option value="false">Write updates</option>
-              <option value="true">Dry run</option>
-            </select>
-          </label>
+          <div class="form-grid">
+            <label>Languages
+              <input type="text" name="langs" placeholder="en,de,ko,zh-cn,zh-tw" />
+            </label>
+            <label>Mode
+              <select name="dryRun">
+                <option value="false">Write updates</option>
+                <option value="true">Dry run</option>
+              </select>
+            </label>
+          </div>
           <button type="submit">Run source update</button>
           <div class="result" data-result></div>
         </form>
       </div>
       <div class="panel">
         <h2>Gemini Import</h2>
-        <p class="text-sm text-muted" style="margin-bottom: var(--space-3)">Generate AI translations and examples via Gemini.</p>
         <form action="/admin/api/jobs/gemini-import" method="POST" data-json-form="true">
           <div class="form-grid">
             <label>Languages
@@ -2164,7 +2901,7 @@ export function renderJobsPage(
               <input type="text" name="seedLang" value="en" />
             </label>
             <label>Model
-              <input type="text" name="model" value="gemini-3.1-flash-lite-preview" />
+              <input type="text" name="model" value="gemini-3.1-flash-lite" />
             </label>
             <label>Limit
               <input type="text" name="limit" value="100" />
@@ -2241,8 +2978,7 @@ export function renderUpdatesPage(data: AdminUpdatesResponse): string {
   return renderPage('Updates Explorer', `
     <div class="page-header">
       <h1>Updates</h1>
-      <p>Browse all translation and example updates across source and AI layers.</p>
-      <div class="text-sm text-muted" style="margin-top: var(--space-1)">Release: ${escapeHtml(data.releaseVersion)}</div>
+      <div class="page-meta">Release ${escapeHtml(data.releaseVersion)}</div>
     </div>
 
     ${renderFilterBar(currentFilters)}

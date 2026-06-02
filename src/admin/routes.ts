@@ -1,7 +1,27 @@
 import { Hono } from 'hono'
-import { requireAdminAuth, getAdminActor } from './auth'
+import {
+  attemptLogin,
+  changeAdminPassword,
+  clearAuthCookies,
+  getAdminActor,
+  getAuthenticatedUser,
+  isAdminEnabled,
+  logout as logoutAuth,
+  normalizeAdminNextPath,
+  readRefreshTokenCookie,
+  refreshSession,
+  requireAdminApiAuth,
+  requireAdminPageAuth,
+  revokeSessionForUser,
+  setAuthCookies,
+} from './auth'
+import type { AdminUser } from './users'
+import { createAdminUser, hasAnyAdminUser } from './users'
+import { listActiveSessions } from './refresh-tokens'
+import { checkLoginRate, clearLoginAttempts, recordLoginFailure } from './rate-limit'
 import {
   applyBulkReviewAction,
+  approveAllReviewUnitsInBatch,
   approveExampleSetReview,
   approveTranslationReview,
   createAdminNewWord,
@@ -24,6 +44,9 @@ import {
   runAdminSourceUpdate,
 } from './service'
 import {
+  renderAdminAccountPage,
+  renderAdminLoginPage,
+  renderAdminSetupPage,
   renderReviewBatchPage,
   renderDashboardPage,
   renderEntryPage,
@@ -36,10 +59,25 @@ import {
 import { normalizeLanguage, type Language } from '../types'
 import { initUpdatesDatabase, listUpdateBatches } from '../update-store'
 import type { GeminiRunOptions } from '../../scripts/import/gemini'
-import type { AdminNewWordFormData, ReviewRiskLevel, ReviewUnitShape } from './types'
+import type { ReviewRiskLevel, ReviewUnitShape } from './types'
 
 const admin = new Hono()
-type JsonObject = Record<string, unknown>
+const adminPages = new Hono()
+const adminApi = new Hono()
+
+class InvalidJsonBodyError extends Error {
+  constructor() {
+    super('Invalid JSON body.')
+    this.name = 'InvalidJsonBodyError'
+  }
+}
+
+admin.onError((error, c) => {
+  if (error instanceof InvalidJsonBodyError) {
+    return c.json({ error: error.message }, 400)
+  }
+  throw error
+})
 
 function parseLanguage(raw: string | undefined, fallback: Language = 'en'): Language {
   if (!raw) return fallback
@@ -57,9 +95,11 @@ function parseLangList(raw: unknown): Language[] | null {
 
 function parseBoolean(raw: unknown, fallback = false): boolean {
   if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'number') return raw !== 0
   if (typeof raw === 'string') {
-    if (raw === 'true') return true
-    if (raw === 'false') return false
+    const normalized = raw.trim().toLowerCase()
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') return true
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') return false
   }
   return fallback
 }
@@ -68,12 +108,6 @@ function parseOptionalNumber(raw: unknown): number | null {
   if (raw === undefined || raw === null || raw === '') return null
   const parsed = Number(raw)
   return Number.isFinite(parsed) ? parsed : null
-}
-
-function asObject(value: unknown): JsonObject | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as JsonObject
-    : null
 }
 
 function mapAdminBuildError(
@@ -118,62 +152,238 @@ function parseUnitIds(raw: unknown): string[] {
     .filter(Boolean)
 }
 
-async function readJsonObject(request: Request): Promise<JsonObject> {
-  const body = await request.json().catch(() => ({}))
-  return asObject(body) ?? {}
-}
-
-function parseStringList(raw: unknown): string[] {
-  const values = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : []
-  return values
-    .map((value) => String(value).trim())
-    .filter(Boolean)
-}
-
-function parseNewWordInput(body: JsonObject): AdminNewWordFormData {
-  const rawTranslations = Array.isArray(body.translations) ? body.translations : []
-
-  return {
-    word: typeof body.word === 'string' ? body.word : '',
-    reading: typeof body.reading === 'string' ? body.reading : '',
-    partOfSpeech: parseStringList(body.partOfSpeech),
-    common: parseBoolean(body.common, false),
-    jlpt: parseOptionalNumber(body.jlpt),
-    translations: rawTranslations.map((raw): AdminNewWordFormData['translations'][number] => {
-      const row = asObject(raw) ?? {}
-      const lang = typeof row.lang === 'string'
-        ? normalizeLanguage(row.lang) ?? 'en'
-        : 'en'
-
-      return {
-        lang,
-        definitions: parseStringList(row.definitions),
-        examples: Array.isArray(row.examples)
-          ? row.examples.map((rawExample) => {
-              const example = asObject(rawExample) ?? {}
-              return {
-                japanese: typeof example.japanese === 'string' ? example.japanese : '',
-                translation: typeof example.translation === 'string' ? example.translation : '',
-              }
-            })
-          : [],
-      }
-    }),
+async function readJsonBody<T extends Record<string, unknown>>(request: Request): Promise<T> {
+  try {
+    return await request.json() as T
+  } catch {
+    throw new InvalidJsonBodyError()
   }
 }
 
-admin.use('/admin', requireAdminAuth)
-admin.use('/admin/*', requireAdminAuth)
+function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  const forwarded = c.req.header('x-forwarded-for')
+  if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown'
+  return c.req.header('x-real-ip')?.trim() || 'unknown'
+}
 
-admin.get('/admin', (c) => c.html(renderDashboardPage(getAdminSummary())))
+admin.get('/admin/setup', (c) => {
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next: '/admin' }), 503)
+  }
+  if (hasAnyAdminUser()) {
+    return c.redirect('/admin/login', 302)
+  }
+  return c.html(renderAdminSetupPage())
+})
 
-admin.get('/admin/entry', (c) => {
+admin.post('/admin/setup', async (c) => {
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next: '/admin' }), 503)
+  }
+  if (hasAnyAdminUser()) {
+    return c.redirect('/admin/login', 302)
+  }
+
+  const body = await c.req.parseBody()
+  const email = typeof body.email === 'string' ? body.email : ''
+  const password = typeof body.password === 'string' ? body.password : ''
+  const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : ''
+
+  if (!email.trim()) {
+    return c.html(renderAdminSetupPage({ error: 'Email is required.' }), 400)
+  }
+  if (password.length < 12) {
+    return c.html(renderAdminSetupPage({ error: 'Password must be at least 12 characters.' }), 400)
+  }
+  if (password !== confirmPassword) {
+    return c.html(renderAdminSetupPage({ error: 'Passwords do not match.' }), 400)
+  }
+
+  try {
+    await createAdminUser(email, password)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create account.'
+    return c.html(renderAdminSetupPage({ error: message }), 400)
+  }
+
+  const ip = clientIp(c)
+  const userAgent = c.req.header('user-agent') ?? null
+  const result = await attemptLogin(email, password, { userAgent, ip })
+  if (result) {
+    setAuthCookies(c, result.accessToken, result.refreshToken)
+    return c.redirect('/admin', 303)
+  }
+
+  return c.redirect('/admin/login', 303)
+})
+
+admin.get('/admin/login', async (c) => {
+  const next = normalizeAdminNextPath(c.req.query('next'))
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
+  }
+  if (!hasAnyAdminUser()) {
+    return c.redirect('/admin/setup', 302)
+  }
+  const user = await getAuthenticatedUser(c)
+  if (user) {
+    return c.redirect(next, 302)
+  }
+  return c.html(renderAdminLoginPage({ next }))
+})
+
+admin.post('/admin/login', async (c) => {
+  const body = await c.req.parseBody()
+  const email = typeof body.email === 'string' ? body.email : ''
+  const password = typeof body.password === 'string' ? body.password : ''
+  const next = normalizeAdminNextPath(typeof body.next === 'string' ? body.next : null)
+
+  if (!isAdminEnabled()) {
+    return c.html(renderAdminLoginPage({ disabled: true, next }), 503)
+  }
+
+  const ip = clientIp(c)
+  const rate = checkLoginRate(ip)
+  if (!rate.allowed) {
+    c.header('Retry-After', String(rate.retryAfterSeconds))
+    return c.html(
+      renderAdminLoginPage({
+        error: `Too many failed attempts. Try again in ${rate.retryAfterSeconds} seconds.`,
+        next,
+      }),
+      429
+    )
+  }
+
+  const userAgent = c.req.header('user-agent') ?? null
+  const result = await attemptLogin(email, password, { userAgent, ip })
+
+  if (!result) {
+    recordLoginFailure(ip)
+    return c.html(
+      renderAdminLoginPage({
+        error: 'Invalid email or password.',
+        next,
+      }),
+      401
+    )
+  }
+
+  clearLoginAttempts(ip)
+  setAuthCookies(c, result.accessToken, result.refreshToken)
+  return c.redirect(next, 303)
+})
+
+admin.post('/admin/auth/refresh', async (c) => {
+  if (!isAdminEnabled()) {
+    return c.json({ error: 'Admin UI is disabled.' }, 503)
+  }
+  const refreshToken = readRefreshTokenCookie(c)
+  if (!refreshToken) {
+    return c.json({ error: 'No refresh token' }, 401)
+  }
+  const userAgent = c.req.header('user-agent') ?? null
+  const ip = clientIp(c)
+  const result = await refreshSession(refreshToken, { userAgent, ip })
+  if (!result) {
+    clearAuthCookies(c)
+    return c.json({ error: 'Invalid or expired refresh token' }, 401)
+  }
+  setAuthCookies(c, result.accessToken, result.refreshToken)
+  return c.json({ ok: true })
+})
+
+admin.post('/admin/logout', async (c) => {
+  const refreshToken = readRefreshTokenCookie(c)
+  const user = await getAuthenticatedUser(c)
+  logoutAuth(refreshToken, {
+    actor: user?.email,
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+  clearAuthCookies(c)
+  return c.redirect('/admin/login', 303)
+})
+
+adminPages.use('/admin', requireAdminPageAuth)
+adminPages.use('/admin/*', requireAdminPageAuth)
+adminApi.use('/admin/api/*', requireAdminApiAuth)
+
+adminPages.get('/admin', (c) => c.html(renderDashboardPage(getAdminSummary())))
+
+function renderAccountPageFor(user: AdminUser, flash: { kind: 'success' | 'error'; message: string } | null = null): string {
+  return renderAdminAccountPage({
+    email: user.email,
+    lastLoginAt: user.lastLoginAt,
+    sessions: listActiveSessions(user.id),
+    flash,
+  })
+}
+
+adminPages.get('/admin/account', (c) => {
+  const user = c.get('adminUser') as AdminUser
+  return c.html(renderAccountPageFor(user))
+})
+
+adminPages.post('/admin/account/change-password', async (c) => {
+  const user = c.get('adminUser') as AdminUser
+  const body = await c.req.parseBody()
+  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : ''
+  const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : ''
+
+  if (newPassword !== confirmPassword) {
+    return c.html(
+      renderAccountPageFor(user, { kind: 'error', message: 'New password and confirmation do not match.' }),
+      400
+    )
+  }
+
+  const result = await changeAdminPassword(user, currentPassword, newPassword, {
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+
+  if (!result.ok) {
+    const message =
+      result.reason === 'wrong_current'
+        ? 'Current password is incorrect.'
+        : 'New password must be at least 12 characters.'
+    return c.html(renderAccountPageFor(user, { kind: 'error', message }), 400)
+  }
+
+  clearAuthCookies(c)
+  const loginUrl = new URL('/admin/login', c.req.url)
+  loginUrl.searchParams.set('next', '/admin/account')
+  return c.redirect(loginUrl.pathname + loginUrl.search, 303)
+})
+
+adminPages.post('/admin/account/sessions/:id/revoke', (c) => {
+  const user = c.get('adminUser') as AdminUser
+  const sessionId = Number(c.req.param('id'))
+  if (!Number.isFinite(sessionId)) {
+    return c.html(renderAccountPageFor(user, { kind: 'error', message: 'Invalid session id.' }), 400)
+  }
+  const ok = revokeSessionForUser(user, sessionId, {
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  })
+  return c.html(
+    renderAccountPageFor(user, {
+      kind: ok ? 'success' : 'error',
+      message: ok ? 'Session revoked.' : 'Session not found or already revoked.',
+    }),
+    ok ? 200 : 404
+  )
+})
+
+adminPages.get('/admin/entry', (c) => {
   const word = c.req.query('word') ?? ''
   const lang = parseLanguage(c.req.query('lang'))
   return c.html(renderEntryPage(inspectEntry(word, lang)))
 })
 
-admin.get('/admin/review', (c) => {
+adminPages.get('/admin/review', (c) => {
   return c.html(renderReviewPage(getReviewQueue({
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
     risk: parseReviewRisk(c.req.query('risk')),
@@ -184,7 +394,7 @@ admin.get('/admin/review', (c) => {
   })))
 })
 
-admin.get('/admin/review/batch/:id', (c) => {
+adminPages.get('/admin/review/batch/:id', (c) => {
   return c.html(renderReviewBatchPage(getReviewBatchPage(Number(c.req.param('id')), {
     risk: parseReviewRisk(c.req.query('risk')),
     shape: parseReviewShape(c.req.query('shape')),
@@ -194,11 +404,11 @@ admin.get('/admin/review/batch/:id', (c) => {
   })))
 })
 
-admin.get('/admin/new-word', (c) => c.html(renderNewWordPage()))
+adminPages.get('/admin/new-word', (c) => c.html(renderNewWordPage()))
 
-admin.get('/admin/releases', (c) => c.html(renderReleasesPage(getAdminReleaseList())))
+adminPages.get('/admin/releases', (c) => c.html(renderReleasesPage(getAdminReleaseList())))
 
-admin.get('/admin/jobs', (c) => {
+adminPages.get('/admin/jobs', (c) => {
   const updatesDb = initUpdatesDatabase()
   const batchId = parseOptionalNumber(c.req.query('batchId'))
   const batches = listUpdateBatches(updatesDb, 20)
@@ -206,7 +416,7 @@ admin.get('/admin/jobs', (c) => {
   return c.html(renderJobsPage(batches, batchId ? getBatchDetail(batchId) : null))
 })
 
-admin.get('/admin/updates', (c) => {
+adminPages.get('/admin/updates', (c) => {
   const response = getUpdatesExplorer({
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
     sourceType: (c.req.query('sourceType') as 'source' | 'ai' | undefined) ?? null,
@@ -216,17 +426,17 @@ admin.get('/admin/updates', (c) => {
   return c.html(renderUpdatesPage(response))
 })
 
-admin.get('/admin/api/summary', (c) => c.json(getAdminSummary()))
-admin.get('/admin/api/releases', (c) => c.json(getAdminReleaseList()))
-admin.get('/admin/api/releases/:version', (c) => {
+adminApi.get('/admin/api/summary', (c) => c.json(getAdminSummary()))
+adminApi.get('/admin/api/releases', (c) => c.json(getAdminReleaseList()))
+adminApi.get('/admin/api/releases/:version', (c) => {
   const version = c.req.param('version')
   const release = getAdminReleaseList().releases.find((item) => item.version === version) ?? null
   if (!release) return c.json({ error: 'Release not found' }, 404)
   return c.json(release)
 })
 
-admin.post('/admin/api/releases/build', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/releases/build', async (c) => {
+  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
   try {
     const result = await runAdminBuildRelease({
       version: typeof body.version === 'string' ? body.version : null,
@@ -241,17 +451,41 @@ admin.post('/admin/api/releases/build', async (c) => {
   }
 })
 
-admin.post('/admin/api/new-word', async (c) => {
-  const body = await readJsonObject(c.req.raw)
-  const result = await createAdminNewWord(parseNewWordInput(body), getAdminActor(c))
+adminApi.post('/admin/api/new-word', async (c) => {
+  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+  const result = await createAdminNewWord({
+    word: typeof body.word === 'string' ? body.word : '',
+    reading: typeof body.reading === 'string' ? body.reading : '',
+    partOfSpeech: Array.isArray(body.partOfSpeech)
+      ? body.partOfSpeech.map((value) => String(value))
+      : typeof body.partOfSpeech === 'string'
+        ? [body.partOfSpeech]
+        : [],
+    common: parseBoolean(body.common, false),
+    jlpt: parseOptionalNumber(body.jlpt),
+    translations: Array.isArray(body.translations)
+      ? body.translations.map((row) => ({
+          lang: typeof row === 'object' && row && 'lang' in row ? String((row as Record<string, unknown>).lang) as Language : 'en',
+          definitions: typeof row === 'object' && row && Array.isArray((row as Record<string, unknown>).definitions)
+            ? ((row as Record<string, unknown>).definitions as unknown[]).map((value) => String(value))
+            : [],
+          examples: typeof row === 'object' && row && Array.isArray((row as Record<string, unknown>).examples)
+            ? ((row as Record<string, unknown>).examples as Record<string, unknown>[]).map((item) => ({
+                japanese: String(item.japanese ?? ''),
+                translation: String(item.translation ?? ''),
+              }))
+            : [],
+        }))
+      : [],
+  }, getAdminActor(c))
 
   if (!result.created && result.conflictWordId) return c.json(result, 409)
   if (!result.created) return c.json(result, 400)
   return c.json(result)
 })
 
-admin.post('/admin/api/new-word/build-release', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/new-word/build-release', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
   const createdWordId = typeof body.createdWordId === 'string' ? body.createdWordId.trim() : ''
   if (!createdWordId) {
     return c.json({ error: 'createdWordId is required.' }, 400)
@@ -271,33 +505,36 @@ admin.post('/admin/api/new-word/build-release', async (c) => {
   }
 })
 
-admin.post('/admin/api/releases/:version/activate', (c) => {
+adminApi.post('/admin/api/releases/:version/activate', (c) => {
   return c.json(runAdminActivateRelease(c.req.param('version'), getAdminActor(c)))
 })
 
-admin.post('/admin/api/releases/promote', async (c) => {
-  const body = await readJsonObject(c.req.raw)
-  try {
-    const result = runAdminPromoteRelease({
-      version: typeof body.version === 'string' ? body.version : null,
-      activate: parseBoolean(body.activate, true),
-      actor: getAdminActor(c),
+adminApi.post('/admin/api/releases/promote', (c) => {
+  return c.req.raw.json()
+    .catch(() => ({}))
+    .then((body: Record<string, unknown>) => {
+      try {
+        const result = runAdminPromoteRelease({
+          version: typeof body.version === 'string' ? body.version : null,
+          activate: parseBoolean(body.activate, true),
+          actor: getAdminActor(c),
+        })
+        return c.json(result)
+      } catch (error) {
+        const response = mapAdminBuildError(c, error)
+        if (response) return response
+        throw error
+      }
     })
-    return c.json(result)
-  } catch (error) {
-    const response = mapAdminBuildError(c, error)
-    if (response) return response
-    throw error
-  }
 })
 
-admin.get('/admin/api/entries', (c) => {
+adminApi.get('/admin/api/entries', (c) => {
   const word = c.req.query('word')
   if (!word) return c.json({ error: 'Missing query parameter: word' }, 400)
   return c.json(inspectEntry(word, parseLanguage(c.req.query('lang'))))
 })
 
-admin.get('/admin/api/updates', (c) => {
+adminApi.get('/admin/api/updates', (c) => {
   return c.json(getUpdatesExplorer({
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
     sourceType: (c.req.query('sourceType') as 'source' | 'ai' | undefined) ?? null,
@@ -306,12 +543,12 @@ admin.get('/admin/api/updates', (c) => {
   }))
 })
 
-admin.get('/admin/api/review/ai', (c) => {
+adminApi.get('/admin/api/review/ai', (c) => {
   const lang = normalizeLanguage(c.req.query('lang') ?? '')
   return c.json(getAiReviewQueue(lang))
 })
 
-admin.get('/admin/api/review/queue', (c) => {
+adminApi.get('/admin/api/review/queue', (c) => {
   return c.json(getReviewQueue({
     batchId: parseOptionalNumber(c.req.query('batchId')),
     lang: normalizeLanguage(c.req.query('lang') ?? ''),
@@ -323,40 +560,40 @@ admin.get('/admin/api/review/queue', (c) => {
   }))
 })
 
-admin.get('/admin/api/review/batches/:id/summary', (c) => {
+adminApi.get('/admin/api/review/batches/:id/summary', (c) => {
   return c.json(getReviewBatchSummary(Number(c.req.param('id'))))
 })
 
-admin.post('/admin/api/review/translation/:id/approve', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/review/translation/:id/approve', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
   const result = approveTranslationReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Translation update not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/translation/:id/reject', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/review/translation/:id/reject', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
   const result = rejectTranslationReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Translation update not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/example-set/:id/approve', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/review/example-set/:id/approve', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
   const result = approveExampleSetReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Example update set not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/example-set/:id/reject', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/review/example-set/:id/reject', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
   const result = rejectExampleSetReview(Number(c.req.param('id')), getAdminActor(c), typeof body.notes === 'string' ? body.notes : null)
   if (!result) return c.json({ error: 'Example update set not found' }, 404)
   return c.json(result)
 })
 
-admin.post('/admin/api/review/units/approve', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/review/units/approve', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
   const result = applyBulkReviewAction('approved', {
     unitIds: parseUnitIds(body.unitIds),
     notes: typeof body.notes === 'string' ? body.notes : null,
@@ -367,8 +604,8 @@ admin.post('/admin/api/review/units/approve', async (c) => {
   return c.json(result)
 })
 
-admin.post('/admin/api/review/units/reject', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/review/units/reject', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
   const result = applyBulkReviewAction('rejected', {
     unitIds: parseUnitIds(body.unitIds),
     notes: typeof body.notes === 'string' ? body.notes : null,
@@ -379,8 +616,20 @@ admin.post('/admin/api/review/units/reject', async (c) => {
   return c.json(result)
 })
 
-admin.post('/admin/api/jobs/source-update', async (c) => {
-  const body = await readJsonObject(c.req.raw)
+adminApi.post('/admin/api/review/batches/:id/approve-all', async (c) => {
+  const body = await c.req.raw.json().catch(() => ({}))
+  const result = approveAllReviewUnitsInBatch(Number(c.req.param('id')), {
+    notes: typeof body.notes === 'string' ? body.notes : null,
+    overrideSourceConflict: parseBoolean(body.overrideSourceConflict, false),
+    allowMultipleLanguages: parseBoolean(body.allowMultipleLanguages, false),
+  }, getAdminActor(c))
+
+  if (!result.ok) return c.json(result, 400)
+  return c.json(result)
+})
+
+adminApi.post('/admin/api/jobs/source-update', async (c) => {
+  const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
   const result = await runAdminSourceUpdate({
     langs: parseLangList(body.langs),
     dryRun: parseBoolean(body.dryRun, false),
@@ -389,25 +638,42 @@ admin.post('/admin/api/jobs/source-update', async (c) => {
   return c.json(result)
 })
 
-admin.post('/admin/api/jobs/gemini-import', async (c) => {
-  const body = await readJsonObject(c.req.raw)
-  const result = await runAdminGeminiImport({
-    actor: getAdminActor(c),
-    langs: parseLangList(body.langs) ?? undefined,
-    seedLang: typeof body.seedLang === 'string' ? body.seedLang as GeminiRunOptions['seedLang'] : undefined,
-    model: typeof body.model === 'string' ? body.model : undefined,
-    limit: parseOptionalNumber(body.limit) ?? undefined,
-    minFrequency: parseOptionalNumber(body.minFrequency) ?? undefined,
-    jlptMax: parseOptionalNumber(body.jlptMax) ?? undefined,
-    maxCostUsd: parseOptionalNumber(body.maxCostUsd) ?? undefined,
-    commonOnly: parseBoolean(body.commonOnly, false),
-    dryRun: parseBoolean(body.dryRun, true),
-  })
-  return c.json(result)
+adminApi.post('/admin/api/jobs/gemini-import', async (c) => {
+  try {
+    const body = await readJsonBody<Record<string, unknown>>(c.req.raw)
+    const result = await runAdminGeminiImport({
+      actor: getAdminActor(c),
+      langs: parseLangList(body.langs) ?? undefined,
+      seedLang: typeof body.seedLang === 'string' ? body.seedLang as GeminiRunOptions['seedLang'] : undefined,
+      model: typeof body.model === 'string' ? body.model : undefined,
+      limit: parseOptionalNumber(body.limit) ?? undefined,
+      minFrequency: parseOptionalNumber(body.minFrequency) ?? undefined,
+      jlptMax: parseOptionalNumber(body.jlptMax) ?? undefined,
+      maxCostUsd: parseOptionalNumber(body.maxCostUsd) ?? undefined,
+      commonOnly: parseBoolean(body.commonOnly, false),
+      dryRun: parseBoolean(body.dryRun, true),
+    })
+    return c.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const lowerMessage = message.toLowerCase()
+    const status = error instanceof InvalidJsonBodyError
+      ? 400
+      : message.includes('GEMINI_API_KEY')
+      || message.includes('GOOGLE_API_KEY')
+      || lowerMessage.includes('api key')
+      || message.startsWith('No pricing preset found')
+      ? 400
+      : 500
+    return c.json({ error: message }, status)
+  }
 })
 
-admin.get('/admin/api/batches/:id', (c) => {
+adminApi.get('/admin/api/batches/:id', (c) => {
   return c.json(getBatchDetail(Number(c.req.param('id'))))
 })
+
+admin.route('/', adminApi)
+admin.route('/', adminPages)
 
 export default admin

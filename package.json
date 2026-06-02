@@ -13,6 +13,7 @@
     "release:build": "bun run scripts/release/build.ts",
     "release:activate": "bun run scripts/release/activate.ts",
     "release:promote": "bun run scripts/release/promote.ts",
+    "release:cleanup": "bun run scripts/release/cleanup.ts",
     "import:jmdict": "bun run scripts/import/jmdict.ts",
     "import:jmdict-examples": "bun run scripts/import/jmdict-examples.ts",
     "import:jitendex": "bun run scripts/import/jitendex.ts",
@@ -27,6 +28,7 @@
     "import:wiktionary": "bun run scripts/import/wiktionary.ts",
     "import:gemini": "bun run scripts/import/gemini.ts",
     "update:ai": "bun run scripts/import/gemini.ts --output-mode updates-db",
+    "review:approve-ai": "bun run scripts/review/approve-ai.ts",
     "update:source": "bun run scripts/update/source.ts",
     "verify:updates": "bun run scripts/verify-updates.ts",
     "import:zhja": "bun run scripts/import/zhja.ts",
@@ -47,6 +49,7 @@
     "@google/genai": "^1.44.0",
     "@scalar/hono-api-reference": "^0.9.44",
     "hono": "^4.6.0",
+    "jose": "^6.2.3",
     "opencc-js": "^1.0.5",
     "wanakana": "^5.3.1"
   },

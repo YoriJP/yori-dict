@@ -76,18 +76,85 @@ function dedupeCaseInsensitive(values: string[]): string[] {
   return deduped
 }
 
+// Yomitan structured content tags each node with a semantic role via
+// `data.content` (e.g. "glossary", "part-of-speech-info", "example-sentence",
+// "attribution", "xref", "forms"). Only the "glossary" role holds the actual
+// definition; everything else is metadata.
+function getRole(node: YomitanNode): string | null {
+  if (node == null || typeof node === 'string' || Array.isArray(node)) return null
+  const data = (node as { data?: unknown }).data
+  if (data && typeof data === 'object' && typeof (data as { content?: unknown }).content === 'string') {
+    return (data as { content: string }).content
+  }
+  return null
+}
+
+// True if any node in the subtree carries a role marker. Rich Jitendex glosses
+// always do; legacy/plain structured content does not.
+function hasRoleMetadata(node: YomitanNode): boolean {
+  if (node == null || typeof node === 'string') return false
+  if (Array.isArray(node)) return node.some(hasRoleMetadata)
+  if (getRole(node) !== null) return true
+  return node.content !== undefined ? hasRoleMetadata(node.content as YomitanNode) : false
+}
+
+// Collect each <li> under a glossary node as its own definition string.
+function collectGlossaryItems(node: YomitanNode, results: string[]): void {
+  if (node == null || typeof node === 'string') return
+  if (Array.isArray(node)) {
+    for (const child of node) collectGlossaryItems(child, results)
+    return
+  }
+  if ((node as { tag?: unknown }).tag === 'li') {
+    const text = normalizeWhitespace(collectText(node.content as YomitanNode))
+    if (text) results.push(text)
+    return
+  }
+  if (node.content !== undefined) collectGlossaryItems(node.content as YomitanNode, results)
+}
+
+// Walk structured content collecting only "glossary"-role text, skipping
+// part-of-speech tags, example sentences, attribution, cross-references, and
+// alternate forms. Redirect-only entries (no glossary) yield nothing.
+function collectGlossaryDefinitions(node: YomitanNode, results: string[]): void {
+  if (node == null || typeof node === 'string') return
+  if (Array.isArray(node)) {
+    for (const child of node) collectGlossaryDefinitions(child, results)
+    return
+  }
+  if (getRole(node) === 'glossary') {
+    collectGlossaryItems(node.content as YomitanNode, results)
+    return
+  }
+  if (node.content !== undefined) collectGlossaryDefinitions(node.content as YomitanNode, results)
+}
+
 export function extractDefinitionTexts(defs: YomitanDef[], maxDefinitions = 8): string[] {
   const collected: string[] = []
 
   for (const def of defs) {
-    const rawText = collectText(unwrapDefinitionNode(def))
-    const cleaned = normalizeWhitespace(rawText)
-      .replace(/\s*[\u2022\u30fb]\s*/g, '; ')
-      .replace(/\s*;\s*/g, '; ')
-      .trim()
+    const node = unwrapDefinitionNode(def)
 
-    if (cleaned.length < 2) continue
-    collected.push(cleaned)
+    // Rich Jitendex content tags each node with a role: pull only the glossary
+    // text. Role-less legacy content falls back to flattening the whole node.
+    const rawTexts: string[] = []
+    if (hasRoleMetadata(node)) {
+      collectGlossaryDefinitions(node, rawTexts)
+    } else {
+      rawTexts.push(collectText(node))
+    }
+
+    for (const rawText of rawTexts) {
+      const cleaned = normalizeWhitespace(rawText)
+        .replace(/\s*[\u2022\u30fb]\s*/g, '; ')
+        .replace(/\s*;\s*/g, '; ')
+        .trim()
+
+      if (cleaned.length < 2) continue
+      collected.push(cleaned)
+      if (collected.length >= maxDefinitions) break
+    }
+
     if (collected.length >= maxDefinitions) break
   }
 

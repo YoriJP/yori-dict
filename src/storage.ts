@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
 import { dirname, join, relative, resolve, sep } from 'path'
 
+export const PROJECT_ROOT_ENV_VAR = 'YORI_PROJECT_ROOT'
 export const RELEASE_SCHEMA_VERSION = '1.0.0'
 export const RELEASES_DIR = './releases'
 export const CURRENT_RELEASE_PATH = join(RELEASES_DIR, 'current.json')
@@ -84,8 +85,25 @@ export function createEmptySnapshot(): ReleaseSnapshot {
   }
 }
 
+export function resolveProjectPath(relativePath: string): string {
+  const projectRoot = process.env[PROJECT_ROOT_ENV_VAR]?.trim()
+  return projectRoot ? join(projectRoot, relativePath) : `./${relativePath}`
+}
+
+export function getReleasesDir(): string {
+  return resolveProjectPath('releases')
+}
+
+export function getCurrentReleasePath(): string {
+  return join(getReleasesDir(), 'current.json')
+}
+
+export function getLegacyDbPath(): string {
+  return process.env.DATABASE_PATH || resolveProjectPath('dict.sqlite')
+}
+
 export function getUpdatesDbPath(): string {
-  return process.env.UPDATES_DATABASE_PATH || DEFAULT_UPDATES_DB_PATH
+  return process.env.UPDATES_DATABASE_PATH || resolveProjectPath('updates.sqlite')
 }
 
 export function ensureParentDir(path: string): void {
@@ -231,6 +249,32 @@ export function createUpdatesSchema(db: Database): void {
       notes TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_refresh_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      user_agent TEXT,
+      ip TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_user
+      ON admin_refresh_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_hash
+      ON admin_refresh_tokens(token_hash);
   `)
 
   ensureUpdatesSchemaCompatibility(db)
@@ -357,11 +401,11 @@ export function buildReleaseVersion(now = new Date(), fingerprint?: string): str
 }
 
 export function getReleaseDbPath(version: string): string {
-  return join(RELEASES_DIR, version, 'dict.sqlite')
+  return join(getReleasesDir(), version, 'dict.sqlite')
 }
 
 export function getReleaseManifestPath(version: string): string {
-  return join(RELEASES_DIR, version, 'manifest.json')
+  return join(getReleasesDir(), version, 'manifest.json')
 }
 
 export function writeReleaseManifest(version: string, manifest: ReleaseManifest): string {
@@ -376,13 +420,15 @@ export function readReleaseManifest(path: string): ReleaseManifest {
 }
 
 export function writeCurrentReleasePointer(pointer: CurrentReleasePointer): void {
-  ensureParentDir(CURRENT_RELEASE_PATH)
-  writeFileSync(CURRENT_RELEASE_PATH, JSON.stringify(pointer, null, 2))
+  const currentReleasePath = getCurrentReleasePath()
+  ensureParentDir(currentReleasePath)
+  writeFileSync(currentReleasePath, JSON.stringify(pointer, null, 2))
 }
 
 export function readCurrentReleasePointer(): CurrentReleasePointer | null {
-  if (!existsSync(CURRENT_RELEASE_PATH)) return null
-  return JSON.parse(readFileSync(CURRENT_RELEASE_PATH, 'utf8')) as CurrentReleasePointer
+  const currentReleasePath = getCurrentReleasePath()
+  if (!existsSync(currentReleasePath)) return null
+  return JSON.parse(readFileSync(currentReleasePath, 'utf8')) as CurrentReleasePointer
 }
 
 export function resolveActiveReleaseConfig(): ActiveReleaseConfig | null {
@@ -406,10 +452,11 @@ export function resolveActiveReleaseConfig(): ActiveReleaseConfig | null {
     }
   }
 
-  if (existsSync(LEGACY_DB_PATH)) {
+  const legacyDbPath = getLegacyDbPath()
+  if (existsSync(legacyDbPath)) {
     return {
       version: 'legacy',
-      dbPath: LEGACY_DB_PATH,
+      dbPath: legacyDbPath,
       manifestPath: null,
       mode: 'legacy',
     }

@@ -56,6 +56,7 @@ export interface CliOptions {
   offset: number
   retries: number
   minDelayMs: number
+  requestTimeoutMs: number
   temperature: number
   commonOnly: boolean
   minFrequency: number | null
@@ -95,6 +96,7 @@ export interface MissingSelectionResult {
   excludedByFrequency: number
   excludedByJlpt: number
   excludedByRegex: number
+  excludedByActiveUpdate: number
   keys: string[]
 }
 
@@ -135,6 +137,7 @@ interface LanguageReport {
   excludedByFrequency: number
   excludedByJlpt: number
   excludedByRegex: number
+  excludedByActiveUpdate: number
   batches: number
   failedBatches: number
   updatedEntries: number
@@ -163,6 +166,7 @@ interface RunReport {
     offset: number
     retries: number
     minDelayMs: number
+    requestTimeoutMs: number
     temperature: number
     commonOnly: boolean
     minFrequency: number | null
@@ -198,7 +202,7 @@ const STYLE_HINT: Record<TargetLang, string> = {
 }
 
 const MODEL_PRICING: Record<string, PricingConfig> = {
-  'gemini-3.1-flash-lite-preview': {
+  'gemini-3.1-flash-lite': {
     inputUsdPerMillion: 0.25,
     outputUsdPerMillion: 1.5,
   },
@@ -275,7 +279,7 @@ export function defaultCliOptions(): CliOptions {
     langs: [...ALL_LANGS],
     seedLang: 'en',
     outputMode: 'updates-db',
-    model: 'gemini-3.1-flash-lite-preview',
+    model: 'gemini-3.1-flash-lite',
     batchSize: 20,
     maxDefs: 3,
     saveEvery: 10,
@@ -283,6 +287,7 @@ export function defaultCliOptions(): CliOptions {
     offset: 0,
     retries: 5,
     minDelayMs: 250,
+    requestTimeoutMs: 60000,
     temperature: 0.2,
     commonOnly: false,
     minFrequency: null,
@@ -339,6 +344,9 @@ export function parseArgs(args: string[]): CliOptions {
       i++
     } else if (arg === '--min-delay-ms' && next) {
       opts.minDelayMs = parseNonNegativeInt(next, '--min-delay-ms')
+      i++
+    } else if (arg === '--request-timeout-ms' && next) {
+      opts.requestTimeoutMs = parsePositiveInt(next, '--request-timeout-ms')
       i++
     } else if (arg === '--temperature' && next) {
       opts.temperature = parseFloatRange(next, '--temperature', 0, 2)
@@ -401,7 +409,7 @@ Options:
   --langs <list>             Comma-separated targets (default: en,de,ko,zh-cn,zh-tw)
   --seed-lang <lang>         Master key/definition source language (default: en, use "none" to disable)
   --output-mode <mode>       json | updates-db (default: updates-db)
-  --model <name>             Gemini model for SDK calls (default: gemini-3.1-flash-lite-preview)
+  --model <name>             Gemini model for SDK calls (default: gemini-3.1-flash-lite)
   --batch-size <n>           Entries per API call (default: 20)
   --max-defs <n>             Max generated definitions per entry (default: 3)
   --save-every <n>           Save every N batches (default: 10)
@@ -409,6 +417,7 @@ Options:
   --offset <n>               Skip first N filtered missing entries per language
   --retries <n>              Retry count per failed request (default: 5)
   --min-delay-ms <n>         Delay between requests in milliseconds (default: 250)
+  --request-timeout-ms <n>   Timeout for each Gemini SDK request (default: 60000)
   --temperature <n>          Generation temperature 0-2 (default: 0.2)
   --common-only              Only generate for entries marked common in core.json
   --min-frequency <rank>     Only include entries with frequency <= rank
@@ -428,6 +437,41 @@ Examples:
   bun run import:gemini --langs de --jlpt-max 3 --max-cost-usd 2 --report-file reports/gemini-de.json
   bun run import:gemini --dry-run --exclude-regex '^[\\p{P}\\p{S}]+$'
 `)
+}
+
+function installInterruptHandler(getState: () => {
+  updatesDb: Database | null
+  updateBatchId: number | null
+}): () => void {
+  const handleInterrupt = (signal: string): never => {
+    const { updatesDb, updateBatchId } = getState()
+    if (updatesDb && updateBatchId !== null) {
+      const message = `Interrupted by ${signal}`
+      try {
+        finalizeUpdateBatch(updatesDb, updateBatchId, 'failed', message)
+        console.error(`\n${message}; marked batch ${updateBatchId} as failed.`)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        console.error(`\n${message}; failed to mark batch ${updateBatchId}: ${detail}`)
+      }
+    }
+
+    try {
+      updatesDb?.close()
+    } catch {
+      // Process is exiting after an interrupt; ignore close failures.
+    }
+
+    process.exit(signal === 'SIGINT' ? 130 : 143)
+  }
+
+  process.once('SIGINT', handleInterrupt)
+  process.once('SIGTERM', handleInterrupt)
+
+  return () => {
+    process.off('SIGINT', handleInterrupt)
+    process.off('SIGTERM', handleInterrupt)
+  }
 }
 
 export function buildSelectionFilters(opts: CliOptions): SelectionFilters {
@@ -499,6 +543,27 @@ function buildLangViewFromSnapshot(snapshot: ReleaseSnapshot, lang: TargetLang):
   return langFile
 }
 
+function listActiveAiUpdateKeys(db: Database, langs: TargetLang[]): Map<TargetLang, Set<string>> {
+  const result = new Map<TargetLang, Set<string>>()
+  for (const lang of langs) result.set(lang, new Set())
+
+  const placeholders = langs.map((_, index) => `?${index + 1}`).join(', ')
+  const rows = db.query<{ word_id: string; lang: TargetLang }, string[]>(`
+    SELECT word_id, lang
+    FROM translation_updates
+    WHERE status = 'active'
+      AND source_type = 'ai'
+      AND review_status = 'pending'
+      AND lang IN (${placeholders})
+  `).all(...langs)
+
+  for (const row of rows) {
+    result.get(row.lang)?.add(row.word_id)
+  }
+
+  return result
+}
+
 function matchesExcludePattern(pattern: RegExp | null, key: string): boolean {
   if (!pattern) return false
   const { word, reading } = parseKey(key)
@@ -538,7 +603,8 @@ export function collectMissingKeys(
   coreEntries: Record<string, CoreEntry>,
   filters: SelectionFilters,
   offset: number,
-  limit: number | null
+  limit: number | null,
+  activeUpdateKeys: Set<string> = new Set()
 ): MissingSelectionResult {
   const eligible: string[] = []
   let totalMissing = 0
@@ -546,12 +612,18 @@ export function collectMissingKeys(
   let excludedByFrequency = 0
   let excludedByJlpt = 0
   let excludedByRegex = 0
+  let excludedByActiveUpdate = 0
 
   for (const key of masterKeys) {
     const entry = target.entries[key]
     if (entry && entry.definitions.length > 0) continue
 
     totalMissing++
+    if (activeUpdateKeys.has(key)) {
+      excludedByActiveUpdate++
+      continue
+    }
+
     const coreEntry = coreEntries[key]
 
     if (filters.commonOnly && !coreEntry?.common) {
@@ -594,6 +666,7 @@ export function collectMissingKeys(
     excludedByFrequency,
     excludedByJlpt,
     excludedByRegex,
+    excludedByActiveUpdate,
     keys: eligible.slice(start, end),
   }
 }
@@ -679,6 +752,32 @@ function parseGeminiResult(
   return map
 }
 
+function buildResponseJsonSchema(maxDefs: number): unknown {
+  return {
+    type: 'object',
+    properties: {
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            definitions: {
+              type: 'array',
+              items: { type: 'string' },
+              maxItems: maxDefs,
+            },
+          },
+          required: ['id', 'definitions'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['items'],
+    additionalProperties: false,
+  }
+}
+
 function buildPrompt(
   lang: TargetLang,
   sourceLang: SeedLang,
@@ -733,25 +832,53 @@ function getResponseText(response: unknown): string {
   return ''
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+
+  return new Promise<T>((resolve, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        if (timeout) clearTimeout(timeout)
+        resolve(value)
+      },
+      (error) => {
+        if (timeout) clearTimeout(timeout)
+        reject(error)
+      }
+    )
+  })
+}
+
 async function callGemini(
   client: GoogleGenAI,
   model: string,
   prompt: string,
   temperature: number,
-  retries: number
+  retries: number,
+  maxDefs: number,
+  requestTimeoutMs: number
 ): Promise<GenerateResult> {
   let lastError: Error | null = null
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const response = await client.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          temperature,
-          responseMimeType: 'application/json',
-        },
-      })
+      const response = await withTimeout(
+        client.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            temperature,
+            responseMimeType: 'application/json',
+            responseJsonSchema: buildResponseJsonSchema(maxDefs),
+          },
+        }),
+        requestTimeoutMs,
+        'Gemini generateContent'
+      )
       const text = getResponseText(response).trim()
 
       if (!text) {
@@ -778,16 +905,21 @@ async function countPromptTokens(
   client: GoogleGenAI,
   model: string,
   prompt: string,
-  retries: number
+  retries: number,
+  requestTimeoutMs: number
 ): Promise<number> {
   let lastError: Error | null = null
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const response = await client.models.countTokens({
-        model,
-        contents: prompt,
-      })
+      const response = await withTimeout(
+        client.models.countTokens({
+          model,
+          contents: prompt,
+        }),
+        requestTimeoutMs,
+        'Gemini countTokens'
+      )
       const container = response as unknown as { totalTokens?: unknown; total_tokens?: unknown }
       const totalTokens = container.totalTokens ?? container.total_tokens
       if (typeof totalTokens !== 'number' || !Number.isFinite(totalTokens) || totalTokens < 0) {
@@ -913,10 +1045,11 @@ async function processLanguage(
   client: GoogleGenAI | null,
   globalTotals: RunTotals,
   updatesDb: Database | null,
-  updateBatchId: number | null
+  updateBatchId: number | null,
+  activeUpdateKeys: Set<string> = new Set()
 ): Promise<LanguageReport> {
   const langPath = `${LANG_DIR}/${lang}.json`
-  const selection = collectMissingKeys(masterKeys, target, coreEntries, filters, opts.offset, opts.limit)
+  const selection = collectMissingKeys(masterKeys, target, coreEntries, filters, opts.offset, opts.limit, activeUpdateKeys)
 
   console.log(`\n=== ${lang} ===`)
   console.log(`Missing entries total: ${selection.totalMissing.toLocaleString()}`)
@@ -934,6 +1067,9 @@ async function processLanguage(
   if (selection.excludedByRegex > 0) {
     console.log(`Excluded by regex filter: ${selection.excludedByRegex.toLocaleString()}`)
   }
+  if (selection.excludedByActiveUpdate > 0) {
+    console.log(`Excluded by active AI update: ${selection.excludedByActiveUpdate.toLocaleString()}`)
+  }
 
   if (selection.keys.length === 0) {
     console.log('Nothing to fill.')
@@ -946,6 +1082,7 @@ async function processLanguage(
       excludedByFrequency: selection.excludedByFrequency,
       excludedByJlpt: selection.excludedByJlpt,
       excludedByRegex: selection.excludedByRegex,
+      excludedByActiveUpdate: selection.excludedByActiveUpdate,
       batches: 0,
       failedBatches: 0,
       updatedEntries: 0,
@@ -975,6 +1112,7 @@ async function processLanguage(
       excludedByFrequency: selection.excludedByFrequency,
       excludedByJlpt: selection.excludedByJlpt,
       excludedByRegex: selection.excludedByRegex,
+      excludedByActiveUpdate: selection.excludedByActiveUpdate,
       batches: 0,
       failedBatches: 0,
       updatedEntries: 0,
@@ -1017,7 +1155,7 @@ async function processLanguage(
     try {
       const needsPreflightCount = opts.maxInputTokens !== null || opts.maxCostUsd !== null
       if (needsPreflightCount) {
-        promptTokens = await countPromptTokens(client, opts.model, prompt, opts.retries)
+        promptTokens = await countPromptTokens(client, opts.model, prompt, opts.retries, opts.requestTimeoutMs)
         globalTotals.countRequests++
         localTotals.countRequests++
       }
@@ -1057,16 +1195,47 @@ async function processLanguage(
         }
       }
 
-      const raw = await callGemini(client, opts.model, prompt, opts.temperature, opts.retries)
-      localTotals.generateRequests++
-      globalTotals.generateRequests++
+      let result: Map<string, string[]> | null = null
+      let lastParseError: Error | null = null
+
+      for (let parseAttempt = 1; parseAttempt <= opts.retries; parseAttempt++) {
+        const raw = await callGemini(
+          client,
+          opts.model,
+          prompt,
+          opts.temperature,
+          opts.retries,
+          opts.maxDefs,
+          opts.requestTimeoutMs
+        )
+        localTotals.generateRequests++
+        globalTotals.generateRequests++
+
+        mergeUsageIntoTotals(localTotals, raw.usage, pricing)
+        mergeUsageIntoTotals(globalTotals, raw.usage, pricing)
+
+        try {
+          result = parseGeminiResult(raw.text, allowedIds, opts.maxDefs)
+          lastParseError = null
+          break
+        } catch (error) {
+          lastParseError = error instanceof Error ? error : new Error(String(error))
+          if (parseAttempt < opts.retries) {
+            console.log(
+              `\n  Batch ${batches.toLocaleString()} returned invalid JSON; ` +
+              `retrying generation (${parseAttempt + 1}/${opts.retries})`
+            )
+            await sleep(Math.min(15000, 500 * 2 ** (parseAttempt - 1)))
+          }
+        }
+      }
+
+      if (!result) {
+        throw lastParseError ?? new Error('Gemini response was not valid JSON')
+      }
+
       localTotals.generatedEntries += batchKeys.length
       globalTotals.generatedEntries += batchKeys.length
-
-      mergeUsageIntoTotals(localTotals, raw.usage, pricing)
-      mergeUsageIntoTotals(globalTotals, raw.usage, pricing)
-
-      const result = parseGeminiResult(raw.text, allowedIds, opts.maxDefs)
 
       for (const key of batchKeys) {
         const defs = result.get(key) ?? []
@@ -1151,6 +1320,7 @@ async function processLanguage(
     excludedByFrequency: selection.excludedByFrequency,
     excludedByJlpt: selection.excludedByJlpt,
     excludedByRegex: selection.excludedByRegex,
+    excludedByActiveUpdate: selection.excludedByActiveUpdate,
     batches,
     failedBatches,
     updatedEntries,
@@ -1182,9 +1352,6 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
   const pricing = resolvePricing(opts)
   const filters = buildSelectionFilters(opts)
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null
-  const client = !opts.dryRun
-    ? new GoogleGenAI(apiKey ? { apiKey } : {})
-    : null
 
   console.log('=== [AI] Gemini Definition Backfill ===')
   console.log(`Languages: ${opts.langs.join(', ')}`)
@@ -1201,6 +1368,7 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
   console.log(`Exclude regex: ${opts.excludeRegex ?? 'none'}`)
   console.log(`Max input tokens: ${opts.maxInputTokens ?? 'none'}`)
   console.log(`Max cost USD: ${opts.maxCostUsd ?? 'none'}`)
+  console.log(`Request timeout ms: ${opts.requestTimeoutMs.toLocaleString()}`)
   if (pricing) {
     console.log(
       `Pricing: input $${pricing.inputUsdPerMillion}/1M, output $${pricing.outputUsdPerMillion}/1M`
@@ -1213,6 +1381,16 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
   if (!opts.dryRun && !apiKey) {
     throw new Error('Set GEMINI_API_KEY (or GOOGLE_API_KEY) before running this script')
   }
+  if (!opts.dryRun && opts.maxCostUsd !== null && !pricing) {
+    throw new Error(
+      `No pricing preset found for model "${opts.model}". ` +
+      'Pass --input-price-per-1m and --output-price-per-1m to use --max-cost-usd.'
+    )
+  }
+
+  const client = !opts.dryRun
+    ? new GoogleGenAI({ apiKey: apiKey ?? undefined })
+    : null
 
   await mkdir(DATA_DIR, { recursive: true })
   await mkdir(LANG_DIR, { recursive: true })
@@ -1223,6 +1401,8 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
   const targetViews = new Map<TargetLang, LangFile>()
   let updatesDb: Database | null = null
   let updateBatchId: number | null = null
+  let activeUpdateKeysByLang = new Map<TargetLang, Set<string>>()
+  const disposeInterruptHandler = installInterruptHandler(() => ({ updatesDb, updateBatchId }))
 
   try {
     if (opts.outputMode === 'updates-db') {
@@ -1232,6 +1412,7 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
 
       const releaseSnapshot = loadSnapshotFromReleaseDb(releaseDb)
       const effectiveSnapshot = applyActiveUpdatesToSnapshot(releaseSnapshot, updatesDb)
+      activeUpdateKeysByLang = listActiveAiUpdateKeys(updatesDb, opts.langs)
 
       masterKeys = Array.from(releaseSnapshot.words.keys())
       coreEntries = buildCoreEntriesFromSnapshot(releaseSnapshot)
@@ -1251,6 +1432,7 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
             seedLang: opts.seedLang,
             model: opts.model,
             outputMode: opts.outputMode,
+            requestTimeoutMs: opts.requestTimeoutMs,
           },
           notes: 'Gemini glossary backfill',
           actor: opts.actor ?? null,
@@ -1305,7 +1487,8 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
         client,
         totals,
         updatesDb,
-        updateBatchId
+        updateBatchId,
+        activeUpdateKeysByLang.get(lang) ?? new Set()
       )
       languages.push(report)
 
@@ -1337,6 +1520,7 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
           offset: opts.offset,
           retries: opts.retries,
           minDelayMs: opts.minDelayMs,
+          requestTimeoutMs: opts.requestTimeoutMs,
           temperature: opts.temperature,
           commonOnly: opts.commonOnly,
           minFrequency: opts.minFrequency,
@@ -1370,6 +1554,7 @@ export async function runGeminiImport(opts: GeminiRunOptions): Promise<{
     }
     throw error
   } finally {
+    disposeInterruptHandler()
     updatesDb?.close()
   }
 }

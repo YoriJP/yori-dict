@@ -3,9 +3,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { closeDb } from '../src/db'
-import type { Language } from '../src/types'
-import type { ReleaseSnapshot } from '../src/storage'
-import { createEmptySnapshot } from '../src/storage'
+import { createEmptySnapshot, writeReleaseManifest, type ReleaseSnapshot } from '../src/storage'
 import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
 
 let app: { fetch: (request: Request) => Response | Promise<Response> }
@@ -14,151 +12,93 @@ let originalReleaseDbPath: string | undefined
 let originalReleaseVersion: string | undefined
 let originalReleaseManifestPath: string | undefined
 let originalUpdatesDatabasePath: string | undefined
-
-async function request(path: string): Promise<Response> {
-  return app.fetch(new Request(`http://localhost${path}`))
-}
+let originalProjectRoot: string | undefined
 
 function addWord(
   snapshot: ReleaseSnapshot,
-  entry: {
-    id: string
-    word: string
-    reading: string
-    partOfSpeech: string[]
-    common?: boolean
-    jlpt?: number[]
-    frequency?: number | null
-    translations: Partial<Record<Language, string[]>>
-    examples?: Partial<Record<Language, Array<{ japanese: string; translation: string }>>>
-  }
+  id: string,
+  word: string,
+  reading: string,
+  partOfSpeech: string[],
+  options: { common?: boolean; jlpt?: number[]; frequency?: number | null } = {}
 ): void {
-  snapshot.words.set(entry.id, {
-    id: entry.id,
-    word: entry.word,
-    reading: entry.reading,
-    partOfSpeech: entry.partOfSpeech,
-    common: entry.common ?? true,
-    jlpt: entry.jlpt ?? [],
-    frequency: entry.frequency ?? null,
+  snapshot.words.set(id, {
+    id,
+    word,
+    reading,
+    partOfSpeech,
+    common: options.common ?? true,
+    jlpt: options.jlpt ?? [],
+    frequency: options.frequency ?? null,
   })
+}
 
-  for (const [lang, definitions] of Object.entries(entry.translations) as Array<[Language, string[]]>) {
-    snapshot.translations.set(`${entry.id}\u0000${lang}`, {
-      wordId: entry.id,
-      lang,
-      definitions,
-      sources: ['fixture'],
-    })
-  }
-
-  for (const [lang, examples] of Object.entries(entry.examples ?? {}) as Array<[Language, Array<{ japanese: string; translation: string }>]>) {
-    snapshot.examples.set(`${entry.id}\u0000${lang}`, examples.map((example) => ({
-      wordId: entry.id,
+function addTranslation(
+  snapshot: ReleaseSnapshot,
+  wordId: string,
+  lang: string,
+  definitions: string[],
+  examples: Array<{ japanese: string; translation: string }> = []
+): void {
+  snapshot.translations.set(`${wordId}\u0000${lang}`, {
+    wordId,
+    lang,
+    definitions,
+    sources: ['test'],
+  })
+  if (examples.length > 0) {
+    snapshot.examples.set(`${wordId}\u0000${lang}`, examples.map((example) => ({
+      wordId,
       lang,
       japanese: example.japanese,
       translation: example.translation,
-      source: 'fixture',
+      source: 'test',
     })))
   }
 }
 
-function makeSnapshot(): ReleaseSnapshot {
+function makeApiSnapshot(): ReleaseSnapshot {
   const snapshot = createEmptySnapshot()
 
-  addWord(snapshot, {
-    id: '食べる:たべる',
-    word: '食べる',
-    reading: 'たべる',
-    partOfSpeech: ['ichidan verb', 'transitive verb'],
-    jlpt: [5],
-    frequency: 195,
-    translations: {
-      en: ['to eat'],
-      de: ['essen'],
-      ko: ['먹다'],
-      'zh-cn': ['吃'],
-      'zh-tw': ['吃'],
-    },
-    examples: {
-      en: [{ japanese: '毎朝食べます', translation: 'I eat every morning' }],
-    },
-  })
+  addWord(snapshot, '食べる:たべる', '食べる', 'たべる', ['ichidan verb'], { jlpt: [5], frequency: 195 })
+  addWord(snapshot, '書く:かく', '書く', 'かく', ['godan verb'], { jlpt: [5], frequency: 300 })
+  addWord(snapshot, '飲む:のむ', '飲む', 'のむ', ['godan verb'], { jlpt: [5], frequency: 250 })
+  addWord(snapshot, '出る:でる', '出る', 'でる', ['ichidan verb'], { jlpt: [5], frequency: 50 })
+  addWord(snapshot, '猫:ねこ', '猫', 'ねこ', ['noun'], { jlpt: [5], frequency: 1200 })
+  addWord(snapshot, '高い:たかい', '高い', 'たかい', ['i-adjective'], { jlpt: [5], frequency: 600 })
+  addWord(snapshot, '大きい:おおきい', '大きい', 'おおきい', ['i-adjective'], { jlpt: [5], frequency: 500 })
+  addWord(snapshot, 'いいえ:いいえ', 'いいえ', 'いいえ', ['interjection'], { jlpt: [5], frequency: 100 })
+  addWord(snapshot, '未訳:みやく', '未訳', 'みやく', ['noun'])
 
-  addWord(snapshot, {
-    id: '書く:かく',
-    word: '書く',
-    reading: 'かく',
-    partOfSpeech: ['godan verb'],
-    translations: { en: ['to write'] },
-  })
+  addTranslation(snapshot, '食べる:たべる', 'en', ['to eat'], [
+    { japanese: '毎朝食べます', translation: 'I eat every morning' },
+  ])
+  addTranslation(snapshot, '食べる:たべる', 'de', ['essen'])
+  addTranslation(snapshot, '食べる:たべる', 'ko', ['먹다'])
+  addTranslation(snapshot, '食べる:たべる', 'zh-cn', ['吃'])
+  addTranslation(snapshot, '食べる:たべる', 'zh-tw', ['吃'])
 
-  addWord(snapshot, {
-    id: '猫:ねこ',
-    word: '猫',
-    reading: 'ねこ',
-    partOfSpeech: ['noun'],
-    translations: { en: ['cat'] },
-  })
+  addTranslation(snapshot, '書く:かく', 'en', ['to write'])
+  addTranslation(snapshot, '飲む:のむ', 'en', ['to drink'])
+  addTranslation(snapshot, '飲む:のむ', 'de', ['trinken'])
+  addTranslation(snapshot, '出る:でる', 'en', ['to leave', 'to appear', 'to come out'])
+  addTranslation(snapshot, '猫:ねこ', 'en', ['cat'])
+  addTranslation(snapshot, '高い:たかい', 'en', ['expensive', 'high'])
+  addTranslation(snapshot, '大きい:おおきい', 'en', ['big', 'large'])
+  addTranslation(snapshot, '未訳:みやく', 'en', ['untranslated'])
 
-  addWord(snapshot, {
-    id: '高い:たかい',
-    word: '高い',
-    reading: 'たかい',
-    partOfSpeech: ['i-adjective'],
-    translations: { en: ['high', 'expensive'] },
-  })
-
-  addWord(snapshot, {
-    id: 'いいえ:いいえ',
-    word: 'いいえ',
-    reading: 'いいえ',
-    partOfSpeech: ['interjection'],
-    translations: {
-      en: ['no'],
-      de: ['nein'],
-      ko: ['아니요'],
-      'zh-cn': ['不'],
-      'zh-tw': ['不'],
-    },
-  })
-
-  addWord(snapshot, {
-    id: '彼処:あそこ',
-    word: '彼処',
-    reading: 'あそこ',
-    partOfSpeech: ['pronoun'],
-    translations: { en: ['there'] },
-  })
-
-  addWord(snapshot, {
-    id: '出る:でる',
-    word: '出る',
-    reading: 'でる',
-    partOfSpeech: ['ichidan verb'],
-    translations: { en: ['to leave', 'to appear'] },
-  })
-
-  addWord(snapshot, {
-    id: '飲む:のむ',
-    word: '飲む',
-    reading: 'のむ',
-    partOfSpeech: ['godan verb'],
-    translations: {
-      en: ['to drink'],
-      de: ['trinken'],
-    },
-  })
-
-  addWord(snapshot, {
-    id: '大きい:おおきい',
-    word: '大きい',
-    reading: 'おおきい',
-    partOfSpeech: ['i-adjective'],
-    translations: { en: ['big'] },
-  })
+  addTranslation(snapshot, 'いいえ:いいえ', 'en', ['no'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'de', ['nein'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'ko', ['아니요'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'zh-cn', ['不'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'zh-tw', ['不'])
 
   return snapshot
+}
+
+// Helper to make requests to the app
+async function request(path: string): Promise<Response> {
+  return app.fetch(new Request(`http://localhost${path}`))
 }
 
 beforeAll(async () => {
@@ -166,15 +106,28 @@ beforeAll(async () => {
   originalReleaseVersion = process.env.RELEASE_VERSION
   originalReleaseManifestPath = process.env.RELEASE_MANIFEST_PATH
   originalUpdatesDatabasePath = process.env.UPDATES_DATABASE_PATH
+  originalProjectRoot = process.env.YORI_PROJECT_ROOT
 
-  tempDir = mkdtempSync(join(tmpdir(), 'yori-api-'))
+  tempDir = mkdtempSync(join(tmpdir(), 'yori-api-test-'))
   const releaseDbPath = join(tempDir, 'release.sqlite')
-  writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
+  const updatesDbPath = join(tempDir, 'updates.sqlite')
+  const manifestPath = join(tempDir, 'releases', 'api-test-release', 'manifest.json')
+
+  process.env.YORI_PROJECT_ROOT = tempDir
+  writeReleaseSnapshotToDb(releaseDbPath, makeApiSnapshot())
+  writeReleaseManifest('api-test-release', {
+    version: 'api-test-release',
+    builtAt: new Date().toISOString(),
+    schemaVersion: '1.0.0',
+    baseSourceFingerprint: 'api-test',
+    releaseDbPath,
+    promotedFromUpdateSequence: null,
+  })
 
   process.env.RELEASE_DB_PATH = releaseDbPath
-  process.env.RELEASE_VERSION = 'api-test'
-  delete process.env.RELEASE_MANIFEST_PATH
-  process.env.UPDATES_DATABASE_PATH = join(tempDir, 'updates.sqlite')
+  process.env.RELEASE_VERSION = 'api-test-release'
+  process.env.RELEASE_MANIFEST_PATH = manifestPath
+  process.env.UPDATES_DATABASE_PATH = updatesDbPath
 
   const module = await import('../src/index')
   app = module.default
@@ -194,6 +147,9 @@ afterAll(() => {
 
   if (originalUpdatesDatabasePath === undefined) delete process.env.UPDATES_DATABASE_PATH
   else process.env.UPDATES_DATABASE_PATH = originalUpdatesDatabasePath
+
+  if (originalProjectRoot === undefined) delete process.env.YORI_PROJECT_ROOT
+  else process.env.YORI_PROJECT_ROOT = originalProjectRoot
 
   if (tempDir) rmSync(tempDir, { recursive: true, force: true })
 })
@@ -345,8 +301,7 @@ describe('GET /v1/lookup - Error Cases', () => {
   })
 
   test('word exists but no translation for language returns 404', async () => {
-    // 彼処 (あそこ) exists in en but has no zh-tw translation
-    const res = await request('/v1/lookup?word=彼処&lang=zh-tw')
+    const res = await request('/v1/lookup?word=未訳&lang=zh-tw')
     expect(res.status).toBe(404)
   })
 

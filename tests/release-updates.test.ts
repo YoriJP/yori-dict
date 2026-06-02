@@ -16,6 +16,7 @@ import {
   insertUpdateBatch,
   listTranslationUpdates,
   markAllActiveUpdatesPromoted,
+  verifyUpdatesAgainstWordIds,
 } from '../src/update-store'
 
 const tempPaths: string[] = []
@@ -59,6 +60,7 @@ afterEach(() => {
   delete process.env.RELEASE_VERSION
   delete process.env.RELEASE_MANIFEST_PATH
   delete process.env.UPDATES_DATABASE_PATH
+  delete process.env.YORI_PROJECT_ROOT
 
   while (tempPaths.length > 0) {
     const path = tempPaths.pop()
@@ -69,11 +71,10 @@ afterEach(() => {
 describe('release overlay flow', () => {
   test('activating a staged promoted release retires only baked-in overlays', () => {
     const dir = makeTempDir()
-    const originalCwd = process.cwd()
     const releaseDbPath = join(dir, 'release.sqlite')
     const updatesDbPath = join(dir, 'updates.sqlite')
     const manifestPath = join(dir, 'manifest.json')
-    process.chdir(dir)
+    process.env.YORI_PROJECT_ROOT = dir
 
     try {
       writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
@@ -141,17 +142,16 @@ describe('release overlay flow', () => {
       expect(aiUpdates.find((row) => row.id === stagedUpdateId)?.status).toBe('promoted')
       expect(aiUpdates.find((row) => row.id === laterUpdateId)?.status).toBe('active')
     } finally {
-      process.chdir(originalCwd)
+      delete process.env.YORI_PROJECT_ROOT
     }
   })
 
   test('promote without activation keeps active overlay data live', () => {
     const dir = makeTempDir()
-    const originalCwd = process.cwd()
     const releaseDbPath = join(dir, 'release.sqlite')
     const updatesDbPath = join(dir, 'updates.sqlite')
     const manifestPath = join(dir, 'manifest.json')
-    process.chdir(dir)
+    process.env.YORI_PROJECT_ROOT = dir
 
     try {
       writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
@@ -195,17 +195,16 @@ describe('release overlay flow', () => {
       closeDb()
       expect(lookupWord('食べる', 'en')?.definitions).toEqual(['to consume food'])
     } finally {
-      process.chdir(originalCwd)
+      delete process.env.YORI_PROJECT_ROOT
     }
   })
 
   test('promote skips orphaned active updates instead of failing the release build', () => {
     const dir = makeTempDir()
-    const originalCwd = process.cwd()
     const releaseDbPath = join(dir, 'release.sqlite')
     const updatesDbPath = join(dir, 'updates.sqlite')
     const manifestPath = join(dir, 'manifest.json')
-    process.chdir(dir)
+    process.env.YORI_PROJECT_ROOT = dir
 
     try {
       writeReleaseSnapshotToDb(releaseDbPath, makeSnapshot())
@@ -275,7 +274,7 @@ describe('release overlay flow', () => {
       expect(orphanedExamples?.count).toBe(0)
       expect(JSON.parse(preservedTranslation?.definitions ?? '[]')).toEqual(['to eat'])
     } finally {
-      process.chdir(originalCwd)
+      delete process.env.YORI_PROJECT_ROOT
     }
   })
 
@@ -402,5 +401,47 @@ describe('release overlay flow', () => {
 
     expect(JSON.parse(translationRow?.definitions ?? '[]')).toEqual(['to dine'])
     expect(exampleRows).toHaveLength(0)
+  })
+
+  test('review counts ignore superseded pending rows', () => {
+    const dir = makeTempDir()
+    const updatesDbPath = join(dir, 'updates.sqlite')
+    const updatesDb = initUpdatesDatabase(updatesDbPath)
+
+    const batchId = insertUpdateBatch(updatesDb, {
+      kind: 'ai_import',
+      inputManifest: { test: true },
+      notes: 'AI backfill',
+    })
+
+    // First AI pass leaves a pending row, a later pass regenerates the same
+    // word/lang and supersedes it. The superseded row keeps review_status
+    // 'pending' as history but is no longer in the queue.
+    insertTranslationUpdate(updatesDb, {
+      wordId: '食べる:たべる',
+      lang: 'en',
+      definitions: ['to consume food'],
+      sources: ['ai'],
+      sourceType: 'ai',
+      batchId,
+      reviewStatus: 'pending',
+    })
+    insertTranslationUpdate(updatesDb, {
+      wordId: '食べる:たべる',
+      lang: 'en',
+      definitions: ['to eat (regenerated)'],
+      sources: ['ai'],
+      sourceType: 'ai',
+      batchId,
+      reviewStatus: 'pending',
+    })
+
+    const verification = verifyUpdatesAgainstWordIds(updatesDb, new Set(['食べる:たべる']))
+    updatesDb.close()
+
+    expect(verification.translationCounts.active).toBe(1)
+    expect(verification.translationCounts.superseded).toBe(1)
+    // Only the active row counts toward the review queue total.
+    expect(verification.reviewCounts['translation:pending']).toBe(1)
   })
 })

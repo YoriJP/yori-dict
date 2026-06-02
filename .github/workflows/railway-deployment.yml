@@ -34,11 +34,12 @@ jobs:
 
       - name: Verify dictionary integrity
         run: |
-          bun run verify:dict data/en.json --fail-on-issues
-          bun run verify:dict data/de.json --fail-on-issues
-          bun run verify:dict data/ko.json --fail-on-issues
-          bun run verify:dict data/zh-cn.json --fail-on-issues
-          bun run verify:dict data/zh-tw.json --fail-on-issues
+          bun run verify:dict data/core.json --fail-on-issues
+          bun run verify:dict data/lang/en.json --fail-on-issues
+          bun run verify:dict data/lang/de.json --fail-on-issues
+          bun run verify:dict data/lang/ko.json --fail-on-issues
+          bun run verify:dict data/lang/zh-cn.json --fail-on-issues
+          bun run verify:dict data/lang/zh-tw.json --fail-on-issues
 
   deploy:
     needs: validate

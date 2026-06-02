@@ -9,16 +9,14 @@ import { buildRelease } from '../src/release-service'
 import { computeFingerprintForFiles, readReleaseManifest } from '../src/storage'
 
 let tempDir = ''
-let originalCwd = ''
 
 beforeEach(() => {
-  originalCwd = process.cwd()
   tempDir = mkdtempSync(join(tmpdir(), 'yori-release-build-'))
-  process.chdir(tempDir)
+  process.env.YORI_PROJECT_ROOT = tempDir
 })
 
 afterEach(() => {
-  process.chdir(originalCwd)
+  delete process.env.YORI_PROJECT_ROOT
   if (tempDir) rmSync(tempDir, { recursive: true, force: true })
 })
 
