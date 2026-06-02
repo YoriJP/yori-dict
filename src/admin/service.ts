@@ -167,13 +167,21 @@ function logReviewAction(
 }
 
 function makeReviewUnitId(wordId: string, lang: Language, batchId: number): string {
-  return `${wordId}|${lang}|${batchId}`
+  return `${encodeURIComponent(wordId)}|${lang}|${batchId}`
 }
 
 function parseReviewUnitId(unitId: string): { wordId: string; lang: Language; batchId: number } | null {
-  const [wordId, langRaw, batchIdRaw] = unitId.split('|')
+  const parts = unitId.split('|')
+  if (parts.length !== 3) return null
+  const [encodedWordId, langRaw, batchIdRaw] = parts
   const batchId = Number(batchIdRaw)
   const lang = langRaw as Language
+  let wordId = ''
+  try {
+    wordId = decodeURIComponent(encodedWordId)
+  } catch {
+    return null
+  }
   if (!wordId || !lang || !Number.isFinite(batchId)) return null
   return { wordId, lang, batchId }
 }

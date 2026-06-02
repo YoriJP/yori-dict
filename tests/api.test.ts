@@ -1,11 +1,100 @@
 import { afterAll, beforeAll, describe, test, expect } from 'bun:test'
+import { mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { closeDb } from '../src/db'
-import { requireActiveReleaseConfig } from '../src/storage'
+import { createEmptySnapshot, writeReleaseManifest, type ReleaseSnapshot } from '../src/storage'
+import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
 
 let app: { fetch: (request: Request) => Response | Promise<Response> }
+let tempDir = ''
 let originalReleaseDbPath: string | undefined
 let originalReleaseVersion: string | undefined
 let originalReleaseManifestPath: string | undefined
+let originalUpdatesDatabasePath: string | undefined
+let originalProjectRoot: string | undefined
+
+function addWord(
+  snapshot: ReleaseSnapshot,
+  id: string,
+  word: string,
+  reading: string,
+  partOfSpeech: string[],
+  options: { common?: boolean; jlpt?: number[]; frequency?: number | null } = {}
+): void {
+  snapshot.words.set(id, {
+    id,
+    word,
+    reading,
+    partOfSpeech,
+    common: options.common ?? true,
+    jlpt: options.jlpt ?? [],
+    frequency: options.frequency ?? null,
+  })
+}
+
+function addTranslation(
+  snapshot: ReleaseSnapshot,
+  wordId: string,
+  lang: string,
+  definitions: string[],
+  examples: Array<{ japanese: string; translation: string }> = []
+): void {
+  snapshot.translations.set(`${wordId}\u0000${lang}`, {
+    wordId,
+    lang,
+    definitions,
+    sources: ['test'],
+  })
+  if (examples.length > 0) {
+    snapshot.examples.set(`${wordId}\u0000${lang}`, examples.map((example) => ({
+      wordId,
+      lang,
+      japanese: example.japanese,
+      translation: example.translation,
+      source: 'test',
+    })))
+  }
+}
+
+function makeApiSnapshot(): ReleaseSnapshot {
+  const snapshot = createEmptySnapshot()
+
+  addWord(snapshot, '食べる:たべる', '食べる', 'たべる', ['ichidan verb'], { jlpt: [5], frequency: 195 })
+  addWord(snapshot, '書く:かく', '書く', 'かく', ['godan verb'], { jlpt: [5], frequency: 300 })
+  addWord(snapshot, '飲む:のむ', '飲む', 'のむ', ['godan verb'], { jlpt: [5], frequency: 250 })
+  addWord(snapshot, '出る:でる', '出る', 'でる', ['ichidan verb'], { jlpt: [5], frequency: 50 })
+  addWord(snapshot, '猫:ねこ', '猫', 'ねこ', ['noun'], { jlpt: [5], frequency: 1200 })
+  addWord(snapshot, '高い:たかい', '高い', 'たかい', ['i-adjective'], { jlpt: [5], frequency: 600 })
+  addWord(snapshot, '大きい:おおきい', '大きい', 'おおきい', ['i-adjective'], { jlpt: [5], frequency: 500 })
+  addWord(snapshot, 'いいえ:いいえ', 'いいえ', 'いいえ', ['interjection'], { jlpt: [5], frequency: 100 })
+  addWord(snapshot, '未訳:みやく', '未訳', 'みやく', ['noun'])
+
+  addTranslation(snapshot, '食べる:たべる', 'en', ['to eat'], [
+    { japanese: '毎朝食べます', translation: 'I eat every morning' },
+  ])
+  addTranslation(snapshot, '食べる:たべる', 'de', ['essen'])
+  addTranslation(snapshot, '食べる:たべる', 'ko', ['먹다'])
+  addTranslation(snapshot, '食べる:たべる', 'zh-cn', ['吃'])
+  addTranslation(snapshot, '食べる:たべる', 'zh-tw', ['吃'])
+
+  addTranslation(snapshot, '書く:かく', 'en', ['to write'])
+  addTranslation(snapshot, '飲む:のむ', 'en', ['to drink'])
+  addTranslation(snapshot, '飲む:のむ', 'de', ['trinken'])
+  addTranslation(snapshot, '出る:でる', 'en', ['to leave', 'to appear', 'to come out'])
+  addTranslation(snapshot, '猫:ねこ', 'en', ['cat'])
+  addTranslation(snapshot, '高い:たかい', 'en', ['expensive', 'high'])
+  addTranslation(snapshot, '大きい:おおきい', 'en', ['big', 'large'])
+  addTranslation(snapshot, '未訳:みやく', 'en', ['untranslated'])
+
+  addTranslation(snapshot, 'いいえ:いいえ', 'en', ['no'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'de', ['nein'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'ko', ['아니요'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'zh-cn', ['不'])
+  addTranslation(snapshot, 'いいえ:いいえ', 'zh-tw', ['不'])
+
+  return snapshot
+}
 
 // Helper to make requests to the app
 async function request(path: string): Promise<Response> {
@@ -16,15 +105,29 @@ beforeAll(async () => {
   originalReleaseDbPath = process.env.RELEASE_DB_PATH
   originalReleaseVersion = process.env.RELEASE_VERSION
   originalReleaseManifestPath = process.env.RELEASE_MANIFEST_PATH
+  originalUpdatesDatabasePath = process.env.UPDATES_DATABASE_PATH
+  originalProjectRoot = process.env.YORI_PROJECT_ROOT
 
-  const activeRelease = requireActiveReleaseConfig()
-  process.env.RELEASE_DB_PATH = activeRelease.dbPath
-  process.env.RELEASE_VERSION = activeRelease.version
-  if (activeRelease.manifestPath) {
-    process.env.RELEASE_MANIFEST_PATH = activeRelease.manifestPath
-  } else {
-    delete process.env.RELEASE_MANIFEST_PATH
-  }
+  tempDir = mkdtempSync(join(tmpdir(), 'yori-api-test-'))
+  const releaseDbPath = join(tempDir, 'release.sqlite')
+  const updatesDbPath = join(tempDir, 'updates.sqlite')
+  const manifestPath = join(tempDir, 'releases', 'api-test-release', 'manifest.json')
+
+  process.env.YORI_PROJECT_ROOT = tempDir
+  writeReleaseSnapshotToDb(releaseDbPath, makeApiSnapshot())
+  writeReleaseManifest('api-test-release', {
+    version: 'api-test-release',
+    builtAt: new Date().toISOString(),
+    schemaVersion: '1.0.0',
+    baseSourceFingerprint: 'api-test',
+    releaseDbPath,
+    promotedFromUpdateSequence: null,
+  })
+
+  process.env.RELEASE_DB_PATH = releaseDbPath
+  process.env.RELEASE_VERSION = 'api-test-release'
+  process.env.RELEASE_MANIFEST_PATH = manifestPath
+  process.env.UPDATES_DATABASE_PATH = updatesDbPath
 
   const module = await import('../src/index')
   app = module.default
@@ -41,6 +144,14 @@ afterAll(() => {
 
   if (originalReleaseManifestPath === undefined) delete process.env.RELEASE_MANIFEST_PATH
   else process.env.RELEASE_MANIFEST_PATH = originalReleaseManifestPath
+
+  if (originalUpdatesDatabasePath === undefined) delete process.env.UPDATES_DATABASE_PATH
+  else process.env.UPDATES_DATABASE_PATH = originalUpdatesDatabasePath
+
+  if (originalProjectRoot === undefined) delete process.env.YORI_PROJECT_ROOT
+  else process.env.YORI_PROJECT_ROOT = originalProjectRoot
+
+  if (tempDir) rmSync(tempDir, { recursive: true, force: true })
 })
 
 describe('Health Check', () => {
@@ -190,8 +301,7 @@ describe('GET /v1/lookup - Error Cases', () => {
   })
 
   test('word exists but no translation for language returns 404', async () => {
-    // 彼処 (あそこ) exists in en but has no zh-tw translation
-    const res = await request('/v1/lookup?word=彼処&lang=zh-tw')
+    const res = await request('/v1/lookup?word=未訳&lang=zh-tw')
     expect(res.status).toBe(404)
   })
 
