@@ -232,7 +232,7 @@ function isReviewEffective(sourceType: UpdateSourceType, reviewStatus: ReviewSta
 }
 
 function encodePendingReviewUnitId(wordId: string, lang: string, batchId: number): string {
-  return `${wordId}|${lang}|${batchId}`
+  return `${encodeURIComponent(wordId)}|${lang}|${batchId}`
 }
 
 function comparePendingReviewUnitOrder(
@@ -245,8 +245,16 @@ function comparePendingReviewUnitOrder(
 }
 
 function parsePendingReviewCursor(cursor: string): PendingReviewUnitKey | null {
-  const [wordId, lang, batchIdRaw] = cursor.split('|')
+  const parts = cursor.split('|')
+  if (parts.length !== 3) return null
+  const [encodedWordId, lang, batchIdRaw] = parts
   const batchId = Number(batchIdRaw)
+  let wordId = ''
+  try {
+    wordId = decodeURIComponent(encodedWordId)
+  } catch {
+    return null
+  }
   if (!wordId || !lang || !Number.isFinite(batchId)) return null
   return {
     unitId: encodePendingReviewUnitId(wordId, lang, batchId),
@@ -920,14 +928,20 @@ export function verifyUpdatesAgainstWordIds(
   const exampleSetCounts: Record<string, number> = {}
   const reviewCounts: Record<string, number> = {}
 
+  // Review status is only meaningful for active rows: a superseded or promoted
+  // row keeps its last review_status as history, but it is no longer in the
+  // review queue. Tally review counts from active rows only so the dashboard
+  // pending total matches what the queue actually shows.
   for (const row of translationRows) {
     translationCounts[row.status] = (translationCounts[row.status] || 0) + 1
+    if (row.status !== 'active') continue
     const reviewKey = `translation:${row.review_status}`
     reviewCounts[reviewKey] = (reviewCounts[reviewKey] || 0) + 1
   }
 
   for (const row of exampleSetRows) {
     exampleSetCounts[row.status] = (exampleSetCounts[row.status] || 0) + 1
+    if (row.status !== 'active') continue
     const reviewKey = `example:${row.review_status}`
     reviewCounts[reviewKey] = (reviewCounts[reviewKey] || 0) + 1
   }
