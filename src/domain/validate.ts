@@ -12,6 +12,14 @@ export interface ValidationResult {
   warnings: ValidationIssue[]
 }
 
+interface ValidationContext {
+  formOwners: Map<string, string>
+  readingOwners: Map<string, string>
+  senseOwners: Map<string, string>
+  glossOwners: Map<string, string>
+  exampleOwners: Map<string, string>
+}
+
 function issue(path: string, message: string): ValidationIssue {
   return { path, message }
 }
@@ -36,7 +44,27 @@ function validateSourceRefs(sourceRefs: SourceRef[] | undefined, path: string, e
   })
 }
 
-function validateEntry(entry: Entry, index: number, errors: ValidationIssue[], warnings: ValidationIssue[]): void {
+function checkDuplicateId(
+  seen: Set<string>,
+  id: string,
+  path: string,
+  message: string,
+  errors: ValidationIssue[]
+): void {
+  if (seen.has(id)) {
+    errors.push(issue(path, message))
+    return
+  }
+  seen.add(id)
+}
+
+function validateEntry(
+  entry: Entry,
+  index: number,
+  context: ValidationContext,
+  errors: ValidationIssue[],
+  warnings: ValidationIssue[]
+): void {
   const path = `entries[${index}]`
   if (!validateYoriId('entry', entry.id)) errors.push(issue(`${path}.id`, 'invalid entry id'))
   if (entry.language !== 'ja') errors.push(issue(`${path}.language`, 'entry language must be ja'))
@@ -50,10 +78,19 @@ function validateEntry(entry: Entry, index: number, errors: ValidationIssue[], w
   const formIds = new Set(entry.forms.map((form) => form.id))
   const readingIds = new Set(entry.readings.map((reading) => reading.id))
   const senseIds = new Set(entry.senses.map((sense) => sense.id))
+  const localFormIds = new Set<string>()
+  const localReadingIds = new Set<string>()
+  const localSenseIds = new Set<string>()
+  const localGlossIds = new Set<string>()
+  const localExampleIds = new Set<string>()
 
   entry.forms.forEach((form, formIndex) => {
     const formPath = `${path}.forms[${formIndex}]`
     if (!validateYoriId('form', form.id)) errors.push(issue(`${formPath}.id`, 'invalid form id'))
+    checkDuplicateId(localFormIds, form.id, `${formPath}.id`, `duplicate form id in entry: ${form.id}`, errors)
+    const owner = context.formOwners.get(form.id)
+    if (owner && owner !== entry.id) errors.push(issue(`${formPath}.id`, `form id also belongs to entry: ${owner}`))
+    context.formOwners.set(form.id, entry.id)
     if (!form.text.trim()) errors.push(issue(`${formPath}.text`, 'form text is required'))
     validateSourceRefs(form.sourceRefs, `${formPath}.sourceRefs`, errors)
   })
@@ -61,6 +98,10 @@ function validateEntry(entry: Entry, index: number, errors: ValidationIssue[], w
   entry.readings.forEach((reading, readingIndex) => {
     const readingPath = `${path}.readings[${readingIndex}]`
     if (!validateYoriId('reading', reading.id)) errors.push(issue(`${readingPath}.id`, 'invalid reading id'))
+    checkDuplicateId(localReadingIds, reading.id, `${readingPath}.id`, `duplicate reading id in entry: ${reading.id}`, errors)
+    const owner = context.readingOwners.get(reading.id)
+    if (owner && owner !== entry.id) errors.push(issue(`${readingPath}.id`, `reading id also belongs to entry: ${owner}`))
+    context.readingOwners.set(reading.id, entry.id)
     if (!reading.text.trim()) errors.push(issue(`${readingPath}.text`, 'reading text is required'))
     if (reading.appliesToFormIds !== 'all') {
       for (const formId of reading.appliesToFormIds) {
@@ -73,6 +114,10 @@ function validateEntry(entry: Entry, index: number, errors: ValidationIssue[], w
   entry.senses.forEach((sense, senseIndex) => {
     const sensePath = `${path}.senses[${senseIndex}]`
     if (!validateYoriId('sense', sense.id)) errors.push(issue(`${sensePath}.id`, 'invalid sense id'))
+    checkDuplicateId(localSenseIds, sense.id, `${sensePath}.id`, `duplicate sense id in entry: ${sense.id}`, errors)
+    const senseOwner = context.senseOwners.get(sense.id)
+    if (senseOwner && senseOwner !== entry.id) errors.push(issue(`${sensePath}.id`, `sense id also belongs to entry: ${senseOwner}`))
+    context.senseOwners.set(sense.id, entry.id)
     if (sense.entryId !== entry.id) errors.push(issue(`${sensePath}.entryId`, 'sense entryId must match parent entry id'))
     if (sense.partOfSpeech.length === 0) warnings.push(issue(`${sensePath}.partOfSpeech`, 'sense has no part of speech'))
     if (sense.appliesToFormIds !== 'all') {
@@ -91,6 +136,10 @@ function validateEntry(entry: Entry, index: number, errors: ValidationIssue[], w
     sense.glosses.forEach((gloss, glossIndex) => {
       const glossPath = `${sensePath}.glosses[${glossIndex}]`
       if (!validateYoriId('gloss', gloss.id)) errors.push(issue(`${glossPath}.id`, 'invalid gloss id'))
+      checkDuplicateId(localGlossIds, gloss.id, `${glossPath}.id`, `duplicate gloss id in entry: ${gloss.id}`, errors)
+      const glossOwner = context.glossOwners.get(gloss.id)
+      if (glossOwner && glossOwner !== entry.id) errors.push(issue(`${glossPath}.id`, `gloss id also belongs to entry: ${glossOwner}`))
+      context.glossOwners.set(gloss.id, entry.id)
       if (!senseIds.has(gloss.senseId)) errors.push(issue(`${glossPath}.senseId`, 'gloss senseId must point to parent entry sense'))
       if (!gloss.text.trim()) errors.push(issue(`${glossPath}.text`, 'gloss text is required'))
       if (gloss.sourceType === 'ai' && gloss.reviewStatus === 'approved') {
@@ -102,6 +151,10 @@ function validateEntry(entry: Entry, index: number, errors: ValidationIssue[], w
     sense.examples.forEach((example, exampleIndex) => {
       const examplePath = `${sensePath}.examples[${exampleIndex}]`
       if (!validateYoriId('example', example.id)) errors.push(issue(`${examplePath}.id`, 'invalid example id'))
+      checkDuplicateId(localExampleIds, example.id, `${examplePath}.id`, `duplicate example id in entry: ${example.id}`, errors)
+      const exampleOwner = context.exampleOwners.get(example.id)
+      if (exampleOwner && exampleOwner !== entry.id) errors.push(issue(`${examplePath}.id`, `example id also belongs to entry: ${exampleOwner}`))
+      context.exampleOwners.set(example.id, entry.id)
       if (example.senseId && !senseIds.has(example.senseId)) errors.push(issue(`${examplePath}.senseId`, 'unknown sense id'))
       if (!example.japanese.trim()) errors.push(issue(`${examplePath}.japanese`, 'japanese example is required'))
       if (!example.translation.trim()) errors.push(issue(`${examplePath}.translation`, 'example translation is required'))
@@ -110,12 +163,28 @@ function validateEntry(entry: Entry, index: number, errors: ValidationIssue[], w
   })
 }
 
-function validateAlias(alias: LookupAlias, index: number, entryIds: Set<string>, errors: ValidationIssue[]): void {
+function validateAlias(
+  alias: LookupAlias,
+  index: number,
+  entryIds: Set<string>,
+  context: ValidationContext,
+  errors: ValidationIssue[]
+): void {
   const path = `lookupAliases[${index}]`
   if (!validateYoriId('alias', alias.id)) errors.push(issue(`${path}.id`, 'invalid alias id'))
   if (!alias.surface.trim()) errors.push(issue(`${path}.surface`, 'surface is required'))
   if (!alias.normalizedSurface.trim()) errors.push(issue(`${path}.normalizedSurface`, 'normalizedSurface is required'))
   if (!entryIds.has(alias.entryId)) errors.push(issue(`${path}.entryId`, `unknown entry id: ${alias.entryId}`))
+  if (alias.formId) {
+    const owner = context.formOwners.get(alias.formId)
+    if (!owner) errors.push(issue(`${path}.formId`, `unknown form id: ${alias.formId}`))
+    if (owner && owner !== alias.entryId) errors.push(issue(`${path}.formId`, `form id belongs to entry: ${owner}`))
+  }
+  if (alias.readingId) {
+    const owner = context.readingOwners.get(alias.readingId)
+    if (!owner) errors.push(issue(`${path}.readingId`, `unknown reading id: ${alias.readingId}`))
+    if (owner && owner !== alias.entryId) errors.push(issue(`${path}.readingId`, `reading id belongs to entry: ${owner}`))
+  }
   if (!Number.isFinite(alias.score)) errors.push(issue(`${path}.score`, 'score must be finite'))
 }
 
@@ -157,20 +226,29 @@ export function validateCanonicalSnapshot(snapshot: CanonicalSnapshot): Validati
   if (!snapshot.generatedAt) errors.push(issue('generatedAt', 'generatedAt is required'))
 
   const entryIds = new Set<string>()
+  const aliasIds = new Set<string>()
+  const context: ValidationContext = {
+    formOwners: new Map(),
+    readingOwners: new Map(),
+    senseOwners: new Map(),
+    glossOwners: new Map(),
+    exampleOwners: new Map(),
+  }
   snapshot.entries.forEach((entry, index) => {
     if (entryIds.has(entry.id)) errors.push(issue(`entries[${index}].id`, `duplicate entry id: ${entry.id}`))
     entryIds.add(entry.id)
-    validateEntry(entry, index, errors, warnings)
+    validateEntry(entry, index, context, errors, warnings)
   })
 
   const aliasKeys = new Set<string>()
   snapshot.lookupAliases.forEach((alias, index) => {
+    checkDuplicateId(aliasIds, alias.id, `lookupAliases[${index}].id`, `duplicate alias id: ${alias.id}`, errors)
     const key = `${alias.normalizedSurface}\u0000${alias.normalizedReading ?? ''}\u0000${alias.entryId}`
     if (aliasKeys.has(key)) {
       errors.push(issue(`lookupAliases[${index}]`, 'duplicate lookup alias for entry'))
     }
     aliasKeys.add(key)
-    validateAlias(alias, index, entryIds, errors)
+    validateAlias(alias, index, entryIds, context, errors)
   })
 
   const kanjiLiterals = new Set<string>()

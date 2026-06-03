@@ -124,6 +124,26 @@ describe('convertJmdictWordToEntry', () => {
     expect(entry.readings).toHaveLength(2)
     expect(new Set(entry.readings.map((reading) => reading.id)).size).toBe(2)
     expect(entry.readings.map((reading) => reading.text)).toEqual(['あく', 'あく'])
+    expect(entry.senses[0].appliesToReadingIds).toEqual(['ydr_00000001', 'ydr_00000002'])
+  })
+
+  test('skips glosses in unsupported target languages', () => {
+    const { entry } = convert({
+      id: '9999998',
+      kanji: [{ text: '試験' }],
+      kana: [{ text: 'しけん' }],
+      sense: [
+        {
+          partOfSpeech: ['n'],
+          gloss: [
+            { lang: 'eng', text: 'exam' },
+            { lang: 'fre', text: 'examen' },
+          ],
+        },
+      ],
+    })
+
+    expect(entry.senses[0].glosses.map((gloss) => `${gloss.lang}:${gloss.text}`)).toEqual(['en:exam'])
   })
 
   test('maps sense restrictions to Yori form and reading ids', () => {

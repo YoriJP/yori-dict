@@ -390,4 +390,101 @@ describe('CanonicalLookupService', () => {
       db.close()
     }
   })
+
+  test('ranks high-fanout aliases before applying the response limit', async () => {
+    const refs = [sourceRef('high-fanout')]
+    const highFanoutSnapshot: CanonicalSnapshot = {
+      schemaVersion: '1.0.0',
+      generatedAt: importedAt,
+      entries: Array.from({ length: 8 }, (_, index) => {
+        const number = index + 1
+        const id = `yde_${String(number).padStart(8, '0')}`
+        const formId = `ydf_${String(number).padStart(8, '0')}`
+        const readingId = `ydr_${String(number).padStart(8, '0')}`
+        const senseId = `yds_${String(number).padStart(8, '0')}`
+        const glossId = `ydg_${String(number).padStart(8, '0')}`
+        return {
+          id,
+          language: 'ja',
+          entryType: 'word',
+          primaryForm: `候補${number}`,
+          primaryReading: 'こう',
+          forms: [
+            {
+              id: formId,
+              text: `候補${number}`,
+              normalizedText: `候補${number}`,
+              script: 'mixed',
+              isPrimary: true,
+              tags: [],
+              sourceRefs: refs,
+            },
+          ],
+          readings: [
+            {
+              id: readingId,
+              text: 'こう',
+              normalizedText: 'こう',
+              system: 'kana',
+              isPrimary: true,
+              appliesToFormIds: 'all',
+              tags: [],
+              sourceRefs: refs,
+            },
+          ],
+          senses: [
+            {
+              id: senseId,
+              entryId: id,
+              order: 1,
+              partOfSpeech: ['n'],
+              appliesToFormIds: 'all',
+              appliesToReadingIds: 'all',
+              domain: [],
+              register: [],
+              misc: [],
+              glosses: [
+                {
+                  id: glossId,
+                  senseId,
+                  lang: 'en',
+                  text: number === 8 ? 'best ranked entry' : `lower ranked entry ${number}`,
+                  sourceType: 'source',
+                  reviewStatus: 'approved',
+                  sourceRefs: refs,
+                },
+              ],
+              examples: [],
+              sourceRefs: refs,
+            },
+          ],
+          ranking: number === 8 ? { common: true, priority: ['ichi1'] } : {},
+          sourceRefs: refs,
+        } satisfies CanonicalSnapshot['entries'][number]
+      }),
+      lookupAliases: Array.from({ length: 8 }, (_, index) => {
+        const number = index + 1
+        return {
+          id: `yda_${String(number).padStart(8, '0')}`,
+          surface: 'こう',
+          normalizedSurface: 'こう',
+          reading: 'こう',
+          normalizedReading: 'こう',
+          entryId: `yde_${String(number).padStart(8, '0')}`,
+          readingId: `ydr_${String(number).padStart(8, '0')}`,
+          aliasType: 'reading',
+          score: 75,
+        }
+      }),
+    }
+
+    const { db, service } = await buildService(highFanoutSnapshot)
+    try {
+      const result = service.lookup({ query: 'こう', lang: 'en', limit: 1 })
+      expect(result.entries.map((entry) => entry.id)).toEqual(['yde_00000008'])
+      expect(result.entries[0]?.definitions).toEqual(['best ranked entry'])
+    } finally {
+      db.close()
+    }
+  })
 })

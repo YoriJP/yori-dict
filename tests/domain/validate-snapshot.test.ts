@@ -121,6 +121,95 @@ describe('validateCanonicalSnapshot', () => {
     expect(result.errors.map((error) => error.path)).toContain('entries[0].readings[0].appliesToFormIds')
   })
 
+  test('rejects duplicate nested ids', () => {
+    const snapshot = validSnapshot()
+    snapshot.entries[0].forms.push({
+      ...snapshot.entries[0].forms[0],
+      text: '喰べる',
+      normalizedText: '喰べる',
+    })
+    snapshot.lookupAliases.push({
+      ...snapshot.lookupAliases[0],
+      surface: '喰べる',
+      normalizedSurface: '喰べる',
+    })
+
+    const result = validateCanonicalSnapshot(snapshot)
+    expect(result.valid).toBe(false)
+    expect(result.errors.map((error) => error.path)).toContain('entries[0].forms[1].id')
+    expect(result.errors.map((error) => error.path)).toContain('lookupAliases[1].id')
+  })
+
+  test('rejects aliases pointing at form or reading ids owned by another entry', () => {
+    const snapshot = validSnapshot()
+    const refs = [sourceRef({ sourceId: '2000000' })]
+    snapshot.entries.push({
+      id: 'yde_00000002',
+      language: 'ja',
+      entryType: 'word',
+      primaryForm: '寿司',
+      primaryReading: 'すし',
+      forms: [
+        {
+          id: 'ydf_00000002',
+          text: '寿司',
+          normalizedText: '寿司',
+          script: 'kanji',
+          isPrimary: true,
+          tags: [],
+          sourceRefs: refs,
+        },
+      ],
+      readings: [
+        {
+          id: 'ydr_00000002',
+          text: 'すし',
+          normalizedText: 'すし',
+          system: 'kana',
+          isPrimary: true,
+          appliesToFormIds: 'all',
+          tags: [],
+          sourceRefs: refs,
+        },
+      ],
+      senses: [
+        {
+          id: 'yds_00000002',
+          entryId: 'yde_00000002',
+          order: 1,
+          partOfSpeech: ['n'],
+          appliesToFormIds: 'all',
+          appliesToReadingIds: 'all',
+          domain: [],
+          register: [],
+          misc: [],
+          glosses: [
+            {
+              id: 'ydg_00000002',
+              senseId: 'yds_00000002',
+              lang: 'en',
+              text: 'sushi',
+              sourceType: 'source',
+              reviewStatus: 'approved',
+              sourceRefs: refs,
+            },
+          ],
+          examples: [],
+          sourceRefs: refs,
+        },
+      ],
+      ranking: {},
+      sourceRefs: refs,
+    })
+    snapshot.lookupAliases[0].formId = 'ydf_00000002'
+    snapshot.lookupAliases[0].readingId = 'ydr_00000002'
+
+    const result = validateCanonicalSnapshot(snapshot)
+    expect(result.valid).toBe(false)
+    expect(result.errors.map((error) => error.path)).toContain('lookupAliases[0].formId')
+    expect(result.errors.map((error) => error.path)).toContain('lookupAliases[0].readingId')
+  })
+
   test('requires AI source refs to record the model', () => {
     const snapshot = validSnapshot()
     snapshot.entries[0].sourceRefs = [sourceRef({ kind: 'ai', model: undefined })]

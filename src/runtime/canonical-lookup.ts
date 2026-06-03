@@ -228,24 +228,30 @@ export interface CanonicalKanjiDetail {
 }
 
 export class CanonicalLookupService {
+  private static readonly MIN_ALIAS_PREFETCH = 100
+  private static readonly MAX_ALIAS_PREFETCH = 500
+
   constructor(private readonly db: Database) {
     this.db.exec('PRAGMA foreign_keys = ON')
   }
 
   lookup(input: CanonicalLookupInput): CanonicalLookupResult {
     const limit = input.limit ?? 3
+    const aliasPrefetchLimit = Math.min(
+      Math.max(limit * 50, CanonicalLookupService.MIN_ALIAS_PREFETCH),
+      CanonicalLookupService.MAX_ALIAS_PREFETCH
+    )
     const candidates = this.buildQueryCandidates(input)
     const bestAliases = new Map<string, AliasRow>()
 
     for (const candidate of candidates) {
-      const rows = this.lookupAliases(candidate.value, candidate.kind, limit)
+      const rows = this.lookupAliases(candidate.value, candidate.kind, aliasPrefetchLimit)
       for (const row of rows) {
         const existing = bestAliases.get(row.entry_public_id)
         if (!existing || this.rankAlias(row) > this.rankAlias(existing)) {
           bestAliases.set(row.entry_public_id, row)
         }
       }
-      if (bestAliases.size >= limit) break
     }
 
     const aliases = [...bestAliases.values()]

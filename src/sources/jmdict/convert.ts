@@ -99,6 +99,12 @@ function normalizeStringList(value: string[] | undefined): string[] {
   return [...new Set((value ?? []).map((item) => item.trim()).filter(Boolean))]
 }
 
+function addToMultiMap(map: Map<string, string[]>, key: string, value: string): void {
+  const values = map.get(key) ?? []
+  values.push(value)
+  map.set(key, values)
+}
+
 function choosePrimaryKanji(kanji: JmdictKanji[] | undefined): JmdictKanji | null {
   if (!kanji || kanji.length === 0) return null
   return kanji.find((item) => item.common) ?? kanji[0]
@@ -136,33 +142,31 @@ function buildForms(word: JmdictWord, options: JmdictConversionOptions): Form[] 
 
 function resolveFormIds(
   restriction: string[] | 'all' | undefined,
-  formsByText: Map<string, string>
+  formsByText: Map<string, string[]>
 ): string[] | 'all' {
   if (!restriction || restriction === 'all' || restriction.length === 0) return 'all'
 
   const formIds = restriction
-    .map((text) => formsByText.get(normalizeJapaneseText(text)))
-    .filter((id): id is string => Boolean(id))
+    .flatMap((text) => formsByText.get(normalizeJapaneseText(text)) ?? [])
 
   return formIds.length > 0 ? formIds : 'all'
 }
 
 function resolveReadingIds(
   restriction: string[] | 'all' | undefined,
-  readingsByText: Map<string, string>
+  readingsByText: Map<string, string[]>
 ): string[] | 'all' {
   if (!restriction || restriction === 'all' || restriction.length === 0) return 'all'
 
   const readingIds = restriction
-    .map((text) => readingsByText.get(normalizeKana(text)))
-    .filter((id): id is string => Boolean(id))
+    .flatMap((text) => readingsByText.get(normalizeKana(text)) ?? [])
 
   return readingIds.length > 0 ? readingIds : 'all'
 }
 
 function buildReadings(
   word: JmdictWord,
-  formsByText: Map<string, string>,
+  formsByText: Map<string, string[]>,
   options: JmdictConversionOptions
 ): Reading[] {
   const refs = [sourceRef(word.id, options)]
@@ -183,9 +187,9 @@ function buildReadings(
   })
 }
 
-function mapGlossLang(lang: string | undefined): TargetLanguage {
+function mapGlossLang(lang: string | undefined): TargetLanguage | null {
   if (!lang) return 'en'
-  return JM_TO_TARGET_LANG[lang.toLowerCase()] ?? 'en'
+  return JM_TO_TARGET_LANG[lang.toLowerCase()] ?? null
 }
 
 function buildGlosses(
@@ -201,6 +205,7 @@ function buildGlosses(
       const text = gloss.text.trim()
       if (!text) return null
       const lang = mapGlossLang(gloss.lang)
+      if (!lang) return null
       return {
         id: getOrCreateYoriId(
           options.registry,
@@ -221,8 +226,8 @@ function buildGlosses(
 function buildSenses(
   word: JmdictWord,
   entryId: string,
-  formsByText: Map<string, string>,
-  readingsByText: Map<string, string>,
+  formsByText: Map<string, string[]>,
+  readingsByText: Map<string, string[]>,
   options: JmdictConversionOptions
 ): Sense[] {
   const refs = [sourceRef(word.id, options)]
@@ -338,9 +343,11 @@ export function convertJmdictWordToEntry(
 
   const entryId = getOrCreateYoriId(options.registry, 'entry', `${SOURCE_KIND}:${word.id}`)
   const forms = buildForms(word, options)
-  const formsByText = new Map(forms.map((form) => [form.normalizedText, form.id]))
+  const formsByText = new Map<string, string[]>()
+  forms.forEach((form) => addToMultiMap(formsByText, form.normalizedText, form.id))
   const readings = buildReadings(word, formsByText, options)
-  const readingsByText = new Map(readings.map((reading) => [reading.normalizedText, reading.id]))
+  const readingsByText = new Map<string, string[]>()
+  readings.forEach((reading) => addToMultiMap(readingsByText, reading.normalizedText, reading.id))
   const senses = buildSenses(word, entryId, formsByText, readingsByText, options)
   const primaryForm = forms.find((form) => form.isPrimary) ?? forms[0]
   const primaryReading = readings.find((reading) => reading.isPrimary) ?? readings[0]
