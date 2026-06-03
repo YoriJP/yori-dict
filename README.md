@@ -72,6 +72,23 @@ Other endpoints:
 - `GET /openapi.yaml` returns the OpenAPI spec
 - `/admin/*` is an internal operations UI protected by `ADMIN_TOKEN`
 
+### Canonical `/v2` API
+
+The canonical dictionary API is the new product-owned model. It is built from a canonical snapshot and served from a separate SQLite release DB. It does not replace `/v1` yet.
+
+Use it with tokenizer output:
+
+```bash
+curl "http://localhost:3000/v2/lookup?surface=食べました&lemma=食べる&reading=タベマシタ&lang=en" | jq
+```
+
+Main endpoints:
+
+- `GET /v2/lookup` looks up one word by `query`, `surface`, `lemma`, or `reading`.
+- `POST /v2/lookup/batch` looks up up to 100 tokenizer tokens.
+- `GET /v2/entries/:id` returns a full canonical entry by product-owned Yori ID.
+- `GET /v2/kanji/:literal` returns kanji details from canonical kanji data.
+
 ## Mental Model
 
 The repo has three data layers:
@@ -94,6 +111,19 @@ Important rules:
 - source updates are effective immediately.
 - AI updates only affect lookup after approval.
 - `release:promote` bakes the current effective data into a new release.
+
+The canonical model adds a cleaner rebuild path for the next API:
+
+```text
+JMdict / KANJIDIC2 sources -> canonical snapshot -> canonical SQLite release DB -> /v2 API
+```
+
+Canonical rules:
+
+- Yori owns canonical IDs such as `yde_00000001`; source IDs stay in `sourceRefs`.
+- `sourceRefs.kind` records where data came from, including `jmdict`, `kanjidic2`, `manual`, and `ai`.
+- downloaded source files, generated snapshots, and generated canonical release DBs are ignored by git.
+- source parsers and importers should be covered by focused tests before real data rebuilds.
 
 ## Repo Map
 
@@ -123,6 +153,9 @@ sdk/                     generated TypeScript client
 | `bun run build:db` | build and activate a release from checked-in JSON |
 | `bun run rebuild:all` | run deterministic imports and build a candidate release |
 | `bun run release:build` | build a release without using the dev wrapper |
+| `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
+| `bun run validate:snapshot` | validate canonical snapshot structure |
+| `bun run quality:canonical` | report dictionary quality issues in a canonical snapshot |
 | `bun run release:activate --version <version>` | switch to an existing release |
 | `bun run release:promote` | bake effective overlay updates into a new release |
 | `bun run verify:rebuild` | compare a clean rebuild against the current snapshot |
