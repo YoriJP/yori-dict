@@ -176,6 +176,254 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
               example:
                 error: Internal server error
+  /v2/lookup:
+    get:
+      tags:
+        - Dictionary
+      summary: Lookup a word from the canonical dictionary
+      description: |
+        Looks up a Japanese dictionary entry from the canonical release database.
+        Use `query` for a simple lookup, or send token fields from a tokenizer:
+        `surface`, `lemma`, and `reading`. When `lemma` is provided, it is tried before
+        surface form so inflected tokens can resolve to dictionary entries.
+      operationId: lookupCanonicalWord
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: Raw lookup text. `word` is also accepted as a compatibility alias.
+          schema:
+            type: string
+          example: 食べる
+        - name: word
+          in: query
+          required: false
+          description: Compatibility alias for `query`.
+          schema:
+            type: string
+        - name: surface
+          in: query
+          required: false
+          description: Token surface form from a tokenizer.
+          schema:
+            type: string
+          example: 食べました
+        - name: lemma
+          in: query
+          required: false
+          description: Token dictionary form from a tokenizer. Tried before `surface`.
+          schema:
+            type: string
+          example: 食べる
+        - name: reading
+          in: query
+          required: false
+          description: Token reading. Katakana input is normalized to hiragana.
+          schema:
+            type: string
+          example: タベマシタ
+        - name: lang
+          in: query
+          required: false
+          description: Translation language code. Default is `en`.
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of entries to return. Values are clamped to 1-20.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+      responses:
+        '200':
+          description: Canonical lookup result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanonicalLookupResponse'
+              example:
+                query: 食べる
+                matched:
+                  surface: 食べる
+                  reading: たべる
+                  matchType: dictionary
+                  score: 100
+                entries:
+                  - id: yde_00000001
+                    word: 食べる
+                    reading: たべる
+                    pos:
+                      - v1
+                      - vt
+                    definitions:
+                      - to eat
+        '400':
+          description: Missing lookup input or invalid language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Word not found or no definition exists for the requested language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Canonical dictionary release DB is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Canonical dictionary is not configured
+  /v2/lookup/batch:
+    post:
+      tags:
+        - Dictionary
+      summary: Batch lookup canonical dictionary entries
+      description: |
+        Looks up up to 100 tokenizer tokens in one request. Each token can contain
+        `query` or `word`, or tokenizer fields `surface`, `lemma`, and `reading`.
+      operationId: batchLookupCanonicalWords
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanonicalBatchLookupRequest'
+            example:
+              lang: en
+              tokens:
+                - surface: 食べました
+                  lemma: 食べる
+                  reading: タベマシタ
+                  pos: 動詞
+                - surface: スシ
+      responses:
+        '200':
+          description: Batch lookup results, returned in the same order as input tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanonicalBatchLookupResponse'
+        '400':
+          description: Invalid JSON body, token shape, language, or batch size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Canonical dictionary release DB is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v2/entries/{id}:
+    get:
+      tags:
+        - Dictionary
+      summary: Get a canonical dictionary entry by ID
+      description: |
+        Returns the full canonical entry for a stable product-owned Yori entry ID.
+        If `lang` is provided, sense glosses and examples are filtered to that language.
+      operationId: getCanonicalEntry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Product-owned Yori entry ID.
+          schema:
+            type: string
+            pattern: '^yde_[0-9]{8}$'
+          example: yde_00000001
+        - name: lang
+          in: query
+          required: false
+          description: Optional language filter for glosses and examples.
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+      responses:
+        '200':
+          description: Canonical entry detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanonicalEntryDetail'
+        '400':
+          description: Invalid entry ID or language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Entry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Entry not found
+        '503':
+          description: Canonical dictionary release DB is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v2/kanji/{literal}:
+    get:
+      tags:
+        - Dictionary
+      summary: Get canonical kanji details by literal
+      description: |
+        Returns kanji-level meanings, readings, ranking/statistics, and source refs
+        from the canonical release database. If `lang` is provided, meanings are
+        filtered to that language.
+      operationId: getCanonicalKanji
+      parameters:
+        - name: literal
+          in: path
+          required: true
+          description: A single kanji character.
+          schema:
+            type: string
+            pattern: '^[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]$'
+          example: 食
+        - name: lang
+          in: query
+          required: false
+          description: Optional language filter for meanings.
+          schema:
+            $ref: '#/components/schemas/LanguageCode'
+      responses:
+        '200':
+          description: Canonical kanji detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanonicalKanjiDetail'
+        '400':
+          description: Invalid kanji literal or language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Kanji not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Kanji not found
+        '503':
+          description: Canonical dictionary release DB is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/api/summary:
     get:
       tags:
@@ -1038,6 +1286,487 @@ components:
           description: Example sentences for this word in the requested language. Always present (may be empty).
           items:
             $ref: '#/components/schemas/ExampleSentence'
+    CanonicalLookupEntry:
+      type: object
+      required:
+        - id
+        - word
+        - reading
+        - pos
+        - definitions
+      properties:
+        id:
+          type: string
+          description: Stable product-owned Yori entry ID.
+          example: yde_00000001
+        word:
+          type: string
+          description: Primary written form.
+          example: 食べる
+        reading:
+          type: string
+          description: Primary kana reading.
+          example: たべる
+        pos:
+          type: array
+          description: Part-of-speech tags preserved from the canonical source model.
+          items:
+            type: string
+        definitions:
+          type: array
+          description: Definitions for the requested language.
+          items:
+            type: string
+    CanonicalLookupMatch:
+      type: object
+      nullable: true
+      required:
+        - surface
+        - matchType
+        - score
+      properties:
+        surface:
+          type: string
+        reading:
+          type: string
+        matchType:
+          type: string
+          enum:
+            - dictionary
+            - variant
+            - kana
+            - reading
+            - normalized
+        score:
+          type: number
+    CanonicalLookupResponse:
+      type: object
+      required:
+        - query
+        - matched
+        - entries
+      properties:
+        query:
+          type: string
+        matched:
+          $ref: '#/components/schemas/CanonicalLookupMatch'
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalLookupEntry'
+    CanonicalLookupToken:
+      type: object
+      properties:
+        query:
+          type: string
+        word:
+          type: string
+          description: Compatibility alias for `query`.
+        surface:
+          type: string
+        lemma:
+          type: string
+        reading:
+          type: string
+        pos:
+          type: string
+          description: Optional tokenizer POS. Currently accepted for caller context, not used for ranking.
+    CanonicalBatchLookupRequest:
+      type: object
+      required:
+        - tokens
+      properties:
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 20
+        tokens:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/CanonicalLookupToken'
+    CanonicalBatchLookupItem:
+      allOf:
+        - $ref: '#/components/schemas/CanonicalLookupResponse'
+        - type: object
+          required:
+            - token
+          properties:
+            token:
+              $ref: '#/components/schemas/CanonicalLookupToken'
+    CanonicalBatchLookupResponse:
+      type: object
+      required:
+        - results
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalBatchLookupItem'
+    CanonicalSourceRef:
+      type: object
+      required:
+        - kind
+        - importedAt
+      properties:
+        kind:
+          type: string
+          enum:
+            - jmdict
+            - jmnedict
+            - kanjidic2
+            - wiktionary
+            - tatoeba
+            - manual
+            - ai
+        sourceId:
+          type: string
+        license:
+          type: string
+        importedAt:
+          type: string
+          format: date-time
+        model:
+          type: string
+        promptVersion:
+          type: string
+        inputRefs:
+          type: array
+          items:
+            type: string
+        reviewStatus:
+          type: string
+          enum:
+            - unreviewed
+            - approved
+            - rejected
+    CanonicalFormDetail:
+      type: object
+      required:
+        - id
+        - text
+        - normalizedText
+        - script
+        - isPrimary
+        - tags
+        - sourceRefs
+      properties:
+        id:
+          type: string
+          example: ydf_00000001
+        text:
+          type: string
+        normalizedText:
+          type: string
+        script:
+          type: string
+        isPrimary:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalReadingDetail:
+      type: object
+      required:
+        - id
+        - text
+        - normalizedText
+        - system
+        - isPrimary
+        - appliesToFormIds
+        - tags
+        - sourceRefs
+      properties:
+        id:
+          type: string
+          example: ydr_00000001
+        text:
+          type: string
+        normalizedText:
+          type: string
+        system:
+          type: string
+          enum:
+            - kana
+        isPrimary:
+          type: boolean
+        appliesToFormIds:
+          oneOf:
+            - type: string
+              enum:
+                - all
+            - type: array
+              items:
+                type: string
+        pitchAccent:
+          type: array
+          nullable: true
+          items:
+            type: object
+            additionalProperties: true
+        tags:
+          type: array
+          items:
+            type: string
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalGlossDetail:
+      type: object
+      required:
+        - id
+        - lang
+        - text
+        - sourceType
+        - reviewStatus
+        - sourceRefs
+      properties:
+        id:
+          type: string
+          example: ydg_00000001
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        text:
+          type: string
+        sourceType:
+          type: string
+          enum:
+            - source
+            - manual
+            - ai
+        reviewStatus:
+          type: string
+          enum:
+            - unreviewed
+            - approved
+            - rejected
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalExampleDetail:
+      type: object
+      required:
+        - id
+        - lang
+        - japanese
+        - translation
+        - sourceRefs
+      properties:
+        id:
+          type: string
+          example: ydx_00000001
+        senseId:
+          type: string
+          example: yds_00000001
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        japanese:
+          type: string
+        translation:
+          type: string
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalSenseDetail:
+      type: object
+      required:
+        - id
+        - order
+        - partOfSpeech
+        - appliesToFormIds
+        - appliesToReadingIds
+        - domain
+        - register
+        - misc
+        - glosses
+        - examples
+        - sourceRefs
+      properties:
+        id:
+          type: string
+          example: yds_00000001
+        order:
+          type: integer
+        partOfSpeech:
+          type: array
+          items:
+            type: string
+        appliesToFormIds:
+          oneOf:
+            - type: string
+              enum:
+                - all
+            - type: array
+              items:
+                type: string
+        appliesToReadingIds:
+          oneOf:
+            - type: string
+              enum:
+                - all
+            - type: array
+              items:
+                type: string
+        domain:
+          type: array
+          items:
+            type: string
+        register:
+          type: array
+          items:
+            type: string
+        misc:
+          type: array
+          items:
+            type: string
+        glosses:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalGlossDetail'
+        examples:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalExampleDetail'
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalEntryDetail:
+      type: object
+      required:
+        - id
+        - language
+        - entryType
+        - primaryForm
+        - primaryReading
+        - ranking
+        - forms
+        - readings
+        - senses
+        - sourceRefs
+      properties:
+        id:
+          type: string
+          example: yde_00000001
+        language:
+          type: string
+          enum:
+            - ja
+        entryType:
+          type: string
+          enum:
+            - word
+            - phrase
+            - proper_noun
+        primaryForm:
+          type: string
+        primaryReading:
+          type: string
+        ranking:
+          type: object
+          additionalProperties: true
+        forms:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalFormDetail'
+        readings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalReadingDetail'
+        senses:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSenseDetail'
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalKanjiMeaning:
+      type: object
+      required:
+        - lang
+        - text
+        - sourceRefs
+      properties:
+        lang:
+          $ref: '#/components/schemas/LanguageCode'
+        text:
+          type: string
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalKanjiReading:
+      type: object
+      required:
+        - type
+        - text
+        - sourceRefs
+      properties:
+        type:
+          type: string
+          enum:
+            - onyomi
+            - kunyomi
+            - nanori
+        text:
+          type: string
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
+    CanonicalKanjiStats:
+      type: object
+      additionalProperties: false
+      properties:
+        grade:
+          type: integer
+        strokeCount:
+          type: integer
+        frequency:
+          type: integer
+        jlpt:
+          type: integer
+    CanonicalKanjiDetail:
+      type: object
+      required:
+        - id
+        - literal
+        - meanings
+        - readings
+        - stats
+        - sourceRefs
+      properties:
+        id:
+          type: string
+          example: ydk_00000001
+        literal:
+          type: string
+          example: 食
+        meanings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalKanjiMeaning'
+        readings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalKanjiReading'
+        stats:
+          $ref: '#/components/schemas/CanonicalKanjiStats'
+        sourceRefs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CanonicalSourceRef'
     Conjugations:
       type: object
       required:
