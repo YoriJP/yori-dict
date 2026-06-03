@@ -115,13 +115,14 @@ Important rules:
 The canonical model adds a cleaner rebuild path for the next API:
 
 ```text
-JMdict / KANJIDIC2 sources -> canonical snapshot -> canonical SQLite release DB -> /v2 API
+JMdict / KANJIDIC2 / Tatoeba sources -> canonical snapshot -> canonical SQLite release DB -> /v2 API
 ```
 
 Canonical rules:
 
 - Yori owns canonical IDs such as `yde_00000001`; source IDs stay in `sourceRefs`.
-- `sourceRefs.kind` records where data came from, including `jmdict`, `kanjidic2`, `manual`, and `ai`.
+- `sourceRefs.kind` records where data came from, including `jmdict`, `jmnedict`, `kanjidic2`, `wiktionary`, `tatoeba`, `manual`, and `ai`.
+- Tatoeba canonical imports enrich existing entries with examples; they do not create new dictionary entries.
 - downloaded source files, generated snapshots, and generated canonical release DBs are ignored by git.
 - source parsers and importers should be covered by focused tests before real data rebuilds.
 
@@ -154,6 +155,7 @@ sdk/                     generated TypeScript client
 | `bun run rebuild:all` | run deterministic imports and build a candidate release |
 | `bun run release:build` | build a release without using the dev wrapper |
 | `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
+| `bun run import:tatoeba:canonical` | import Tatoeba examples into an existing canonical snapshot |
 | `bun run validate:snapshot` | validate canonical snapshot structure |
 | `bun run quality:canonical` | report dictionary quality issues in a canonical snapshot |
 | `bun run release:activate --version <version>` | switch to an existing release |
