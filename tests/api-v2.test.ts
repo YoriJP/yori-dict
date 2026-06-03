@@ -388,6 +388,17 @@ describe('POST /v2/lookup/batch', () => {
     })
     expect(res.status).toBe(400)
   })
+
+  test('rejects invalid top-level body shapes', async () => {
+    const res = await request('/v2/lookup/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'null',
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Invalid request body' })
+  })
 })
 
 describe('GET /v2/entries/:id', () => {

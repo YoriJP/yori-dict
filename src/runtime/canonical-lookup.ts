@@ -29,7 +29,14 @@ interface AliasRow {
   alias_type: string
   score: number
   entry_public_id: string
+  form_public_id: string | null
+  reading_public_id: string | null
   ranking_json: string
+}
+
+interface RankedAlias {
+  alias: AliasRow
+  priority: number
 }
 
 interface EntryRow {
@@ -228,41 +235,39 @@ export interface CanonicalKanjiDetail {
 }
 
 export class CanonicalLookupService {
-  private static readonly MIN_ALIAS_PREFETCH = 100
-  private static readonly MAX_ALIAS_PREFETCH = 500
-
   constructor(private readonly db: Database) {
     this.db.exec('PRAGMA foreign_keys = ON')
   }
 
   lookup(input: CanonicalLookupInput): CanonicalLookupResult {
     const limit = input.limit ?? 3
-    const aliasPrefetchLimit = Math.min(
-      Math.max(limit * 50, CanonicalLookupService.MIN_ALIAS_PREFETCH),
-      CanonicalLookupService.MAX_ALIAS_PREFETCH
-    )
     const candidates = this.buildQueryCandidates(input)
-    const bestAliases = new Map<string, AliasRow>()
+    const rankedAliases: RankedAlias[] = []
 
     for (const candidate of candidates) {
-      const rows = this.lookupAliases(candidate.value, candidate.kind, aliasPrefetchLimit)
+      const rows = this.lookupAliases(candidate.value, candidate.kind)
       for (const row of rows) {
-        const existing = bestAliases.get(row.entry_public_id)
-        if (!existing || this.rankAlias(row) > this.rankAlias(existing)) {
-          bestAliases.set(row.entry_public_id, row)
-        }
+        rankedAliases.push({ alias: row, priority: candidate.priority })
       }
     }
 
-    const aliases = [...bestAliases.values()]
-      .sort((left, right) => this.rankAlias(right) - this.rankAlias(left))
-      .slice(0, limit)
+    const entries: CanonicalLookupEntry[] = []
+    const returnedEntryIds = new Set<string>()
+    let topAlias: AliasRow | undefined
 
-    const entries = aliases
-      .map((alias) => this.buildEntry(alias.entry_public_id, input.lang))
-      .filter((entry): entry is CanonicalLookupEntry => Boolean(entry))
+    rankedAliases
+      .sort((left, right) => this.compareRankedAliases(right, left))
+      .forEach((ranked) => {
+        if (entries.length >= limit) return
+        const alias = ranked.alias
+        if (returnedEntryIds.has(alias.entry_public_id)) return
+        const entry = this.buildEntry(alias.entry_public_id, input.lang, alias.form_public_id, alias.reading_public_id)
+        if (!entry) return
+        topAlias ??= alias
+        returnedEntryIds.add(alias.entry_public_id)
+        entries.push(entry)
+      })
 
-    const topAlias = aliases[0]
     return {
       query: input.query ?? input.surface ?? input.lemma ?? input.reading ?? '',
       matched: topAlias
@@ -408,61 +413,67 @@ export class CanonicalLookupService {
     }
   }
 
-  private buildQueryCandidates(input: CanonicalLookupInput): Array<{ kind: 'surface' | 'reading'; value: string }> {
-    const candidates: Array<{ kind: 'surface' | 'reading'; value: string }> = []
+  private buildQueryCandidates(input: CanonicalLookupInput): Array<{ kind: 'surface' | 'reading'; value: string; priority: number }> {
+    const candidates: Array<{ kind: 'surface' | 'reading'; value: string; priority: number }> = []
     const seen = new Set<string>()
 
-    const add = (kind: 'surface' | 'reading', value: string | undefined): void => {
+    const add = (kind: 'surface' | 'reading', value: string | undefined, priority: number): void => {
       const normalized = kind === 'reading' ? normalizeKana(value ?? '') : normalizeJapaneseText(value ?? '')
       if (!normalized) return
       const key = `${kind}:${normalized}`
       if (seen.has(key)) return
       seen.add(key)
-      candidates.push({ kind, value: normalized })
+      candidates.push({ kind, value: normalized, priority })
     }
 
-    add('surface', input.lemma)
-    add('surface', input.surface)
-    add('surface', input.query)
-    add('reading', input.reading)
-    add('reading', input.query)
-    add('reading', input.surface)
+    add('surface', input.lemma, 6)
+    add('surface', input.surface, 5)
+    add('surface', input.query, 4)
+    add('reading', input.reading, 3)
+    add('reading', input.query, 2)
+    add('reading', input.surface, 1)
 
     return candidates
   }
 
-  private lookupAliases(value: string, kind: 'surface' | 'reading', limit: number): AliasRow[] {
+  private lookupAliases(value: string, kind: 'surface' | 'reading'): AliasRow[] {
     if (kind === 'reading') {
-      return this.db.query<AliasRow, [string, number]>(`
+      return this.db.query<AliasRow, [string]>(`
         SELECT
           lookup_aliases.surface,
           lookup_aliases.reading,
           lookup_aliases.alias_type,
           lookup_aliases.score,
           lookup_aliases.entry_public_id,
+          lookup_aliases.form_public_id,
+          lookup_aliases.reading_public_id,
           entries.ranking_json
         FROM lookup_aliases
         JOIN entries ON entries.public_id = lookup_aliases.entry_public_id
         WHERE lookup_aliases.normalized_reading = ?1 OR lookup_aliases.normalized_surface = ?1
         ORDER BY score DESC, alias_type ASC, surface ASC
-        LIMIT ?2
-      `).all(value, limit)
+      `).all(value)
     }
 
-    return this.db.query<AliasRow, [string, number]>(`
+    return this.db.query<AliasRow, [string]>(`
       SELECT
         lookup_aliases.surface,
         lookup_aliases.reading,
         lookup_aliases.alias_type,
         lookup_aliases.score,
         lookup_aliases.entry_public_id,
+        lookup_aliases.form_public_id,
+        lookup_aliases.reading_public_id,
         entries.ranking_json
       FROM lookup_aliases
       JOIN entries ON entries.public_id = lookup_aliases.entry_public_id
       WHERE lookup_aliases.normalized_surface = ?1
       ORDER BY score DESC, alias_type ASC, surface ASC
-      LIMIT ?2
-    `).all(value, limit)
+    `).all(value)
+  }
+
+  private compareRankedAliases(left: RankedAlias, right: RankedAlias): number {
+    return left.priority - right.priority || this.rankAlias(left.alias) - this.rankAlias(right.alias)
   }
 
   private rankAlias(alias: AliasRow): number {
@@ -494,7 +505,12 @@ export class CanonicalLookupService {
     return boost
   }
 
-  private buildEntry(entryId: string, lang: TargetLanguage): CanonicalLookupEntry | null {
+  private buildEntry(
+    entryId: string,
+    lang: TargetLanguage,
+    formId?: string | null,
+    readingId?: string | null
+  ): CanonicalLookupEntry | null {
     const entry = this.db.query<EntryRow, [string]>(`
       SELECT public_id, primary_form, primary_reading
       FROM entries
@@ -504,7 +520,8 @@ export class CanonicalLookupService {
     if (!entry) return null
 
     const senses = this.db.query<SenseRow, [string]>(`
-      SELECT public_id, part_of_speech_json, sense_order
+      SELECT public_id, part_of_speech_json, sense_order, applies_to_form_ids_json,
+        applies_to_reading_ids_json
       FROM senses
       WHERE entry_public_id = ?1
       ORDER BY sense_order ASC
@@ -514,6 +531,8 @@ export class CanonicalLookupService {
     const definitions: string[] = []
 
     for (const sense of senses) {
+      if (!this.senseAppliesToAlias(sense, formId, readingId)) continue
+
       for (const part of JSON.parse(sense.part_of_speech_json) as string[]) {
         pos.add(part)
       }
@@ -539,6 +558,16 @@ export class CanonicalLookupService {
       pos: [...pos],
       definitions,
     }
+  }
+
+  private senseAppliesToAlias(sense: SenseRow, formId?: string | null, readingId?: string | null): boolean {
+    const formIds = this.parseJson<string[] | 'all'>(sense.applies_to_form_ids_json, 'all')
+    if (formIds !== 'all' && formId && !formIds.includes(formId)) return false
+
+    const readingIds = this.parseJson<string[] | 'all'>(sense.applies_to_reading_ids_json, 'all')
+    if (readingIds !== 'all' && readingId && !readingIds.includes(readingId)) return false
+
+    return true
   }
 
   private getGlosses(senseId: string, lang?: TargetLanguage): CanonicalGlossDetail[] {

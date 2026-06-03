@@ -140,6 +140,41 @@ describe('validateCanonicalSnapshot', () => {
     expect(result.errors.map((error) => error.path)).toContain('lookupAliases[1].id')
   })
 
+  test('rejects glosses and examples nested under the wrong sense', () => {
+    const snapshot = validSnapshot()
+    const refs = [sourceRef()]
+    snapshot.entries[0].senses.push({
+      id: 'yds_00000002',
+      entryId: 'yde_00000001',
+      order: 2,
+      partOfSpeech: ['n'],
+      appliesToFormIds: 'all',
+      appliesToReadingIds: 'all',
+      domain: [],
+      register: [],
+      misc: [],
+      glosses: [],
+      examples: [],
+      sourceRefs: refs,
+    })
+    snapshot.entries[0].senses[0].glosses[0].senseId = 'yds_00000002'
+    snapshot.entries[0].senses[0].examples = [
+      {
+        id: 'ydx_00000001',
+        senseId: 'yds_00000002',
+        lang: 'en',
+        japanese: '寿司を食べる。',
+        translation: 'I eat sushi.',
+        sourceRefs: refs,
+      },
+    ]
+
+    const result = validateCanonicalSnapshot(snapshot)
+    expect(result.valid).toBe(false)
+    expect(result.errors.map((error) => error.path)).toContain('entries[0].senses[0].glosses[0].senseId')
+    expect(result.errors.map((error) => error.path)).toContain('entries[0].senses[0].examples[0].senseId')
+  })
+
   test('rejects aliases pointing at form or reading ids owned by another entry', () => {
     const snapshot = validSnapshot()
     const refs = [sourceRef({ sourceId: '2000000' })]

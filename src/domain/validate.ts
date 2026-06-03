@@ -77,7 +77,6 @@ function validateEntry(
 
   const formIds = new Set(entry.forms.map((form) => form.id))
   const readingIds = new Set(entry.readings.map((reading) => reading.id))
-  const senseIds = new Set(entry.senses.map((sense) => sense.id))
   const localFormIds = new Set<string>()
   const localReadingIds = new Set<string>()
   const localSenseIds = new Set<string>()
@@ -140,7 +139,7 @@ function validateEntry(
       const glossOwner = context.glossOwners.get(gloss.id)
       if (glossOwner && glossOwner !== entry.id) errors.push(issue(`${glossPath}.id`, `gloss id also belongs to entry: ${glossOwner}`))
       context.glossOwners.set(gloss.id, entry.id)
-      if (!senseIds.has(gloss.senseId)) errors.push(issue(`${glossPath}.senseId`, 'gloss senseId must point to parent entry sense'))
+      if (gloss.senseId !== sense.id) errors.push(issue(`${glossPath}.senseId`, 'gloss senseId must match parent sense id'))
       if (!gloss.text.trim()) errors.push(issue(`${glossPath}.text`, 'gloss text is required'))
       if (gloss.sourceType === 'ai' && gloss.reviewStatus === 'approved') {
         warnings.push(issue(`${glossPath}.reviewStatus`, 'approved AI gloss should be traceable to reviewer metadata later'))
@@ -155,7 +154,7 @@ function validateEntry(
       const exampleOwner = context.exampleOwners.get(example.id)
       if (exampleOwner && exampleOwner !== entry.id) errors.push(issue(`${examplePath}.id`, `example id also belongs to entry: ${exampleOwner}`))
       context.exampleOwners.set(example.id, entry.id)
-      if (example.senseId && !senseIds.has(example.senseId)) errors.push(issue(`${examplePath}.senseId`, 'unknown sense id'))
+      if (example.senseId !== sense.id) errors.push(issue(`${examplePath}.senseId`, 'example senseId must match parent sense id'))
       if (!example.japanese.trim()) errors.push(issue(`${examplePath}.japanese`, 'japanese example is required'))
       if (!example.translation.trim()) errors.push(issue(`${examplePath}.translation`, 'example translation is required'))
       validateSourceRefs(example.sourceRefs, `${examplePath}.sourceRefs`, errors)

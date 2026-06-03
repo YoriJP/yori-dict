@@ -178,12 +178,23 @@ function isLookupToken(value: unknown): value is BatchLookupToken {
   })
 }
 
+function isBatchLookupBody(value: unknown): value is BatchLookupBody {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const body = value as Record<string, unknown>
+  return (body.lang === undefined || typeof body.lang === 'string')
+    && (body.limit === undefined || typeof body.limit === 'number')
+}
+
 app.post('/v2/lookup/batch', async (c) => {
-  let body: BatchLookupBody
+  let body: unknown
   try {
     body = await c.req.json()
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+
+  if (!isBatchLookupBody(body)) {
+    return c.json({ error: 'Invalid request body' }, 400)
   }
 
   const lang = body.lang ? normalizeLanguage(body.lang) : 'en'
