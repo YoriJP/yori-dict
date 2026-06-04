@@ -112,6 +112,7 @@ sdk/                          generated TypeScript client
 | `bun run release:build:canonical` | build a canonical SQLite release DB from a snapshot |
 | `bun run validate:snapshot` | validate canonical snapshot structure |
 | `bun run quality:canonical` | report dictionary quality issues in a canonical snapshot |
+| `bun run release:manifest:canonical` | write release artifact metadata and hashes |
 | `bun run sdk:generate` | regenerate `sdk/` from OpenAPI |
 
 ## Manual And AI Overlays
@@ -152,6 +153,14 @@ Preview overlays before promotion:
 
 ```bash
 bun run preview:canonical-release --overlay data/overlays/canonical-overlays.json --lookup 食べる --overwrite
+```
+
+Write a release manifest after building the release DB:
+
+```bash
+bun run release:manifest:canonical \
+  --overlay data/overlays/canonical-overlays.json \
+  --quality-report data/reports/canonical-quality.json
 ```
 
 The replacement admin and curation workflow is defined in `CANONICAL_EDITING_WORKFLOW.md`.

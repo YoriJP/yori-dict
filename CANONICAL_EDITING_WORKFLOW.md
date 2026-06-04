@@ -149,6 +149,7 @@ A canonical release can be promoted only when all of these pass:
 - canonical snapshot validation after overlays
 - quality report generated
 - release DB build succeeds
+- release manifest written with artifact hashes
 - `/v2/lookup` smoke tests pass for edited entries
 - `/v2/entries/:id` smoke tests pass for edited entries
 - TypeScript typecheck passes
@@ -177,6 +178,7 @@ A canonical release can be promoted only when all of these pass:
 
 5. Add release promotion metadata.
    - Record source versions, overlay file hash, quality report path, build time, and release DB path.
+   - Write a manifest with `bun run release:manifest:canonical`.
 
 ## Risks And Trade-Offs
 
