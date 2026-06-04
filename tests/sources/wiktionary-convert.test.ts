@@ -226,6 +226,32 @@ describe('importWiktionaryGlossesIntoSnapshot', () => {
     expect(result.snapshot.entries[1].senses[1].glosses).toEqual([])
   })
 
+  test('uses source sense order for multi-sense entries', () => {
+    const result = importWiktionaryGlossesIntoSnapshot(snapshot(), [
+      {
+        sourceId: 'kaikki:紙:sense2',
+        word: '紙',
+        reading: 'かみ',
+        lang: 'zh-tw',
+        senseOrder: 2,
+        glosses: ['後綴'],
+      },
+    ], {
+      registry: registry(),
+      importedAt,
+    })
+
+    expect(result.stats.glossesAdded).toBe(1)
+    expect(result.snapshot.entries[1].senses[0].glosses).toEqual([])
+    expect(result.snapshot.entries[1].senses[1].glosses[0]).toMatchObject({
+      id: 'ydg_00000002',
+      senseId: 'yds_00000003',
+      lang: 'zh-tw',
+      text: '後綴',
+      sourceRefs: [{ kind: 'wiktionary', sourceId: 'kaikki:紙:sense2' }],
+    })
+  })
+
   test('skips ambiguous multi-sense entries without direct ids or pos match', () => {
     const result = importWiktionaryGlossesIntoSnapshot(snapshot(), [
       {

@@ -188,6 +188,34 @@ describe('importTatoebaExamplesIntoSnapshot', () => {
     expect(result.snapshot.entries[0].senses[1].examples).toEqual([])
   })
 
+  test('uses translation gloss overlap to avoid broad multi-sense attachment', () => {
+    const source = snapshot()
+    source.entries[0].senses[1].appliesToFormIds = 'all'
+    source.entries[0].senses[1].glosses[0].text = 'to live on a salary'
+
+    const result = importTatoebaExamplesIntoSnapshot(source, [
+      {
+        japaneseId: '8878337',
+        translationId: '7114453',
+        japanese: '食べることが大好きなんです。',
+        translation: 'I love to eat.',
+        lang: 'en',
+      },
+    ], {
+      registry: createEmptyIdRegistry(),
+      importedAt,
+    })
+
+    expect(result.stats).toMatchObject({
+      pairsProcessed: 1,
+      pairsMatched: 1,
+      examplesAdded: 1,
+      entriesUpdated: 1,
+    })
+    expect(result.snapshot.entries[0].senses[0].examples).toHaveLength(1)
+    expect(result.snapshot.entries[0].senses[1].examples).toEqual([])
+  })
+
   test('deduplicates examples and respects per-sense limits', () => {
     const result = importTatoebaExamplesIntoSnapshot(snapshot(), [
       {

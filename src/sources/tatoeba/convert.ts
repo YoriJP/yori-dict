@@ -154,6 +154,64 @@ function hasExample(sense: Sense, pair: TatoebaExamplePair): boolean {
   )
 }
 
+const LATIN_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'be',
+  'i',
+  'in',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+])
+
+function tokenizeForOverlap(text: string): string[] {
+  return [...new Set(
+    text
+      .toLowerCase()
+      .match(/[\p{Letter}\p{Number}]+/gu)
+      ?.filter((token) => token.length > 1 && !LATIN_STOP_WORDS.has(token)) ?? []
+  )]
+}
+
+function translationGlossOverlapScore(sense: Sense, pair: TatoebaExamplePair): number {
+  const translationTokens = new Set(tokenizeForOverlap(pair.translation))
+  if (translationTokens.size === 0) return 0
+
+  let score = 0
+  for (const gloss of sense.glosses) {
+    if (gloss.lang !== pair.lang) continue
+    for (const token of tokenizeForOverlap(gloss.text)) {
+      if (translationTokens.has(token)) score++
+    }
+  }
+  return score
+}
+
+function chooseTargetSenses(pair: TatoebaExamplePair, match: CandidateMatch): Sense[] {
+  const applicable = match.entry.senses.filter((sense) => {
+    if (pair.senseId && sense.id !== pair.senseId) return false
+    return senseAppliesToMatch(sense, match)
+  })
+
+  if (pair.senseId || applicable.length <= 1) return applicable
+
+  const scored = applicable.map((sense) => ({
+    sense,
+    score: translationGlossOverlapScore(sense, pair),
+  }))
+  const bestScore = Math.max(...scored.map((item) => item.score))
+  if (bestScore <= 0) return []
+
+  const best = scored.filter((item) => item.score === bestScore)
+  return best.length === 1 ? [best[0].sense] : []
+}
+
 function buildExample(
   pair: TatoebaExamplePair,
   sense: Sense,
@@ -196,9 +254,7 @@ export function importTatoebaExamplesIntoSnapshot(
     if (matches.length > 0) stats.pairsMatched++
 
     for (const match of matches) {
-      for (const sense of match.entry.senses) {
-        if (pair.senseId && sense.id !== pair.senseId) continue
-        if (!senseAppliesToMatch(sense, match)) continue
+      for (const sense of chooseTargetSenses(pair, match)) {
         if (hasExample(sense, pair)) continue
         if (countExistingTatoebaExamples(sense, pair.lang) >= maxExamplesPerSense) continue
 

@@ -35,11 +35,11 @@ Usage:
   bun run import:wiktionary:canonical --file <glosses.json|jsonl> [options]
 
 Options:
-  --file <path>                  Simplified JSON or JSONL gloss file.
+  --file <path>                  Simplified JSON/JSONL gloss file, or raw Kaikki JSONL.
   --snapshot <path>              Existing canonical snapshot (default: ${DEFAULT_SNAPSHOT})
   --out <path>                   Output snapshot path (default: same as --snapshot)
   --registry <path>              Stable Yori ID registry (default: ${DEFAULT_REGISTRY})
-  --lang <lang>                  Fallback language for records missing lang. Supported: ${SUPPORTED_LANGUAGES.join(', ')}
+  --lang <lang>                  Fallback language for records missing lang; required for raw Kaikki rows. Supported: ${SUPPORTED_LANGUAGES.join(', ')}
   --max-glosses-per-sense <n>    Max Wiktionary glosses per sense/language (default: ${DEFAULT_MAX_GLOSSES_PER_SENSE})
   --limit <n>                    Import only first n valid records.
   --imported-at <iso>            Import timestamp (default: now)
@@ -122,6 +122,13 @@ function normalizeStringList(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function normalizePositiveInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value
+  if (typeof value !== 'string') return undefined
+  const parsed = Number.parseInt(value, 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
 function normalizeRecord(value: unknown, fallbackLang?: TargetLanguage): WiktionaryGlossInput | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const row = value as Record<string, unknown>
@@ -135,12 +142,61 @@ function normalizeRecord(value: unknown, fallbackLang?: TargetLanguage): Wiktion
     sourceId: typeof row.sourceId === 'string' ? row.sourceId : undefined,
     entryId: typeof row.entryId === 'string' ? row.entryId : undefined,
     senseId: typeof row.senseId === 'string' ? row.senseId : undefined,
+    senseOrder: normalizePositiveInt(row.senseOrder ?? row.senseIndex ?? row.senseNumber),
     word,
     reading: typeof row.reading === 'string' ? row.reading : undefined,
     lang,
     pos: normalizeStringList(row.pos),
     glosses,
   }
+}
+
+function rawReading(row: Record<string, unknown>): string | undefined {
+  const sounds = Array.isArray(row.sounds) ? row.sounds : []
+  for (const sound of sounds) {
+    if (!sound || typeof sound !== 'object') continue
+    const other = (sound as Record<string, unknown>).other
+    if (typeof other === 'string' && other.trim()) return other.trim()
+  }
+  return undefined
+}
+
+function rawPos(row: Record<string, unknown>): string[] {
+  return typeof row.pos === 'string' && row.pos.trim() ? [row.pos.trim()] : []
+}
+
+function normalizeRawKaikkiRecords(value: unknown, fallbackLang?: TargetLanguage): WiktionaryGlossInput[] | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  const senses = Array.isArray(row.senses) ? row.senses : null
+  if (row.lang_code !== 'ja' || !senses) return null
+
+  const word = typeof row.word === 'string' ? row.word.trim() : ''
+  if (!word || !fallbackLang) return []
+
+  return senses.flatMap((sense, index) => {
+    if (!sense || typeof sense !== 'object' || Array.isArray(sense)) return []
+    const glosses = normalizeStringList((sense as Record<string, unknown>).glosses)
+    if (glosses.length === 0) return []
+
+    return [{
+      sourceId: `kaikki:${fallbackLang}:ja:${word}:${typeof row.pos === 'string' ? row.pos : ''}:sense${index + 1}`,
+      word,
+      reading: rawReading(row),
+      lang: fallbackLang,
+      pos: rawPos(row),
+      senseOrder: index + 1,
+      glosses,
+    }]
+  })
+}
+
+function normalizeRecords(value: unknown, fallbackLang?: TargetLanguage): WiktionaryGlossInput[] {
+  const rawRecords = normalizeRawKaikkiRecords(value, fallbackLang)
+  if (rawRecords) return rawRecords
+
+  const record = normalizeRecord(value, fallbackLang)
+  return record ? [record] : []
 }
 
 function loadJsonRecords(text: string, fallbackLang?: TargetLanguage): WiktionaryGlossInput[] {
@@ -151,14 +207,13 @@ function loadJsonRecords(text: string, fallbackLang?: TargetLanguage): Wiktionar
       ? (payload as { entries: unknown[] }).entries
       : null
   if (!rows) {
-    const singleRecord = normalizeRecord(payload, fallbackLang)
-    if (singleRecord) return [singleRecord]
+    const singleRecord = normalizeRecords(payload, fallbackLang)
+    if (singleRecord.length > 0) return singleRecord
     throw new Error('Wiktionary JSON input must be an array or an object with an entries array')
   }
 
   return rows
-    .map((row) => normalizeRecord(row, fallbackLang))
-    .filter((record): record is WiktionaryGlossInput => Boolean(record))
+    .flatMap((row) => normalizeRecords(row, fallbackLang))
 }
 
 function loadJsonlRecords(text: string, fallbackLang?: TargetLanguage): WiktionaryGlossInput[] {
@@ -166,8 +221,7 @@ function loadJsonlRecords(text: string, fallbackLang?: TargetLanguage): Wiktiona
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     try {
-      const record = normalizeRecord(JSON.parse(line), fallbackLang)
-      if (record) records.push(record)
+      records.push(...normalizeRecords(JSON.parse(line), fallbackLang))
     } catch {
       // Skip malformed JSONL rows.
     }

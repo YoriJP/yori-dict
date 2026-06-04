@@ -215,4 +215,42 @@ describe('canonical Wiktionary import CLI', () => {
       sourceRefs: [{ kind: 'wiktionary', sourceId: 'kaikki:食べる' }],
     })
   })
+
+  test('imports raw Kaikki JSONL rows with a fallback target language', async () => {
+    const dir = makeTempDir()
+    const snapshotPath = join(dir, 'snapshot.json')
+    const inputPath = join(dir, 'kaikki.jsonl')
+    const registryPath = join(dir, 'registry', 'ids.json')
+
+    await Bun.write(snapshotPath, JSON.stringify(wordSnapshot()))
+    await writeRegistry(registryPath)
+    await Bun.write(inputPath, `${JSON.stringify({
+      word: '食べる',
+      lang_code: 'ja',
+      lang: '日語',
+      pos: 'verb',
+      sounds: [{ other: 'たべる' }],
+      senses: [
+        { glosses: ['吃'] },
+      ],
+    })}\n`)
+
+    await importWiktionaryCanonical({
+      file: inputPath,
+      snapshot: snapshotPath,
+      out: snapshotPath,
+      registry: registryPath,
+      importedAt,
+      lang: 'zh-tw',
+      maxGlossesPerSense: 8,
+    })
+
+    const snapshot = await Bun.file(snapshotPath).json() as CanonicalSnapshot
+    expect(snapshot.entries[0].senses[0].glosses[1]).toMatchObject({
+      id: 'ydg_00000002',
+      lang: 'zh-tw',
+      text: '吃',
+      sourceRefs: [{ kind: 'wiktionary', sourceId: 'kaikki:zh-tw:ja:食べる:verb:sense1' }],
+    })
+  })
 })

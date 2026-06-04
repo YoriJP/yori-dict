@@ -14,6 +14,7 @@ export interface WiktionaryGlossInput {
   sourceId?: string
   entryId?: string
   senseId?: string
+  senseOrder?: number
   word: string
   reading?: string
   lang: TargetLanguage
@@ -124,6 +125,11 @@ function posMatches(sense: Sense, pos: string[]): boolean {
 
 function chooseTargetSenses(match: EntryMatch, input: WiktionaryGlossInput): Sense[] {
   if (match.sense) return [match.sense]
+
+  if (input.senseOrder) {
+    const sense = match.entry.senses.find((candidate) => candidate.order === input.senseOrder)
+    return sense ? [sense] : []
+  }
 
   const pos = normalizePos(input.pos)
   const posMatched = match.entry.senses.filter((sense) => posMatches(sense, pos))
