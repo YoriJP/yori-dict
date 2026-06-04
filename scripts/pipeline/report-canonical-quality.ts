@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import { analyzeCanonicalQuality, type QualityReport, type QualitySeverity } from '../../src/domain/quality'
-import type { CanonicalSnapshot } from '../../src/domain/types'
+import type { CanonicalSnapshot, TargetLanguage } from '../../src/domain/types'
+import { normalizeLanguage, SUPPORTED_LANGUAGES } from '../../src/types'
 
 interface CliOptions {
   snapshot: string
@@ -9,6 +10,7 @@ interface CliOptions {
   failOn: QualitySeverity | 'none'
   aliasFanoutThreshold: number
   sampleLimit: number
+  targetLanguages: TargetLanguage[]
 }
 
 const DEFAULT_SNAPSHOT = 'data/snapshots/yori-dict.snapshot.json'
@@ -27,6 +29,7 @@ Options:
                                     Exit non-zero when findings meet this severity (default: error).
   --alias-fanout-threshold <n>     Warn when one lookup key maps to more than n entries (default: 20).
   --sample-limit <n>               Number of samples to print per finding (default: 10).
+  --target-lang <lang>             Report senses missing this target-language gloss. Repeatable.
   --help, -h                       Show this help.
 `)
 }
@@ -42,12 +45,19 @@ function parseFailOn(value: string): QualitySeverity | 'none' {
   throw new Error('--fail-on must be one of: none, info, warning, error')
 }
 
+function parseLang(value: string): TargetLanguage {
+  const lang = normalizeLanguage(value)
+  if (!lang) throw new Error(`--target-lang must be one of: ${SUPPORTED_LANGUAGES.join(', ')}`)
+  return lang
+}
+
 export function parseArgs(args: string[]): CliOptions {
   const opts: CliOptions = {
     snapshot: DEFAULT_SNAPSHOT,
     failOn: 'error',
     aliasFanoutThreshold: 20,
     sampleLimit: 10,
+    targetLanguages: [],
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -71,6 +81,9 @@ export function parseArgs(args: string[]): CliOptions {
       i++
     } else if (arg === '--sample-limit' && next) {
       opts.sampleLimit = parsePositiveInt(next, '--sample-limit')
+      i++
+    } else if (arg === '--target-lang' && next) {
+      opts.targetLanguages.push(parseLang(next))
       i++
     } else {
       throw new Error(`Unknown or incomplete argument: ${arg}`)
@@ -139,6 +152,7 @@ export async function reportCanonicalQuality(opts: CliOptions): Promise<QualityR
   const report = analyzeCanonicalQuality(snapshot, {
     aliasFanoutThreshold: opts.aliasFanoutThreshold,
     sampleLimit: opts.sampleLimit,
+    targetLanguages: opts.targetLanguages,
   })
 
   printReport(opts.snapshot, report)

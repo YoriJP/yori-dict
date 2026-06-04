@@ -119,6 +119,7 @@ describe('canonical quality report CLI', () => {
       failOn: 'warning',
       aliasFanoutThreshold: 5,
       sampleLimit: 3,
+      targetLanguages: [],
     })
   })
 
@@ -134,6 +135,7 @@ describe('canonical quality report CLI', () => {
       failOn: 'none',
       aliasFanoutThreshold: 20,
       sampleLimit: 10,
+      targetLanguages: [],
     })
 
     expect(report.findings.find((finding) => finding.code === 'entries_without_glosses')?.count).toBe(1)

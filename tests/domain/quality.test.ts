@@ -151,6 +151,19 @@ describe('analyzeCanonicalQuality', () => {
     expect(report.findings.find((finding) => finding.code === 'common_entries_missing_detailed_ranking')?.count).toBe(1)
   })
 
+  test('reports missing target-language glosses when requested', () => {
+    const report = analyzeCanonicalQuality(snapshot([entry()]), { targetLanguages: ['zh-tw'] })
+
+    const missingTargetGlosses = report.findings.find((finding) =>
+      finding.code === 'senses_missing_zh-tw_glosses'
+    )
+    expect(missingTargetGlosses).toMatchObject({
+      severity: 'warning',
+      count: 1,
+    })
+    expect(missingTargetGlosses?.samples[0]).toContain('missing zh-tw gloss')
+  })
+
   test('reports duplicate aliases, collisions, and fanout', () => {
     const report = analyzeCanonicalQuality({
       ...snapshot([

@@ -28,6 +28,7 @@ export interface QualityReport {
 export interface QualityOptions {
   aliasFanoutThreshold?: number
   sampleLimit?: number
+  targetLanguages?: TargetLanguage[]
 }
 
 const DEFAULT_ALIAS_FANOUT_THRESHOLD = 20
@@ -128,6 +129,7 @@ export function analyzeCanonicalQuality(
   const duplicateAliases = collector()
   const aliasCollisions = collector()
   const aliasFanout = collector()
+  const missingTargetGlossesByLanguage = new Map<TargetLanguage, FindingCollector>()
 
   const aliasKeys = new Map<string, string>()
   const aliasesByLookupKey = new Map<string, Set<string>>()
@@ -151,6 +153,20 @@ export function analyzeCanonicalQuality(
       const label = `${entryLabel(entry)} sense ${sense.order}`
       if (sense.glosses.length === 0) addSample(sensesWithoutGlosses, label, sampleLimit)
       if (sense.partOfSpeech.length === 0) addSample(sensesWithoutPartOfSpeech, label, sampleLimit)
+
+      for (const lang of options.targetLanguages ?? []) {
+        const hasTargetGloss = sense.glosses.some((gloss) =>
+          gloss.lang === lang && gloss.reviewStatus === 'approved' && Boolean(gloss.text.trim())
+        )
+        const hasSourceGloss = sense.glosses.some((gloss) =>
+          gloss.lang !== lang && gloss.reviewStatus === 'approved' && Boolean(gloss.text.trim())
+        )
+        if (hasTargetGloss || !hasSourceGloss) continue
+
+        const finding = missingTargetGlossesByLanguage.get(lang) ?? collector()
+        addSample(finding, `${label} missing ${lang} gloss`, sampleLimit)
+        missingTargetGlossesByLanguage.set(lang, finding)
+      }
     }
   }
 
@@ -236,6 +252,16 @@ export function analyzeCanonicalQuality(
     'A lookup key points to many entries and may create noisy lookup results.',
     aliasFanout
   )
+
+  for (const [lang, finding] of missingTargetGlossesByLanguage.entries()) {
+    pushFinding(
+      findings,
+      `senses_missing_${lang}_glosses`,
+      'warning',
+      `Senses with source glosses but no approved ${lang} gloss need curation.`,
+      finding
+    )
+  }
 
   let senses = 0
   let glosses = 0
