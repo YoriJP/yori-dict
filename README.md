@@ -147,6 +147,8 @@ Or apply to an existing snapshot:
 bun run apply:canonical-overlays --overlay data/overlays/canonical-overlays.json
 ```
 
+The replacement admin and curation workflow is defined in `CANONICAL_EDITING_WORKFLOW.md`.
+
 ## Environment
 
 | Variable | Purpose |
