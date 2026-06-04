@@ -107,6 +107,7 @@ sdk/                          generated TypeScript client
 | `bun run import:tatoeba:canonical` | import Tatoeba examples into an existing canonical snapshot |
 | `bun run import:wiktionary:canonical` | import Wiktionary/Kaikki glosses into an existing canonical snapshot |
 | `bun run apply:canonical-overlays` | apply approved manual/AI overlay operations to a canonical snapshot |
+| `bun run curate:canonical-overlays` | create or review canonical overlay operations |
 | `bun run preview:canonical-release` | preview overlays in a temporary canonical release DB |
 | `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
 | `bun run release:build:canonical` | build a canonical SQLite release DB from a snapshot |
