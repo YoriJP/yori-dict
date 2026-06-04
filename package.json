@@ -17,6 +17,7 @@
     "import:tatoeba:canonical": "bun run scripts/pipeline/import-tatoeba-canonical.ts",
     "import:wiktionary:canonical": "bun run scripts/pipeline/import-wiktionary-canonical.ts",
     "apply:canonical-overlays": "bun run scripts/pipeline/apply-canonical-overlays.ts",
+    "preview:canonical-release": "bun run scripts/pipeline/preview-canonical-release.ts",
     "rebuild:canonical": "bun run scripts/pipeline/rebuild-canonical.ts",
     "validate:snapshot": "bun run scripts/pipeline/validate-snapshot.ts",
     "quality:canonical": "bun run scripts/pipeline/report-canonical-quality.ts",

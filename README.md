@@ -107,6 +107,7 @@ sdk/                          generated TypeScript client
 | `bun run import:tatoeba:canonical` | import Tatoeba examples into an existing canonical snapshot |
 | `bun run import:wiktionary:canonical` | import Wiktionary/Kaikki glosses into an existing canonical snapshot |
 | `bun run apply:canonical-overlays` | apply approved manual/AI overlay operations to a canonical snapshot |
+| `bun run preview:canonical-release` | preview overlays in a temporary canonical release DB |
 | `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
 | `bun run release:build:canonical` | build a canonical SQLite release DB from a snapshot |
 | `bun run validate:snapshot` | validate canonical snapshot structure |
@@ -145,6 +146,12 @@ Or apply to an existing snapshot:
 
 ```bash
 bun run apply:canonical-overlays --overlay data/overlays/canonical-overlays.json
+```
+
+Preview overlays before promotion:
+
+```bash
+bun run preview:canonical-release --overlay data/overlays/canonical-overlays.json --lookup 食べる --overwrite
 ```
 
 The replacement admin and curation workflow is defined in `CANONICAL_EDITING_WORKFLOW.md`.
