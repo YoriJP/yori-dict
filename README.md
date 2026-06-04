@@ -138,6 +138,32 @@ Canonical overlays are JSON files with approved operations:
 }
 ```
 
+Create manual curation operations:
+
+```bash
+bun run curate:canonical-overlays replace-glosses \
+  --overlay data/overlays/canonical-overlays.json \
+  --sense-id yds_00000001 \
+  --lang zh-tw \
+  --gloss "吃" \
+  --approved
+
+bun run curate:canonical-overlays add-example \
+  --overlay data/overlays/canonical-overlays.json \
+  --sense-id yds_00000001 \
+  --lang zh-tw \
+  --japanese "寿司を食べる。" \
+  --translation "我吃壽司。"
+```
+
+Review overlay operations:
+
+```bash
+bun run curate:canonical-overlays list-pending-ai --overlay data/overlays/canonical-overlays.json
+bun run curate:canonical-overlays approve --overlay data/overlays/canonical-overlays.json --id manual-yds_00000001-add-example-zh-tw-20260604
+bun run curate:canonical-overlays reject --overlay data/overlays/canonical-overlays.json --id ai-yds_00000001-add-gloss-zh-tw-canonical-gloss-v1-20260604
+```
+
 Apply overlays during rebuild:
 
 ```bash
