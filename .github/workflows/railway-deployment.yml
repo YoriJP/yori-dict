@@ -1,6 +1,7 @@
 name: Deploy to Railway
 
 on:
+  pull_request:
   release:
     types: [published]
   workflow_dispatch:
@@ -35,6 +36,7 @@ jobs:
   deploy:
     needs: validate
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
 
     steps:
       - name: Checkout with LFS
