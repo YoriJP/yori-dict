@@ -22,6 +22,7 @@
     "import:kanjidic2:canonical": "bun run scripts/pipeline/import-kanjidic2-canonical.ts",
     "import:tatoeba:canonical": "bun run scripts/pipeline/import-tatoeba-canonical.ts",
     "import:wiktionary:canonical": "bun run scripts/pipeline/import-wiktionary-canonical.ts",
+    "apply:canonical-overlays": "bun run scripts/pipeline/apply-canonical-overlays.ts",
     "import:jmdict-examples": "bun run scripts/import/jmdict-examples.ts",
     "import:jitendex": "bun run scripts/import/jitendex.ts",
     "import:kaikki": "bun run scripts/import/kaikki.ts",

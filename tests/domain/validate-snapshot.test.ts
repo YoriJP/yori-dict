@@ -245,13 +245,17 @@ describe('validateCanonicalSnapshot', () => {
     expect(result.errors.map((error) => error.path)).toContain('lookupAliases[0].readingId')
   })
 
-  test('requires AI source refs to record the model', () => {
+  test('requires AI source refs to record model, prompt version, and input refs', () => {
     const snapshot = validSnapshot()
     snapshot.entries[0].sourceRefs = [sourceRef({ kind: 'ai', model: undefined })]
 
     const result = validateCanonicalSnapshot(snapshot)
     expect(result.valid).toBe(false)
-    expect(result.errors.map((error) => error.path)).toContain('entries[0].sourceRefs[0].model')
+    expect(result.errors.map((error) => error.path)).toEqual([
+      'entries[0].sourceRefs[0].model',
+      'entries[0].sourceRefs[0].promptVersion',
+      'entries[0].sourceRefs[0].inputRefs',
+    ])
   })
 
   test('accepts valid kanji characters', () => {

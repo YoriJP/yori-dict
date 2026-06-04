@@ -41,6 +41,12 @@ function validateSourceRefs(sourceRefs: SourceRef[] | undefined, path: string, e
     if (source.kind === 'ai' && !source.model) {
       errors.push(issue(`${path}[${index}].model`, 'AI source refs must include model'))
     }
+    if (source.kind === 'ai' && !source.promptVersion) {
+      errors.push(issue(`${path}[${index}].promptVersion`, 'AI source refs must include promptVersion'))
+    }
+    if (source.kind === 'ai' && (!Array.isArray(source.inputRefs) || source.inputRefs.length === 0)) {
+      errors.push(issue(`${path}[${index}].inputRefs`, 'AI source refs must include inputRefs'))
+    }
   })
 }
 

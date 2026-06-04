@@ -158,6 +158,7 @@ sdk/                     generated TypeScript client
 | `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
 | `bun run import:tatoeba:canonical` | import Tatoeba examples into an existing canonical snapshot |
 | `bun run import:wiktionary:canonical` | import Wiktionary/Kaikki glosses into an existing canonical snapshot |
+| `bun run apply:canonical-overlays` | apply approved manual/AI overlay operations to a canonical snapshot |
 | `bun run validate:snapshot` | validate canonical snapshot structure |
 | `bun run quality:canonical` | report dictionary quality issues in a canonical snapshot |
 | `bun run release:activate --version <version>` | switch to an existing release |
@@ -188,6 +189,8 @@ Admin workflow summary:
 - build or activate immutable releases
 - promote approved effective updates into a release
 - inspect update batches and failures
+
+Canonical manual/AI data should be stored as overlay operations and applied after source imports. For rebuilds, pass `--overlay-file <path>` to `bun run rebuild:canonical`; only approved operations are applied to the release snapshot.
 
 ## Environment
 

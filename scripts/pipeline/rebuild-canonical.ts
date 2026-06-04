@@ -5,6 +5,7 @@ import { runImport as importJmdictCanonical } from './import-jmdict-canonical'
 import { importKanjidic2Canonical } from './import-kanjidic2-canonical'
 import { importTatoebaCanonical } from './import-tatoeba-canonical'
 import { importWiktionaryCanonical } from './import-wiktionary-canonical'
+import { applyCanonicalOverlays } from './apply-canonical-overlays'
 import { buildCanonicalRelease } from './build-canonical-release'
 import type { TargetLanguage } from '../../src/domain/types'
 import { SUPPORTED_LANGUAGES, normalizeLanguage } from '../../src/types'
@@ -22,6 +23,7 @@ interface CliOptions {
   wiktionaryFile?: string
   wiktionaryLang?: TargetLanguage
   wiktionaryMaxGlossesPerSense: number
+  overlayFile?: string
   snapshot: string
   registry: string
   releaseDb: string
@@ -67,6 +69,7 @@ Options:
   --wiktionary-lang <lang>   Fallback language for records missing lang. Supported: ${SUPPORTED_LANGUAGES.join(', ')}
   --wiktionary-max-glosses-per-sense <n>
                               Max Wiktionary glosses per sense/language (default: ${DEFAULT_WIKTIONARY_MAX_GLOSSES_PER_SENSE})
+  --overlay-file <path>      Optional manual/AI canonical overlay JSON file.
   --snapshot <path>          Canonical snapshot path (default: ${DEFAULT_SNAPSHOT})
   --registry <path>          Stable Yori ID registry path (default: ${DEFAULT_REGISTRY})
   --release-db <path>        Canonical SQLite release path (default: ${DEFAULT_RELEASE_DB})
@@ -150,6 +153,9 @@ export function parseArgs(args: string[]): CliOptions {
       i++
     } else if (arg === '--wiktionary-max-glosses-per-sense' && next) {
       opts.wiktionaryMaxGlossesPerSense = parsePositiveInt(next, '--wiktionary-max-glosses-per-sense')
+      i++
+    } else if (arg === '--overlay-file' && next) {
+      opts.overlayFile = next
       i++
     } else if (arg === '--snapshot' && next) {
       opts.snapshot = next
@@ -242,6 +248,14 @@ export async function rebuildCanonical(opts: CliOptions): Promise<void> {
       importedAt: opts.importedAt,
       lang: opts.wiktionaryLang,
       maxGlossesPerSense: opts.wiktionaryMaxGlossesPerSense,
+    })
+  }
+  if (opts.overlayFile) {
+    await applyCanonicalOverlays({
+      overlay: opts.overlayFile,
+      snapshot: opts.snapshot,
+      out: opts.snapshot,
+      registry: opts.registry,
     })
   }
   await buildCanonicalRelease({
