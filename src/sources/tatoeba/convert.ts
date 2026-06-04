@@ -170,13 +170,41 @@ const LATIN_STOP_WORDS = new Set([
   'to',
 ])
 
+const IRREGULAR_LATIN_TOKEN_BASES: Record<string, string> = {
+  ate: 'eat',
+  eaten: 'eat',
+}
+
+function addLatinTokenVariants(token: string, tokens: Set<string>): void {
+  if (LATIN_STOP_WORDS.has(token) || token.length <= 1) return
+  tokens.add(token)
+
+  const irregular = IRREGULAR_LATIN_TOKEN_BASES[token]
+  if (irregular) tokens.add(irregular)
+  if (token.length > 4 && token.endsWith('ing')) tokens.add(token.slice(0, -3))
+  if (token.length > 3 && token.endsWith('ed')) tokens.add(token.slice(0, -2))
+  if (token.length > 3 && token.endsWith('s')) tokens.add(token.slice(0, -1))
+}
+
 function tokenizeForOverlap(text: string): string[] {
-  return [...new Set(
-    text
-      .toLowerCase()
-      .match(/[\p{Letter}\p{Number}]+/gu)
-      ?.filter((token) => token.length > 1 && !LATIN_STOP_WORDS.has(token)) ?? []
-  )]
+  const tokens = new Set<string>()
+  for (const token of text.toLowerCase().match(/[\p{Letter}\p{Number}]+/gu) ?? []) {
+    if (/^[a-z0-9]+$/.test(token)) {
+      addLatinTokenVariants(token, tokens)
+      continue
+    }
+
+    if (/[\u3400-\u9FFF\uAC00-\uD7AF]/.test(token)) {
+      tokens.add(token)
+      for (const char of token) {
+        if (/[\u3400-\u9FFF\uAC00-\uD7AF]/.test(char)) tokens.add(char)
+      }
+      continue
+    }
+
+    if (token.length > 1) tokens.add(token)
+  }
+  return [...tokens]
 }
 
 function translationGlossOverlapScore(sense: Sense, pair: TatoebaExamplePair): number {

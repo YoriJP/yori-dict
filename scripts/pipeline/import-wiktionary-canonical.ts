@@ -23,6 +23,30 @@ interface CliOptions {
 const DEFAULT_SNAPSHOT = 'data/snapshots/yori-dict.snapshot.json'
 const DEFAULT_REGISTRY = 'data/registry/ids.json'
 const DEFAULT_MAX_GLOSSES_PER_SENSE = 8
+const RAW_KAIKKI_POS = new Set([
+  'noun', 'verb', 'adj', 'adv', 'intj', 'pron', 'conj',
+  'particle', 'counter', 'prefix', 'suffix', 'affix', 'phrase', 'proverb', 'num',
+])
+const RAW_KAIKKI_SKIP_SENSE_TAGS = new Set(['alt-of', 'form-of', 'romanization', 'Rōmaji'])
+const RAW_KAIKKI_META_GLOSS_PATTERNS = [
+  /的[舊旧]字體形式$/,
+  /的[舊旧]字体形式$/,
+  /的異體字$/,
+  /的异体字$/,
+  /的繁體字$/,
+  /的繁体字$/,
+  /的簡體字$/,
+  /的简体字$/,
+  /的古字$/,
+  /的俗字$/,
+  /的別字$/,
+  /的别字$/,
+  /的另一種寫法$/,
+  /的另一种写法$/,
+  /的另一寫法$/,
+  /的另一写法$/,
+]
+const RAW_KAIKKI_LANG_ERROR = '--lang is required for raw Kaikki JSONL rows'
 
 function printHelp(): void {
   console.log(`
@@ -165,6 +189,21 @@ function rawPos(row: Record<string, unknown>): string[] {
   return typeof row.pos === 'string' && row.pos.trim() ? [row.pos.trim()] : []
 }
 
+function isFilteredRawKaikkiGloss(gloss: string): boolean {
+  const cleaned = gloss.replace(/\s+/g, ' ').trim()
+  return !cleaned || RAW_KAIKKI_META_GLOSS_PATTERNS.some((pattern) => pattern.test(cleaned))
+}
+
+function normalizeRawKaikkiGlosses(sense: Record<string, unknown>): string[] {
+  const tags = normalizeStringList(sense.tags)
+  if (tags.some((tag) => RAW_KAIKKI_SKIP_SENSE_TAGS.has(tag))) return []
+  if (Array.isArray(sense.form_of) || Array.isArray(sense.alt_of)) return []
+
+  return normalizeStringList(sense.glosses ?? sense.raw_glosses)
+    .map((gloss) => gloss.replace(/\s+/g, ' ').trim())
+    .filter((gloss) => !isFilteredRawKaikkiGloss(gloss))
+}
+
 function normalizeRawKaikkiRecords(value: unknown, fallbackLang?: TargetLanguage): WiktionaryGlossInput[] | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const row = value as Record<string, unknown>
@@ -172,11 +211,14 @@ function normalizeRawKaikkiRecords(value: unknown, fallbackLang?: TargetLanguage
   if (row.lang_code !== 'ja' || !senses) return null
 
   const word = typeof row.word === 'string' ? row.word.trim() : ''
-  if (!word || !fallbackLang) return []
+  const pos = typeof row.pos === 'string' ? row.pos.trim() : ''
+  if (!word) return []
+  if (!fallbackLang) throw new Error(RAW_KAIKKI_LANG_ERROR)
+  if (!RAW_KAIKKI_POS.has(pos)) return []
 
   return senses.flatMap((sense, index) => {
     if (!sense || typeof sense !== 'object' || Array.isArray(sense)) return []
-    const glosses = normalizeStringList((sense as Record<string, unknown>).glosses)
+    const glosses = normalizeRawKaikkiGlosses(sense as Record<string, unknown>)
     if (glosses.length === 0) return []
 
     return [{
@@ -185,7 +227,6 @@ function normalizeRawKaikkiRecords(value: unknown, fallbackLang?: TargetLanguage
       reading: rawReading(row),
       lang: fallbackLang,
       pos: rawPos(row),
-      senseOrder: index + 1,
       glosses,
     }]
   })
@@ -222,7 +263,8 @@ function loadJsonlRecords(text: string, fallbackLang?: TargetLanguage): Wiktiona
     if (!line.trim()) continue
     try {
       records.push(...normalizeRecords(JSON.parse(line), fallbackLang))
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === RAW_KAIKKI_LANG_ERROR) throw error
       // Skip malformed JSONL rows.
     }
   }
@@ -238,7 +280,8 @@ async function loadRecords(path: string, fallbackLang?: TargetLanguage, limit?: 
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       records = loadJsonRecords(text, fallbackLang)
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === RAW_KAIKKI_LANG_ERROR) throw error
       records = loadJsonlRecords(text, fallbackLang)
     }
   } else {

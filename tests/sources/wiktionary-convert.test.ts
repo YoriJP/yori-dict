@@ -274,6 +274,31 @@ describe('importWiktionaryGlossesIntoSnapshot', () => {
     })
   })
 
+  test('skips POS matches that still point at multiple senses', () => {
+    const result = importWiktionaryGlossesIntoSnapshot(snapshot(), [
+      {
+        sourceId: 'kaikki:紙:noun',
+        word: '紙',
+        reading: 'かみ',
+        lang: 'zh-tw',
+        pos: ['noun', 'suffix'],
+        glosses: ['紙'],
+      },
+    ], {
+      registry: registry(),
+      importedAt,
+    })
+
+    expect(result.stats).toMatchObject({
+      recordsProcessed: 1,
+      recordsMatched: 1,
+      glossesAdded: 0,
+      entriesUpdated: 0,
+    })
+    expect(result.snapshot.entries[1].senses[0].glosses).toEqual([])
+    expect(result.snapshot.entries[1].senses[1].glosses).toEqual([])
+  })
+
   test('deduplicates glosses and respects per-sense limits', () => {
     const result = importWiktionaryGlossesIntoSnapshot(snapshot(), [
       {

@@ -253,4 +253,70 @@ describe('canonical Wiktionary import CLI', () => {
       sourceRefs: [{ kind: 'wiktionary', sourceId: 'kaikki:zh-tw:ja:食べる:verb:sense1' }],
     })
   })
+
+  test('rejects raw Kaikki rows without an explicit target language', async () => {
+    const dir = makeTempDir()
+    const snapshotPath = join(dir, 'snapshot.json')
+    const inputPath = join(dir, 'kaikki.jsonl')
+    const registryPath = join(dir, 'registry', 'ids.json')
+
+    await Bun.write(snapshotPath, JSON.stringify(wordSnapshot()))
+    await writeRegistry(registryPath)
+    await Bun.write(inputPath, `${JSON.stringify({
+      word: '食べる',
+      lang_code: 'ja',
+      pos: 'verb',
+      senses: [{ glosses: ['吃'] }],
+    })}\n`)
+
+    await expect(importWiktionaryCanonical({
+      file: inputPath,
+      snapshot: snapshotPath,
+      out: snapshotPath,
+      registry: registryPath,
+      importedAt,
+      maxGlossesPerSense: 8,
+    })).rejects.toThrow('--lang is required for raw Kaikki JSONL rows')
+  })
+
+  test('filters raw Kaikki form and meta gloss rows', async () => {
+    const dir = makeTempDir()
+    const snapshotPath = join(dir, 'snapshot.json')
+    const inputPath = join(dir, 'kaikki.jsonl')
+    const registryPath = join(dir, 'registry', 'ids.json')
+
+    await Bun.write(snapshotPath, JSON.stringify(wordSnapshot()))
+    await writeRegistry(registryPath)
+    await Bun.write(inputPath, [
+      JSON.stringify({
+        word: '食べる',
+        lang_code: 'ja',
+        pos: 'verb',
+        senses: [
+          { tags: ['form-of'], glosses: ['食べる的另一種寫法'] },
+          { form_of: [{ word: '食べる' }], glosses: ['form of 食べる'] },
+        ],
+      }),
+      JSON.stringify({
+        word: '食べる',
+        lang_code: 'ja',
+        pos: 'character',
+        senses: [{ glosses: ['吃'] }],
+      }),
+    ].join('\n') + '\n')
+
+    await importWiktionaryCanonical({
+      file: inputPath,
+      snapshot: snapshotPath,
+      out: snapshotPath,
+      registry: registryPath,
+      importedAt,
+      lang: 'zh-tw',
+      maxGlossesPerSense: 8,
+    })
+
+    const snapshot = await Bun.file(snapshotPath).json() as CanonicalSnapshot
+    expect(snapshot.entries[0].senses[0].glosses).toHaveLength(1)
+    expect(snapshot.entries[0].senses[0].glosses[0].text).toBe('to eat')
+  })
 })

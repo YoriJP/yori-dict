@@ -133,7 +133,8 @@ function chooseTargetSenses(match: EntryMatch, input: WiktionaryGlossInput): Sen
 
   const pos = normalizePos(input.pos)
   const posMatched = match.entry.senses.filter((sense) => posMatches(sense, pos))
-  if (posMatched.length > 0) return posMatched
+  if (posMatched.length === 1) return posMatched
+  if (posMatched.length > 1) return []
 
   return match.entry.senses.length === 1 ? [match.entry.senses[0]] : []
 }
