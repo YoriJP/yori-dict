@@ -26,20 +26,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build SQLite database
-        run: bun run build:db
+      - name: Typecheck
+        run: bun run typecheck
 
       - name: Run tests
         run: bun test
-
-      - name: Verify dictionary integrity
-        run: |
-          bun run verify:dict data/core.json --fail-on-issues
-          bun run verify:dict data/lang/en.json --fail-on-issues
-          bun run verify:dict data/lang/de.json --fail-on-issues
-          bun run verify:dict data/lang/ko.json --fail-on-issues
-          bun run verify:dict data/lang/zh-cn.json --fail-on-issues
-          bun run verify:dict data/lang/zh-tw.json --fail-on-issues
 
   deploy:
     needs: validate

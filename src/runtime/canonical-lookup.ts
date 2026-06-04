@@ -561,10 +561,10 @@ export class CanonicalLookupService {
   }
 
   private senseAppliesToAlias(sense: SenseRow, formId?: string | null, readingId?: string | null): boolean {
-    const formIds = this.parseJson<string[] | 'all'>(sense.applies_to_form_ids_json, 'all')
+    const formIds = this.parseJson<string[] | 'all'>(sense.applies_to_form_ids_json ?? '"all"', 'all')
     if (formIds !== 'all' && formId && !formIds.includes(formId)) return false
 
-    const readingIds = this.parseJson<string[] | 'all'>(sense.applies_to_reading_ids_json, 'all')
+    const readingIds = this.parseJson<string[] | 'all'>(sense.applies_to_reading_ids_json ?? '"all"', 'all')
     if (readingIds !== 'all' && readingId && !readingIds.includes(readingId)) return false
 
     return true

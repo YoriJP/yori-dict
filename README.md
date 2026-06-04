@@ -99,6 +99,7 @@ sdk/                          generated TypeScript client
 | --- | --- |
 | `bun run dev` | start the local server |
 | `bun test` | run tests |
+| `bun run typecheck` | run TypeScript type checking |
 | `bun run prepare:jmdict` | prepare a JMdict XML source file |
 | `bun run prepare:kanjidic2` | prepare a KANJIDIC2 XML source file |
 | `bun run import:jmdict:canonical` | import JMdict into a canonical snapshot |

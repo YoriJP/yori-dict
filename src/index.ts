@@ -14,6 +14,7 @@ import {
   SUPPORTED_LANGUAGES,
   normalizeLanguage,
 } from './types'
+import type { Language } from './types'
 import type { CanonicalLookupInput } from './runtime/canonical-lookup'
 
 const app = new Hono()
@@ -62,7 +63,12 @@ function canonicalLookupOrUnavailable(input: CanonicalLookupInput) {
   }
 }
 
-function canonicalEntryOrUnavailable(id: string, lang?: NonNullable<ReturnType<typeof normalizeLanguage>>) {
+function optionalLanguage(rawLang: string | undefined): Language | null | undefined {
+  if (!rawLang) return undefined
+  return normalizeLanguage(rawLang)
+}
+
+function canonicalEntryOrUnavailable(id: string, lang?: Language) {
   try {
     return getCanonicalEntry(id, lang)
   } catch (error) {
@@ -73,7 +79,7 @@ function canonicalEntryOrUnavailable(id: string, lang?: NonNullable<ReturnType<t
   }
 }
 
-function canonicalKanjiOrUnavailable(literal: string, lang?: NonNullable<ReturnType<typeof normalizeLanguage>>) {
+function canonicalKanjiOrUnavailable(literal: string, lang?: Language) {
   try {
     return getCanonicalKanji(literal, lang)
   } catch (error) {
@@ -221,8 +227,8 @@ app.get('/v2/entries/:id', (c) => {
   }
 
   const rawLang = c.req.query('lang')
-  const lang = rawLang ? normalizeLanguage(rawLang) : undefined
-  if (rawLang && !lang) {
+  const lang = optionalLanguage(rawLang)
+  if (lang === null) {
     return c.json(
       { error: `Invalid language. Supported: ${SUPPORTED_LANGUAGES.join(', ')}` },
       400
@@ -247,8 +253,8 @@ app.get('/v2/kanji/:literal', (c) => {
   }
 
   const rawLang = c.req.query('lang')
-  const lang = rawLang ? normalizeLanguage(rawLang) : undefined
-  if (rawLang && !lang) {
+  const lang = optionalLanguage(rawLang)
+  if (lang === null) {
     return c.json(
       { error: `Invalid language. Supported: ${SUPPORTED_LANGUAGES.join(', ')}` },
       400

@@ -24,7 +24,7 @@ function issue(path: string, message: string): ValidationIssue {
   return { path, message }
 }
 
-function hasSourceRefs(sourceRefs: SourceRef[] | undefined): boolean {
+function hasSourceRefs(sourceRefs: SourceRef[] | undefined): sourceRefs is SourceRef[] {
   return Array.isArray(sourceRefs) && sourceRefs.length > 0
 }
 
