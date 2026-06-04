@@ -1,1367 +1,216 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Yori Dict API
-  version: 1.0.0
-  description: |
-    Fast multilingual Japanese dictionary API with automatic conjugations.
-    Supports lookup by kanji or reading with per-language translations.
-
-    **Deduplication:** `definitions` are deduplicated across sources (JMdict, Kaikki, Wiktionary, Wadoku).
-    `examples` are deduplicated by `(japanese, translation)` pair.
-
-    This spec also documents the internal `/admin/api/*` control plane used by the Admin UI.
-    Admin endpoints require `ADMIN_TOKEN` authentication and are intended for internal operations.
-  license:
-    name: CC-BY-SA-4.0
+  version: 2.0.0
+  description: Canonical multilingual Japanese dictionary API.
 servers:
-  - url: https://yori-dict-production.up.railway.app
-    description: Production
   - url: http://localhost:3000
-    description: Local development
-tags:
-  - name: Health
-  - name: Dictionary
-  - name: Docs
-  - name: Admin
 paths:
-  /openapi.yaml:
-    get:
-      tags:
-        - Docs
-      summary: OpenAPI specification
-      operationId: getOpenApiSpec
-      responses:
-        '200':
-          description: OpenAPI 3.0 YAML document
-          content:
-            text/plain:
-              schema:
-                type: string
-  /docs:
-    get:
-      tags:
-        - Docs
-      summary: Interactive API reference (Scalar UI)
-      operationId: getApiDocs
-      responses:
-        '200':
-          description: HTML page with Scalar API reference UI
-          content:
-            text/html:
-              schema:
-                type: string
   /health:
     get:
-      tags:
-        - Health
       summary: Health check
-      operationId: healthCheck
       responses:
         '200':
-          description: API is healthy
+          description: Service is healthy
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
-              example:
-                status: ok
-  /v1/lookup:
-    get:
-      tags:
-        - Dictionary
-      summary: Lookup a Japanese word
-      description: |
-        Looks up a Japanese word by exact match on kanji (`word`) or reading.
-        Returns `404` when the word does not exist, or when no translation is available for the requested language.
-      operationId: lookupWord
-      parameters:
-        - name: word
-          in: query
-          required: true
-          description: Japanese word in kanji, hiragana, or katakana.
-          schema:
-            type: string
-            minLength: 1
-          example: 食べる
-        - name: lang
-          in: query
-          required: false
-          description: |
-            Translation language code. Default is `en`.
-            Canonical values: `en`, `de`, `ko`, `zh-cn`, `zh-tw`.
-            Accepted aliases (case-insensitive): `zh-CN`, `zh-TW`, `zh_cn`, `zh_tw`, `zh-hans`, `zh-hant`.
-          schema:
-            type: string
-            default: en
-            enum:
-              - en
-              - de
-              - ko
-              - zh-cn
-              - zh-tw
-              - zh-CN
-              - zh-TW
-              - zh_cn
-              - zh_tw
-              - zh-hans
-              - zh-hant
-          example: en
-      responses:
-        '200':
-          description: Lookup result
-          content:
-            application/json; charset=utf-8:
-              schema:
-                $ref: '#/components/schemas/LookupResponse'
-              examples:
-                verbWithConjugations:
-                  summary: Verb response (conjugations included)
-                  value:
-                    word: 食べる
-                    reading: たべる
-                    romaji: taberu
-                    partOfSpeech:
-                      - ichidan verb
-                      - transitive verb
-                    definitions:
-                      - to eat
-                      - to live on (e.g. a salary)
-                    frequency: 195
-                    conjugations:
-                      dictionary: 食べる
-                      polite: たべます
-                      negative: たべない
-                      past: たべた
-                      te: たべて
-                    examples:
-                      - japanese: 毎朝食べます
-                        translation: I eat every morning
-                nounWithoutConjugations:
-                  summary: Non-conjugatable word
-                  value:
-                    word: 猫
-                    reading: ねこ
-                    romaji: neko
-                    partOfSpeech:
-                      - noun
-                    definitions:
-                      - cat
-                    examples: []
-        '400':
-          description: Invalid request (missing word or invalid language)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              examples:
-                missingWord:
-                  value:
-                    error: 'Missing required parameter: word'
-                invalidLanguage:
-                  value:
-                    error: 'Invalid language. Supported: en, de, ko, zh-cn, zh-tw'
-        '404':
-          description: Word not found or language translation unavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Word not found
-        '500':
-          description: Unexpected server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Internal server error
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
   /v2/lookup:
     get:
-      tags:
-        - Dictionary
-      summary: Lookup a word from the canonical dictionary
-      description: |
-        Looks up a Japanese dictionary entry from the canonical release database.
-        Use `query` for a simple lookup, or send token fields from a tokenizer:
-        `surface`, `lemma`, and `reading`. When `lemma` is provided, it is tried before
-        surface form so inflected tokens can resolve to dictionary entries.
-      operationId: lookupCanonicalWord
+      summary: Look up one dictionary token
       parameters:
         - name: query
           in: query
-          required: false
-          description: Raw lookup text. `word` is also accepted as a compatibility alias.
           schema:
             type: string
-          example: 食べる
+          description: Generic lookup text. Alias of the legacy `word` parameter.
         - name: word
           in: query
-          required: false
-          description: Compatibility alias for `query`.
           schema:
             type: string
+          description: Compatibility alias for `query`.
         - name: surface
           in: query
-          required: false
-          description: Token surface form from a tokenizer.
           schema:
             type: string
-          example: 食べました
+          description: Token surface from a tokenizer.
         - name: lemma
           in: query
-          required: false
-          description: Token dictionary form from a tokenizer. Tried before `surface`.
           schema:
             type: string
-          example: 食べる
+          description: Dictionary/base form from a tokenizer.
         - name: reading
           in: query
-          required: false
-          description: Token reading. Katakana input is normalized to hiragana.
           schema:
             type: string
-          example: タベマシタ
+          description: Kana or katakana reading from a tokenizer.
         - name: lang
           in: query
-          required: false
-          description: Translation language code. Default is `en`.
           schema:
-            $ref: '#/components/schemas/LanguageCode'
+            $ref: '#/components/schemas/TargetLanguage'
+          description: Target gloss language. Defaults to `en`.
         - name: limit
           in: query
-          required: false
-          description: Maximum number of entries to return. Values are clamped to 1-20.
           schema:
             type: integer
             minimum: 1
             maximum: 20
       responses:
         '200':
-          description: Canonical lookup result
+          description: Lookup result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CanonicalLookupResponse'
-              example:
-                query: 食べる
-                matched:
-                  surface: 食べる
-                  reading: たべる
-                  matchType: dictionary
-                  score: 100
-                entries:
-                  - id: yde_00000001
-                    word: 食べる
-                    reading: たべる
-                    pos:
-                      - v1
-                      - vt
-                    definitions:
-                      - to eat
+                $ref: '#/components/schemas/LookupResult'
         '400':
-          description: Missing lookup input or invalid language
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/Error'
         '404':
-          description: Word not found or no definition exists for the requested language
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/Error'
         '503':
-          description: Canonical dictionary release DB is not configured
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Canonical dictionary is not configured
+          $ref: '#/components/responses/Error'
   /v2/lookup/batch:
     post:
-      tags:
-        - Dictionary
-      summary: Batch lookup canonical dictionary entries
-      description: |
-        Looks up up to 100 tokenizer tokens in one request. Each token can contain
-        `query` or `word`, or tokenizer fields `surface`, `lemma`, and `reading`.
-      operationId: batchLookupCanonicalWords
+      summary: Look up tokenizer tokens in batch
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CanonicalBatchLookupRequest'
-            example:
-              lang: en
-              tokens:
-                - surface: 食べました
-                  lemma: 食べる
-                  reading: タベマシタ
-                  pos: 動詞
-                - surface: スシ
+              type: object
+              required: [tokens]
+              properties:
+                lang:
+                  $ref: '#/components/schemas/TargetLanguage'
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                tokens:
+                  type: array
+                  maxItems: 100
+                  items:
+                    $ref: '#/components/schemas/LookupToken'
+            examples:
+              kuromoji:
+                value:
+                  lang: en
+                  tokens:
+                    - surface: 食べました
+                      lemma: 食べる
+                      reading: タベマシタ
+                      pos: 動詞
+                    - surface: スシ
       responses:
         '200':
-          description: Batch lookup results, returned in the same order as input tokens
+          description: Batch lookup result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CanonicalBatchLookupResponse'
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/LookupResult'
+                        - type: object
+                          required: [token]
+                          properties:
+                            token:
+                              $ref: '#/components/schemas/LookupToken'
         '400':
-          description: Invalid JSON body, token shape, language, or batch size
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/Error'
         '503':
-          description: Canonical dictionary release DB is not configured
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/Error'
   /v2/entries/{id}:
     get:
-      tags:
-        - Dictionary
-      summary: Get a canonical dictionary entry by ID
-      description: |
-        Returns the full canonical entry for a stable product-owned Yori entry ID.
-        If `lang` is provided, sense glosses and examples are filtered to that language.
-      operationId: getCanonicalEntry
+      summary: Get a canonical entry by Yori ID
       parameters:
         - name: id
           in: path
           required: true
-          description: Product-owned Yori entry ID.
           schema:
             type: string
             pattern: '^yde_[0-9]{8}$'
-          example: yde_00000001
         - name: lang
           in: query
-          required: false
-          description: Optional language filter for glosses and examples.
           schema:
-            $ref: '#/components/schemas/LanguageCode'
+            $ref: '#/components/schemas/TargetLanguage'
+          description: Optional language filter for glosses and examples.
       responses:
         '200':
           description: Canonical entry detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CanonicalEntryDetail'
+                $ref: '#/components/schemas/EntryDetail'
         '400':
-          description: Invalid entry ID or language
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/Error'
         '404':
-          description: Entry not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Entry not found
+          $ref: '#/components/responses/Error'
         '503':
-          description: Canonical dictionary release DB is not configured
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/Error'
   /v2/kanji/{literal}:
     get:
-      tags:
-        - Dictionary
-      summary: Get canonical kanji details by literal
-      description: |
-        Returns kanji-level meanings, readings, ranking/statistics, and source refs
-        from the canonical release database. If `lang` is provided, meanings are
-        filtered to that language.
-      operationId: getCanonicalKanji
+      summary: Get kanji details by literal
       parameters:
         - name: literal
           in: path
           required: true
-          description: A single kanji character.
           schema:
             type: string
-            pattern: '^[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]$'
-          example: 食
+            minLength: 1
+            maxLength: 1
         - name: lang
           in: query
-          required: false
-          description: Optional language filter for meanings.
           schema:
-            $ref: '#/components/schemas/LanguageCode'
+            $ref: '#/components/schemas/TargetLanguage'
+          description: Optional language filter for meanings.
       responses:
         '200':
           description: Canonical kanji detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CanonicalKanjiDetail'
+                $ref: '#/components/schemas/KanjiDetail'
         '400':
-          description: Invalid kanji literal or language
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          $ref: '#/components/responses/Error'
         '404':
-          description: Kanji not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Kanji not found
+          $ref: '#/components/responses/Error'
         '503':
-          description: Canonical dictionary release DB is not configured
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /admin/api/summary:
-    get:
-      tags:
-        - Admin
-      summary: Admin dashboard summary
-      description: Returns release, review, update, and batch summary data for the admin dashboard.
-      operationId: getAdminSummary
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      responses:
-        '200':
-          description: Admin summary payload
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminSummaryResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/releases:
-    get:
-      tags:
-        - Admin
-      summary: List releases
-      description: Returns release inventory and identifies the active release.
-      operationId: getAdminReleaseList
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      responses:
-        '200':
-          description: Release inventory
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminReleaseListResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/releases/{version}:
-    get:
-      tags:
-        - Admin
-      summary: Get one release
-      operationId: getAdminRelease
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: version
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: One release record
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReleaseListItem'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '404':
-          description: Release not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/releases/build:
-    post:
-      tags:
-        - Admin
-      summary: Build a release from snapshot data
-      description: |
-        Builds a release from the current checked-in snapshot (`data/core.json` and `data/lang/*.json`).
-        This path does not bake overlay updates into the immutable release.
-      operationId: buildAdminRelease
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminReleaseBuildRequest'
-      responses:
-        '200':
-          description: Release build result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReleaseActionResult'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/new-word:
-    post:
-      tags:
-        - Admin
-      summary: Create a new word in snapshot data
-      description: |
-        Writes a new canonical entry into snapshot JSON. The new word is not visible to runtime lookup
-        until a new release is built and activated.
-      operationId: createAdminNewWord
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminNewWordFormData'
-      responses:
-        '200':
-          description: Word created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminNewWordResponse'
-        '400':
-          description: Validation error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminNewWordResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '409':
-          description: Duplicate or conflicting word
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminNewWordResponse'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/new-word/build-release:
-    post:
-      tags:
-        - Admin
-      summary: Build a release after creating a new word
-      description: |
-        Validates that `createdWordId` exists in the current snapshot, then builds a release from the full
-        current snapshot. This endpoint does not bake current overlay updates into the immutable release;
-        use `/admin/api/releases/promote` for that workflow.
-      operationId: buildAdminReleaseForNewWord
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminNewWordBuildReleaseRequest'
-      responses:
-        '200':
-          description: Release build result for the newly created word
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminNewWordBuildReleaseResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/releases/{version}/activate:
-    post:
-      tags:
-        - Admin
-      summary: Activate an existing release
-      operationId: activateAdminRelease
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: version
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Release activation result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReleaseActionResult'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/releases/promote:
-    post:
-      tags:
-        - Admin
-      summary: Promote effective updates into a new release
-      description: |
-        Builds a new release from the current effective state: active release base plus effective overlay
-        updates (`source` updates and `approved` AI updates). Included updates are then marked `promoted`.
-      operationId: promoteAdminRelease
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminReleasePromoteRequest'
-      responses:
-        '200':
-          description: Release promotion result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReleaseActionResult'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/entries:
-    get:
-      tags:
-        - Admin
-      summary: Inspect an entry across release and update layers
-      operationId: inspectAdminEntry
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: word
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: lang
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/LanguageCode'
-      responses:
-        '200':
-          description: Entry inspection payload
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminEntryInspectionResponse'
-        '400':
-          description: Missing word
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/updates:
-    get:
-      tags:
-        - Admin
-      summary: List updates across source and AI layers
-      operationId: listAdminUpdates
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: lang
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/LanguageCode'
-        - name: sourceType
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/UpdateSourceType'
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: reviewStatus
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/ReviewStatus'
-      responses:
-        '200':
-          description: Update explorer payload
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminUpdatesResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/ai:
-    get:
-      tags:
-        - Admin
-      summary: Get legacy pending AI review lists
-      description: |
-        Legacy compatibility endpoint that returns flat pending translation/example-set lists.
-        Prefer `/admin/api/review/queue` and `/admin/api/review/batches/{id}/summary` for the current
-        queue-and-batch review workflow.
-      operationId: getAdminAiReviewQueue
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: lang
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/LanguageCode'
-      responses:
-        '200':
-          description: Pending AI translations and example sets
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminReviewQueueResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/queue:
-    get:
-      tags:
-        - Admin
-      summary: Get AI review queue summary and paginated review units
-      operationId: getAdminReviewQueue
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: batchId
-          in: query
-          required: false
-          schema:
-            type: integer
-            nullable: true
-        - name: lang
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/LanguageCode'
-        - name: risk
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/ReviewRiskLevel'
-        - name: shape
-          in: query
-          required: false
-          schema:
-            $ref: '#/components/schemas/ReviewUnitShape'
-        - name: hasSourceConflict
-          in: query
-          required: false
-          schema:
-            type: boolean
-            nullable: true
-        - name: cursor
-          in: query
-          required: false
-          schema:
-            type: string
-            nullable: true
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-      responses:
-        '200':
-          description: Queue summary plus paginated review units
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminReviewQueueResponseV2'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/batches/{id}/summary:
-    get:
-      tags:
-        - Admin
-      summary: Get review summary for one AI batch
-      operationId: getAdminReviewBatchSummary
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Batch review summary
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminReviewBatchSummaryResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/translation/{id}/approve:
-    post:
-      tags:
-        - Admin
-      summary: Approve one AI translation update
-      operationId: approveAdminTranslationReview
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminReviewActionRequest'
-      responses:
-        '200':
-          description: Updated translation review state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DetailedTranslationUpdate'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '404':
-          description: Translation update not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/translation/{id}/reject:
-    post:
-      tags:
-        - Admin
-      summary: Reject one AI translation update
-      operationId: rejectAdminTranslationReview
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminReviewActionRequest'
-      responses:
-        '200':
-          description: Updated translation review state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DetailedTranslationUpdate'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '404':
-          description: Translation update not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/example-set/{id}/approve:
-    post:
-      tags:
-        - Admin
-      summary: Approve one AI example set
-      operationId: approveAdminExampleSetReview
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminReviewActionRequest'
-      responses:
-        '200':
-          description: Updated example set review state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DetailedExampleUpdateSet'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '404':
-          description: Example update set not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/units/approve:
-    post:
-      tags:
-        - Admin
-      summary: Bulk approve AI review units
-      description: |
-        Approves one or more review units in a single batch/single language scope. By default, units with
-        active source conflicts are blocked unless `overrideSourceConflict` is true.
-      operationId: approveAdminReviewUnits
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkReviewActionRequest'
-      responses:
-        '200':
-          description: Bulk review action result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkReviewActionResponse'
-        '400':
-          description: Invalid request, blocked unit selection, or queue constraint violation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkReviewActionResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/units/reject:
-    post:
-      tags:
-        - Admin
-      summary: Bulk reject AI review units
-      operationId: rejectAdminReviewUnits
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkReviewActionRequest'
-      responses:
-        '200':
-          description: Bulk review action result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkReviewActionResponse'
-        '400':
-          description: Invalid request or queue constraint violation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkReviewActionResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/review/example-set/{id}/reject:
-    post:
-      tags:
-        - Admin
-      summary: Reject one AI example set
-      operationId: rejectAdminExampleSetReview
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminReviewActionRequest'
-      responses:
-        '200':
-          description: Updated example set review state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DetailedExampleUpdateSet'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '404':
-          description: Example update set not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/jobs/source-update:
-    post:
-      tags:
-        - Admin
-      summary: Run deterministic source update
-      operationId: runAdminSourceUpdate
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminSourceUpdateJobRequest'
-      responses:
-        '200':
-          description: Source update job result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminSourceUpdateJobResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/jobs/gemini-import:
-    post:
-      tags:
-        - Admin
-      summary: Run Gemini import
-      operationId: runAdminGeminiImport
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminGeminiImportRequest'
-      responses:
-        '200':
-          description: Gemini import result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminGeminiImportResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
-  /admin/api/batches/{id}:
-    get:
-      tags:
-        - Admin
-      summary: Get one batch detail
-      operationId: getAdminBatchDetail
-      security:
-        - basicAuth: []
-        - bearerAuth: []
-        - adminTokenHeader: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Batch detail payload
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminBatchDetailResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedAdmin'
-        '503':
-          $ref: '#/components/responses/AdminDisabled'
+          $ref: '#/components/responses/Error'
 components:
   responses:
-    UnauthorizedAdmin:
-      description: Admin authentication failed
+    Error:
+      description: Error response
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example:
-            error: Unauthorized
-    AdminDisabled:
-      description: Admin UI is disabled because no admin token is configured
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-          example:
-            error: Admin UI is disabled. Set ADMIN_TOKEN to enable /admin routes.
-  securitySchemes:
-    basicAuth:
-      type: http
-      scheme: basic
-    bearerAuth:
-      type: http
-      scheme: bearer
-    adminTokenHeader:
-      type: apiKey
-      in: header
-      name: x-admin-token
   schemas:
-    LanguageCode:
+    TargetLanguage:
       type: string
-      enum:
-        - en
-        - de
-        - ko
-        - zh-cn
-        - zh-tw
-    UpdateSourceType:
-      type: string
-      enum:
-        - source
-        - ai
-    ReviewStatus:
-      type: string
-      enum:
-        - not_required
-        - pending
-        - approved
-        - rejected
-    UpdateStatus:
-      type: string
-      enum:
-        - active
-        - superseded
-        - promoted
-    UpdateBatchStatus:
-      type: string
-      enum:
-        - running
-        - succeeded
-        - failed
-    SeedLanguage:
-      type: string
-      enum:
-        - en
-        - de
-        - ko
-        - zh-cn
-        - zh-tw
-        - none
-    HealthResponse:
+      enum: [en, de, ko, zh-cn, zh-tw]
+    ErrorResponse:
       type: object
-      required:
-        - status
+      required: [error]
       properties:
-        status:
+        error:
           type: string
-          enum:
-            - ok
-    LookupResponse:
-      type: object
-      required:
-        - word
-        - reading
-        - romaji
-        - partOfSpeech
-        - definitions
-        - examples
-      properties:
-        word:
-          type: string
-          description: Kanji form
-        reading:
-          type: string
-          description: Hiragana reading
-        romaji:
-          type: string
-          description: Romanized reading
-        partOfSpeech:
-          type: array
-          items:
-            type: string
-        definitions:
-          type: array
-          items:
-            type: string
-        frequency:
-          type: integer
-          description: >
-            Frequency rank from JPDB (1 = most common). Only present if
-            frequency data is available for this entry.
-        conjugations:
-          $ref: '#/components/schemas/Conjugations'
-        examples:
-          type: array
-          description: Example sentences for this word in the requested language. Always present (may be empty).
-          items:
-            $ref: '#/components/schemas/ExampleSentence'
-    CanonicalLookupEntry:
-      type: object
-      required:
-        - id
-        - word
-        - reading
-        - pos
-        - definitions
-      properties:
-        id:
-          type: string
-          description: Stable product-owned Yori entry ID.
-          example: yde_00000001
-        word:
-          type: string
-          description: Primary written form.
-          example: 食べる
-        reading:
-          type: string
-          description: Primary kana reading.
-          example: たべる
-        pos:
-          type: array
-          description: Part-of-speech tags preserved from the canonical source model.
-          items:
-            type: string
-        definitions:
-          type: array
-          description: Definitions for the requested language.
-          items:
-            type: string
-    CanonicalLookupMatch:
-      type: object
-      nullable: true
-      required:
-        - surface
-        - matchType
-        - score
-      properties:
-        surface:
-          type: string
-        reading:
-          type: string
-        matchType:
-          type: string
-          enum:
-            - dictionary
-            - variant
-            - kana
-            - reading
-            - normalized
-        score:
-          type: number
-    CanonicalLookupResponse:
-      type: object
-      required:
-        - query
-        - matched
-        - entries
-      properties:
-        query:
-          type: string
-        matched:
-          $ref: '#/components/schemas/CanonicalLookupMatch'
-        entries:
-          type: array
-          items:
-            $ref: '#/components/schemas/CanonicalLookupEntry'
-    CanonicalLookupToken:
+    LookupToken:
       type: object
       properties:
         query:
           type: string
         word:
           type: string
-          description: Compatibility alias for `query`.
         surface:
           type: string
         lemma:
@@ -1370,64 +219,69 @@ components:
           type: string
         pos:
           type: string
-          description: Optional tokenizer POS. Currently accepted for caller context, not used for ranking.
-    CanonicalBatchLookupRequest:
+    MatchedAlias:
       type: object
-      required:
-        - tokens
+      required: [aliasId, surface, entryId, matchType, score]
       properties:
-        lang:
-          $ref: '#/components/schemas/LanguageCode'
-        limit:
-          type: integer
-          minimum: 1
-          maximum: 20
-        tokens:
-          type: array
-          maxItems: 100
-          items:
-            $ref: '#/components/schemas/CanonicalLookupToken'
-    CanonicalBatchLookupItem:
-      allOf:
-        - $ref: '#/components/schemas/CanonicalLookupResponse'
-        - type: object
-          required:
-            - token
-          properties:
-            token:
-              $ref: '#/components/schemas/CanonicalLookupToken'
-    CanonicalBatchLookupResponse:
+        aliasId:
+          type: string
+        surface:
+          type: string
+        reading:
+          type: string
+        entryId:
+          type: string
+        formId:
+          type: string
+        readingId:
+          type: string
+        matchType:
+          type: string
+        score:
+          type: number
+    LookupEntry:
       type: object
-      required:
-        - results
+      required: [id, word, reading, pos, definitions]
       properties:
-        results:
+        id:
+          type: string
+        word:
+          type: string
+        reading:
+          type: string
+        pos:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalBatchLookupItem'
-    CanonicalSourceRef:
+            type: string
+        definitions:
+          type: array
+          items:
+            type: string
+    LookupResult:
       type: object
-      required:
-        - kind
-        - importedAt
+      required: [matched, entries]
+      properties:
+        matched:
+          oneOf:
+            - $ref: '#/components/schemas/MatchedAlias'
+            - type: 'null'
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupEntry'
+    SourceRef:
+      type: object
+      required: [kind, importedAt]
       properties:
         kind:
           type: string
-          enum:
-            - jmdict
-            - jmnedict
-            - kanjidic2
-            - wiktionary
-            - tatoeba
-            - manual
-            - ai
+          enum: [jmdict, jmnedict, kanjidic2, wiktionary, tatoeba, manual, ai]
         sourceId:
           type: string
         license:
           type: string
         importedAt:
           type: string
-          format: date-time
         model:
           type: string
         promptVersion:
@@ -1438,24 +292,13 @@ components:
             type: string
         reviewStatus:
           type: string
-          enum:
-            - unreviewed
-            - approved
-            - rejected
-    CanonicalFormDetail:
+          enum: [unreviewed, approved, rejected]
+    Form:
       type: object
-      required:
-        - id
-        - text
-        - normalizedText
-        - script
-        - isPrimary
-        - tags
-        - sourceRefs
+      required: [id, text, normalizedText, script, isPrimary, tags, sourceRefs]
       properties:
         id:
           type: string
-          example: ydf_00000001
         text:
           type: string
         normalizedText:
@@ -1471,46 +314,28 @@ components:
         sourceRefs:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalReadingDetail:
+            $ref: '#/components/schemas/SourceRef'
+    Reading:
       type: object
-      required:
-        - id
-        - text
-        - normalizedText
-        - system
-        - isPrimary
-        - appliesToFormIds
-        - tags
-        - sourceRefs
+      required: [id, text, normalizedText, system, isPrimary, appliesToFormIds, tags, sourceRefs]
       properties:
         id:
           type: string
-          example: ydr_00000001
         text:
           type: string
         normalizedText:
           type: string
         system:
           type: string
-          enum:
-            - kana
         isPrimary:
           type: boolean
         appliesToFormIds:
           oneOf:
             - type: string
-              enum:
-                - all
+              enum: [all]
             - type: array
               items:
                 type: string
-        pitchAccent:
-          type: array
-          nullable: true
-          items:
-            type: object
-            additionalProperties: true
         tags:
           type: array
           items:
@@ -1518,57 +343,37 @@ components:
         sourceRefs:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalGlossDetail:
+            $ref: '#/components/schemas/SourceRef'
+    Gloss:
       type: object
-      required:
-        - id
-        - lang
-        - text
-        - sourceType
-        - reviewStatus
-        - sourceRefs
+      required: [id, lang, text, sourceType, reviewStatus, sourceRefs]
       properties:
         id:
           type: string
-          example: ydg_00000001
         lang:
-          $ref: '#/components/schemas/LanguageCode'
+          $ref: '#/components/schemas/TargetLanguage'
         text:
           type: string
         sourceType:
           type: string
-          enum:
-            - source
-            - manual
-            - ai
+          enum: [source, manual, ai]
         reviewStatus:
           type: string
-          enum:
-            - unreviewed
-            - approved
-            - rejected
+          enum: [unreviewed, approved, rejected]
         sourceRefs:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalExampleDetail:
+            $ref: '#/components/schemas/SourceRef'
+    Example:
       type: object
-      required:
-        - id
-        - lang
-        - japanese
-        - translation
-        - sourceRefs
+      required: [id, lang, japanese, translation, sourceRefs]
       properties:
         id:
           type: string
-          example: ydx_00000001
         senseId:
           type: string
-          example: yds_00000001
         lang:
-          $ref: '#/components/schemas/LanguageCode'
+          $ref: '#/components/schemas/TargetLanguage'
         japanese:
           type: string
         translation:
@@ -1576,25 +381,13 @@ components:
         sourceRefs:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalSenseDetail:
+            $ref: '#/components/schemas/SourceRef'
+    Sense:
       type: object
-      required:
-        - id
-        - order
-        - partOfSpeech
-        - appliesToFormIds
-        - appliesToReadingIds
-        - domain
-        - register
-        - misc
-        - glosses
-        - examples
-        - sourceRefs
+      required: [id, order, partOfSpeech, appliesToFormIds, appliesToReadingIds, domain, register, misc, glosses, examples, sourceRefs]
       properties:
         id:
           type: string
-          example: yds_00000001
         order:
           type: integer
         partOfSpeech:
@@ -1604,16 +397,14 @@ components:
         appliesToFormIds:
           oneOf:
             - type: string
-              enum:
-                - all
+              enum: [all]
             - type: array
               items:
                 type: string
         appliesToReadingIds:
           oneOf:
             - type: string
-              enum:
-                - all
+              enum: [all]
             - type: array
               items:
                 type: string
@@ -1632,1200 +423,86 @@ components:
         glosses:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalGlossDetail'
+            $ref: '#/components/schemas/Gloss'
         examples:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalExampleDetail'
+            $ref: '#/components/schemas/Example'
         sourceRefs:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalEntryDetail:
+            $ref: '#/components/schemas/SourceRef'
+    EntryDetail:
       type: object
-      required:
-        - id
-        - language
-        - entryType
-        - primaryForm
-        - primaryReading
-        - ranking
-        - forms
-        - readings
-        - senses
-        - sourceRefs
+      required: [id, language, entryType, primaryForm, primaryReading, forms, readings, senses, ranking, sourceRefs]
       properties:
         id:
           type: string
-          example: yde_00000001
         language:
           type: string
-          enum:
-            - ja
         entryType:
           type: string
-          enum:
-            - word
-            - phrase
-            - proper_noun
         primaryForm:
           type: string
         primaryReading:
           type: string
-        ranking:
-          type: object
-          additionalProperties: true
         forms:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalFormDetail'
+            $ref: '#/components/schemas/Form'
         readings:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalReadingDetail'
+            $ref: '#/components/schemas/Reading'
         senses:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSenseDetail'
+            $ref: '#/components/schemas/Sense'
+        ranking:
+          type: object
         sourceRefs:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalKanjiMeaning:
+            $ref: '#/components/schemas/SourceRef'
+    KanjiDetail:
       type: object
-      required:
-        - lang
-        - text
-        - sourceRefs
-      properties:
-        lang:
-          $ref: '#/components/schemas/LanguageCode'
-        text:
-          type: string
-        sourceRefs:
-          type: array
-          items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalKanjiReading:
-      type: object
-      required:
-        - type
-        - text
-        - sourceRefs
-      properties:
-        type:
-          type: string
-          enum:
-            - onyomi
-            - kunyomi
-            - nanori
-        text:
-          type: string
-        sourceRefs:
-          type: array
-          items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    CanonicalKanjiStats:
-      type: object
-      additionalProperties: false
-      properties:
-        grade:
-          type: integer
-        strokeCount:
-          type: integer
-        frequency:
-          type: integer
-        jlpt:
-          type: integer
-    CanonicalKanjiDetail:
-      type: object
-      required:
-        - id
-        - literal
-        - meanings
-        - readings
-        - stats
-        - sourceRefs
+      required: [id, literal, meanings, readings, stats, sourceRefs]
       properties:
         id:
           type: string
-          example: ydk_00000001
         literal:
           type: string
-          example: 食
         meanings:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalKanjiMeaning'
+            type: object
+            required: [lang, text, sourceRefs]
+            properties:
+              lang:
+                $ref: '#/components/schemas/TargetLanguage'
+              text:
+                type: string
+              sourceRefs:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceRef'
         readings:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalKanjiReading'
+            type: object
+            required: [type, text, sourceRefs]
+            properties:
+              type:
+                type: string
+              text:
+                type: string
+              sourceRefs:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceRef'
         stats:
-          $ref: '#/components/schemas/CanonicalKanjiStats'
+          type: object
         sourceRefs:
           type: array
           items:
-            $ref: '#/components/schemas/CanonicalSourceRef'
-    Conjugations:
-      type: object
-      required:
-        - dictionary
-        - polite
-        - negative
-        - past
-        - te
-      properties:
-        dictionary:
-          type: string
-        polite:
-          type: string
-        negative:
-          type: string
-        past:
-          type: string
-        te:
-          type: string
-    ExampleSentence:
-      type: object
-      required:
-        - japanese
-        - translation
-      properties:
-        japanese:
-          type: string
-        translation:
-          type: string
-    ErrorResponse:
-      type: object
-      required:
-        - error
-      properties:
-        error:
-          type: string
-    ReleaseActionResult:
-      type: object
-      required:
-        - version
-        - dbPath
-        - manifestPath
-        - activated
-      properties:
-        version:
-          type: string
-        dbPath:
-          type: string
-        manifestPath:
-          type: string
-        activated:
-          type: boolean
-    ReleaseListItem:
-      type: object
-      required:
-        - version
-        - dbPath
-        - manifestPath
-        - builtAt
-        - schemaVersion
-        - baseSourceFingerprint
-        - promotedFromUpdateSequence
-        - isActive
-      properties:
-        version:
-          type: string
-        dbPath:
-          type: string
-        manifestPath:
-          type: string
-        builtAt:
-          type: string
-          format: date-time
-        schemaVersion:
-          type: string
-        baseSourceFingerprint:
-          type: string
-        promotedFromUpdateSequence:
-          type: integer
-          nullable: true
-        isActive:
-          type: boolean
-    UpdateBatchRecord:
-      type: object
-      required:
-        - id
-        - kind
-        - createdAt
-        - inputManifest
-        - notes
-        - status
-        - completedAt
-        - errorMessage
-        - actor
-      properties:
-        id:
-          type: integer
-        kind:
-          type: string
-          enum:
-            - source_import
-            - ai_import
-        createdAt:
-          type: string
-          format: date-time
-        inputManifest:
-          type: object
-          additionalProperties: true
-        notes:
-          type: string
-          nullable: true
-        status:
-          $ref: '#/components/schemas/UpdateBatchStatus'
-        completedAt:
-          type: string
-          format: date-time
-          nullable: true
-        errorMessage:
-          type: string
-          nullable: true
-        actor:
-          type: string
-          nullable: true
-    ReviewMetadata:
-      type: object
-      required:
-        - reviewStatus
-        - reviewedAt
-        - reviewedBy
-        - reviewNotes
-      properties:
-        reviewStatus:
-          $ref: '#/components/schemas/ReviewStatus'
-        reviewedAt:
-          type: string
-          format: date-time
-          nullable: true
-        reviewedBy:
-          type: string
-          nullable: true
-        reviewNotes:
-          type: string
-          nullable: true
-    ReleaseExampleRecord:
-      type: object
-      required:
-        - wordId
-        - lang
-        - japanese
-        - translation
-        - source
-      properties:
-        wordId:
-          type: string
-        lang:
-          $ref: '#/components/schemas/LanguageCode'
-        japanese:
-          type: string
-        translation:
-          type: string
-        source:
-          type: string
-    DetailedTranslationUpdate:
-      allOf:
-        - $ref: '#/components/schemas/ReviewMetadata'
-        - type: object
-          required:
-            - id
-            - wordId
-            - lang
-            - definitions
-            - sources
-            - sourceType
-            - status
-            - createdAt
-            - updatedAt
-            - batchId
-            - supersedesUpdateId
-          properties:
-            id:
-              type: integer
-            wordId:
-              type: string
-            lang:
-              $ref: '#/components/schemas/LanguageCode'
-            definitions:
-              type: array
-              items:
-                type: string
-            sources:
-              type: array
-              items:
-                type: string
-            sourceType:
-              $ref: '#/components/schemas/UpdateSourceType'
-            status:
-              type: string
-            createdAt:
-              type: string
-              format: date-time
-            updatedAt:
-              type: string
-              format: date-time
-            batchId:
-              type: integer
-            supersedesUpdateId:
-              type: integer
-              nullable: true
-    DetailedExampleUpdateSet:
-      allOf:
-        - $ref: '#/components/schemas/ReviewMetadata'
-        - type: object
-          required:
-            - id
-            - wordId
-            - lang
-            - sourceType
-            - status
-            - createdAt
-            - updatedAt
-            - batchId
-            - supersedesSetId
-            - examples
-          properties:
-            id:
-              type: integer
-            wordId:
-              type: string
-            lang:
-              $ref: '#/components/schemas/LanguageCode'
-            sourceType:
-              $ref: '#/components/schemas/UpdateSourceType'
-            status:
-              type: string
-            createdAt:
-              type: string
-              format: date-time
-            updatedAt:
-              type: string
-              format: date-time
-            batchId:
-              type: integer
-            supersedesSetId:
-              type: integer
-              nullable: true
-            examples:
-              type: array
-              items:
-                $ref: '#/components/schemas/ReleaseExampleRecord'
-    ListedTranslationUpdate:
-      allOf:
-        - $ref: '#/components/schemas/DetailedTranslationUpdate'
-        - type: object
-          required:
-            - batch
-          properties:
-            batch:
-              allOf:
-                - $ref: '#/components/schemas/UpdateBatchRecord'
-              nullable: true
-    ListedExampleUpdateSet:
-      allOf:
-        - $ref: '#/components/schemas/DetailedExampleUpdateSet'
-        - type: object
-          required:
-            - batch
-          properties:
-            batch:
-              allOf:
-                - $ref: '#/components/schemas/UpdateBatchRecord'
-              nullable: true
-    UpdateVerificationSummary:
-      type: object
-      required:
-        - translationCounts
-        - exampleSetCounts
-        - reviewCounts
-        - orphanedWordIds
-        - activeReviewedAiCount
-      properties:
-        translationCounts:
-          type: object
-          additionalProperties:
-            type: integer
-        exampleSetCounts:
-          type: object
-          additionalProperties:
-            type: integer
-        reviewCounts:
-          type: object
-          additionalProperties:
-            type: integer
-        orphanedWordIds:
-          type: array
-          items:
-            type: string
-        activeReviewedAiCount:
-          type: integer
-    AdminSummaryResponse:
-      type: object
-      required:
-        - activeReleaseVersion
-        - activeReleaseMode
-        - translationCounts
-        - exampleSetCounts
-        - reviewCounts
-        - orphanedWordIdsCount
-        - activeReviewedAiCount
-        - recentBatches
-      properties:
-        activeReleaseVersion:
-          type: string
-        activeReleaseMode:
-          type: string
-        translationCounts:
-          type: object
-          additionalProperties:
-            type: integer
-        exampleSetCounts:
-          type: object
-          additionalProperties:
-            type: integer
-        reviewCounts:
-          type: object
-          additionalProperties:
-            type: integer
-        orphanedWordIdsCount:
-          type: integer
-        activeReviewedAiCount:
-          type: integer
-        recentBatches:
-          type: array
-          items:
-            $ref: '#/components/schemas/UpdateBatchRecord'
-    AdminReleaseListResponse:
-      type: object
-      required:
-        - activeReleaseVersion
-        - releases
-      properties:
-        activeReleaseVersion:
-          type: string
-        releases:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReleaseListItem'
-    EntryInspectionQuery:
-      type: object
-      required:
-        - word
-        - lang
-      properties:
-        word:
-          type: string
-        lang:
-          $ref: '#/components/schemas/LanguageCode'
-    EntryWordSummary:
-      type: object
-      required:
-        - wordId
-        - word
-        - reading
-        - partOfSpeech
-        - frequency
-      properties:
-        wordId:
-          type: string
-        word:
-          type: string
-        reading:
-          type: string
-        partOfSpeech:
-          type: array
-          items:
-            type: string
-        frequency:
-          type: integer
-          nullable: true
-    EntryReleaseLayer:
-      type: object
-      required:
-        - definitions
-        - sources
-        - examples
-      properties:
-        definitions:
-          type: array
-          items:
-            type: string
-        sources:
-          type: array
-          items:
-            type: string
-        examples:
-          type: array
-          items:
-            type: object
-            required:
-              - japanese
-              - translation
-              - source
-            properties:
-              japanese:
-                type: string
-              translation:
-                type: string
-              source:
-                type: string
-    EntryUpdateLayer:
-      type: object
-      required:
-        - translation
-        - examples
-      properties:
-        translation:
-          allOf:
-            - $ref: '#/components/schemas/DetailedTranslationUpdate'
-          nullable: true
-        examples:
-          allOf:
-            - $ref: '#/components/schemas/DetailedExampleUpdateSet'
-          nullable: true
-    AdminEntryInspectionResponse:
-      type: object
-      required:
-        - releaseVersion
-        - query
-        - word
-        - release
-        - sourceUpdate
-        - aiUpdate
-        - effective
-      properties:
-        releaseVersion:
-          type: string
-        query:
-          $ref: '#/components/schemas/EntryInspectionQuery'
-        word:
-          allOf:
-            - $ref: '#/components/schemas/EntryWordSummary'
-          nullable: true
-        release:
-          allOf:
-            - $ref: '#/components/schemas/EntryReleaseLayer'
-          nullable: true
-        sourceUpdate:
-          $ref: '#/components/schemas/EntryUpdateLayer'
-        aiUpdate:
-          $ref: '#/components/schemas/EntryUpdateLayer'
-        effective:
-          allOf:
-            - $ref: '#/components/schemas/LookupResponse'
-          nullable: true
-    AdminReviewQueueResponse:
-      type: object
-      required:
-        - releaseVersion
-        - translations
-        - exampleSets
-      properties:
-        releaseVersion:
-          type: string
-        translations:
-          type: array
-          items:
-            $ref: '#/components/schemas/ListedTranslationUpdate'
-        exampleSets:
-          type: array
-          items:
-            $ref: '#/components/schemas/ListedExampleUpdateSet'
-    ReviewRiskLevel:
-      type: string
-      enum:
-        - low
-        - medium
-        - high
-    ReviewUnitShape:
-      type: string
-      enum:
-        - translation-only
-        - examples-only
-    ReviewUnitFlags:
-      type: object
-      required:
-        - hasSourceConflict
-        - isSuperseded
-        - hasTranslation
-        - hasExamples
-        - isTranslationOnly
-        - isExamplesOnly
-      properties:
-        hasSourceConflict:
-          type: boolean
-        isSuperseded:
-          type: boolean
-        hasTranslation:
-          type: boolean
-        hasExamples:
-          type: boolean
-        isTranslationOnly:
-          type: boolean
-        isExamplesOnly:
-          type: boolean
-    ReviewUnitReleaseValue:
-      type: object
-      required:
-        - definitions
-        - sources
-        - examples
-      properties:
-        definitions:
-          type: array
-          items:
-            type: string
-        sources:
-          type: array
-          items:
-            type: string
-        examples:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReleaseExampleRecord'
-    ReviewQueueSummaryRecentBatch:
-      type: object
-      required:
-        - batchId
-        - batch
-        - pendingUnits
-        - sourceConflictCount
-        - byLanguage
-      properties:
-        batchId:
-          type: integer
-        batch:
-          allOf:
-            - $ref: '#/components/schemas/UpdateBatchRecord'
-          nullable: true
-        pendingUnits:
-          type: integer
-        sourceConflictCount:
-          type: integer
-        byLanguage:
-          type: object
-          additionalProperties:
-            type: integer
-    ReviewQueueSummary:
-      type: object
-      required:
-        - pendingUnits
-        - byLanguage
-        - byRisk
-        - sourceConflictCount
-        - recentBatches
-      properties:
-        pendingUnits:
-          type: integer
-        byLanguage:
-          type: object
-          additionalProperties:
-            type: integer
-        byRisk:
-          type: object
-          additionalProperties:
-            type: integer
-        sourceConflictCount:
-          type: integer
-        recentBatches:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReviewQueueSummaryRecentBatch'
-    ReviewQueueAppliedFilters:
-      type: object
-      required:
-        - batchId
-        - lang
-        - risk
-        - shape
-        - hasSourceConflict
-        - limit
-      properties:
-        batchId:
-          type: integer
-          nullable: true
-        lang:
-          allOf:
-            - $ref: '#/components/schemas/LanguageCode'
-          nullable: true
-        risk:
-          allOf:
-            - $ref: '#/components/schemas/ReviewRiskLevel'
-          nullable: true
-        shape:
-          allOf:
-            - $ref: '#/components/schemas/ReviewUnitShape'
-          nullable: true
-        hasSourceConflict:
-          type: boolean
-          nullable: true
-        limit:
-          type: integer
-    ReviewUnit:
-      type: object
-      required:
-        - unitId
-        - wordId
-        - lang
-        - batchId
-        - batch
-        - word
-        - translation
-        - exampleSet
-        - release
-        - sourceUpdate
-        - effectivePreview
-        - flags
-        - riskLevel
-      properties:
-        unitId:
-          type: string
-        wordId:
-          type: string
-        lang:
-          $ref: '#/components/schemas/LanguageCode'
-        batchId:
-          type: integer
-        batch:
-          allOf:
-            - $ref: '#/components/schemas/UpdateBatchRecord'
-          nullable: true
-        word:
-          allOf:
-            - $ref: '#/components/schemas/ReleaseWordRecord'
-          nullable: true
-        translation:
-          allOf:
-            - $ref: '#/components/schemas/ListedTranslationUpdate'
-          nullable: true
-        exampleSet:
-          allOf:
-            - $ref: '#/components/schemas/ListedExampleUpdateSet'
-          nullable: true
-        release:
-          allOf:
-            - $ref: '#/components/schemas/ReviewUnitReleaseValue'
-          nullable: true
-        sourceUpdate:
-          $ref: '#/components/schemas/EntryUpdateLayer'
-        effectivePreview:
-          allOf:
-            - $ref: '#/components/schemas/ReviewUnitReleaseValue'
-          nullable: true
-        flags:
-          $ref: '#/components/schemas/ReviewUnitFlags'
-        riskLevel:
-          $ref: '#/components/schemas/ReviewRiskLevel'
-    AdminReviewQueueResponseV2:
-      type: object
-      required:
-        - releaseVersion
-        - summary
-        - items
-        - nextCursor
-        - filters
-      properties:
-        releaseVersion:
-          type: string
-        summary:
-          $ref: '#/components/schemas/ReviewQueueSummary'
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/ReviewUnit'
-        nextCursor:
-          type: string
-          nullable: true
-        filters:
-          $ref: '#/components/schemas/ReviewQueueAppliedFilters'
-    AdminReviewBatchSummaryResponse:
-      type: object
-      required:
-        - releaseVersion
-        - batch
-        - pendingUnits
-        - byLanguage
-        - byRisk
-        - sourceConflictCount
-        - translationOnlyCount
-        - examplesOnlyCount
-      properties:
-        releaseVersion:
-          type: string
-        batch:
-          allOf:
-            - $ref: '#/components/schemas/UpdateBatchRecord'
-          nullable: true
-        pendingUnits:
-          type: integer
-        byLanguage:
-          type: object
-          additionalProperties:
-            type: integer
-        byRisk:
-          type: object
-          additionalProperties:
-            type: integer
-        sourceConflictCount:
-          type: integer
-        translationOnlyCount:
-          type: integer
-        examplesOnlyCount:
-          type: integer
-    AdminBatchDetailResponse:
-      type: object
-      required:
-        - releaseVersion
-        - batch
-        - translations
-        - exampleSets
-      properties:
-        releaseVersion:
-          type: string
-        batch:
-          allOf:
-            - $ref: '#/components/schemas/UpdateBatchRecord'
-          nullable: true
-        translations:
-          type: array
-          items:
-            $ref: '#/components/schemas/ListedTranslationUpdate'
-        exampleSets:
-          type: array
-          items:
-            $ref: '#/components/schemas/ListedExampleUpdateSet'
-    AdminUpdatesResponse:
-      type: object
-      required:
-        - releaseVersion
-        - translations
-        - exampleSets
-        - verification
-      properties:
-        releaseVersion:
-          type: string
-        translations:
-          type: array
-          items:
-            $ref: '#/components/schemas/ListedTranslationUpdate'
-        exampleSets:
-          type: array
-          items:
-            $ref: '#/components/schemas/ListedExampleUpdateSet'
-        verification:
-          $ref: '#/components/schemas/UpdateVerificationSummary'
-    AdminReviewActionRequest:
-      type: object
-      properties:
-        notes:
-          type: string
-          nullable: true
-    BulkReviewActionRequest:
-      type: object
-      required:
-        - unitIds
-      properties:
-        unitIds:
-          oneOf:
-            - type: string
-              description: Comma-delimited review unit ids
-            - type: array
-              items:
-                type: string
-        notes:
-          type: string
-          nullable: true
-        overrideSourceConflict:
-          type: boolean
-          default: false
-    BulkReviewActionResponse:
-      type: object
-      required:
-        - ok
-        - action
-        - affected
-      properties:
-        ok:
-          type: boolean
-        action:
-          type: string
-          enum:
-            - approved
-            - rejected
-        affected:
-          type: object
-          required:
-            - units
-            - translations
-            - exampleSets
-          properties:
-            units:
-              type: integer
-            translations:
-              type: integer
-            exampleSets:
-              type: integer
-        blockedUnitIds:
-          type: array
-          items:
-            type: string
-        error:
-          type: string
-    AdminReleaseBuildRequest:
-      type: object
-      properties:
-        version:
-          type: string
-          nullable: true
-        activate:
-          type: boolean
-          default: true
-    AdminReleasePromoteRequest:
-      type: object
-      properties:
-        version:
-          type: string
-          nullable: true
-        activate:
-          type: boolean
-          default: true
-    AdminNewWordBuildReleaseRequest:
-      type: object
-      properties:
-        createdWordId:
-          type: string
-          nullable: true
-        activate:
-          type: boolean
-          default: true
-    AdminNewWordBuildReleaseResponse:
-      allOf:
-        - $ref: '#/components/schemas/ReleaseActionResult'
-        - type: object
-          required:
-            - createdWordId
-          properties:
-            createdWordId:
-              type: string
-              nullable: true
-    SimilarManualWordEntry:
-      type: object
-      required:
-        - wordId
-        - word
-        - reading
-        - match
-      properties:
-        wordId:
-          type: string
-        word:
-          type: string
-        reading:
-          type: string
-        match:
-          type: string
-          enum:
-            - word
-            - reading
-    AdminNewWordExampleInput:
-      type: object
-      required:
-        - japanese
-        - translation
-      properties:
-        japanese:
-          type: string
-        translation:
-          type: string
-    AdminNewWordTranslationInput:
-      type: object
-      required:
-        - lang
-        - definitions
-      properties:
-        lang:
-          $ref: '#/components/schemas/LanguageCode'
-        definitions:
-          type: array
-          items:
-            type: string
-        examples:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminNewWordExampleInput'
-    AdminNewWordFormData:
-      type: object
-      required:
-        - word
-        - reading
-        - translations
-      properties:
-        word:
-          type: string
-        reading:
-          type: string
-        partOfSpeech:
-          type: array
-          items:
-            type: string
-        common:
-          type: boolean
-        jlpt:
-          type: integer
-          nullable: true
-        translations:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminNewWordTranslationInput'
-    AdminNewWordNextActions:
-      type: object
-      required:
-        - buildReleaseUrl
-        - entryInspectorUrl
-        - releasesUrl
-      properties:
-        buildReleaseUrl:
-          type: string
-        entryInspectorUrl:
-          type: string
-        releasesUrl:
-          type: string
-    AdminNewWordResponse:
-      type: object
-      required:
-        - created
-        - releaseVersion
-        - activeReleaseContainsWord
-        - fieldErrors
-        - warnings
-        - similarEntries
-      properties:
-        created:
-          type: boolean
-        wordId:
-          type: string
-        snapshotFiles:
-          type: array
-          items:
-            type: string
-        releaseVersion:
-          type: string
-        activeReleaseContainsWord:
-          type: boolean
-        fieldErrors:
-          type: object
-          additionalProperties:
-            type: array
-            items:
-              type: string
-        warnings:
-          type: array
-          items:
-            type: string
-        similarEntries:
-          type: array
-          items:
-            $ref: '#/components/schemas/SimilarManualWordEntry'
-        conflictWordId:
-          type: string
-          nullable: true
-        nextActions:
-          allOf:
-            - $ref: '#/components/schemas/AdminNewWordNextActions'
-          nullable: true
-    LanguageSelector:
-      oneOf:
-        - type: string
-          description: Comma-separated list such as `en,de,ko`
-        - type: array
-          items:
-            $ref: '#/components/schemas/LanguageCode'
-    AdminSourceUpdateJobRequest:
-      type: object
-      properties:
-        langs:
-          $ref: '#/components/schemas/LanguageSelector'
-        dryRun:
-          type: boolean
-          default: false
-    AdminSourceUpdateJobResponse:
-      type: object
-      required:
-        - langs
-        - translationChanges
-        - exampleChanges
-        - batchId
-        - dryRun
-        - outputPath
-      properties:
-        langs:
-          type: array
-          items:
-            $ref: '#/components/schemas/LanguageCode'
-        translationChanges:
-          type: integer
-        exampleChanges:
-          type: integer
-        batchId:
-          type: integer
-          nullable: true
-        dryRun:
-          type: boolean
-        outputPath:
-          type: string
-    AdminGeminiImportRequest:
-      type: object
-      properties:
-        langs:
-          $ref: '#/components/schemas/LanguageSelector'
-        seedLang:
-          $ref: '#/components/schemas/SeedLanguage'
-        model:
-          type: string
-        limit:
-          type: integer
-          nullable: true
-        minFrequency:
-          type: integer
-          nullable: true
-        jlptMax:
-          type: integer
-          nullable: true
-        maxCostUsd:
-          type: number
-          nullable: true
-        commonOnly:
-          type: boolean
-        dryRun:
-          type: boolean
-          default: true
-    GeminiImportTotals:
-      type: object
-      additionalProperties: true
-      description: Aggregate Gemini import token, request, and cost totals.
-    GeminiImportLanguageReport:
-      type: object
-      additionalProperties: true
-      description: Per-language Gemini import report row.
-    AdminGeminiImportResponse:
-      type: object
-      required:
-        - totals
-        - languages
-        - reportFile
-      properties:
-        totals:
-          $ref: '#/components/schemas/GeminiImportTotals'
-        languages:
-          type: array
-          items:
-            $ref: '#/components/schemas/GeminiImportLanguageReport'
-        reportFile:
-          type: string
-          nullable: true
+            $ref: '#/components/schemas/SourceRef'

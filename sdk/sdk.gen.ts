@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GetApiDocsData, GetApiDocsResponses, GetOpenApiSpecData, GetOpenApiSpecResponses, HealthCheckData, HealthCheckResponses, LookupWordData, LookupWordErrors, LookupWordResponses } from './types.gen';
+import type { GetHealthData, GetHealthResponses, GetV2EntriesByIdData, GetV2EntriesByIdErrors, GetV2EntriesByIdResponses, GetV2KanjiByLiteralData, GetV2KanjiByLiteralErrors, GetV2KanjiByLiteralResponses, GetV2LookupData, GetV2LookupErrors, GetV2LookupResponses, PostV2LookupBatchData, PostV2LookupBatchErrors, PostV2LookupBatchResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -19,25 +19,33 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 };
 
 /**
- * OpenAPI specification
- */
-export const getOpenApiSpec = <ThrowOnError extends boolean = false>(options?: Options<GetOpenApiSpecData, ThrowOnError>) => (options?.client ?? client).get<GetOpenApiSpecResponses, unknown, ThrowOnError>({ url: '/openapi.yaml', ...options });
-
-/**
- * Interactive API reference (Scalar UI)
- */
-export const getApiDocs = <ThrowOnError extends boolean = false>(options?: Options<GetApiDocsData, ThrowOnError>) => (options?.client ?? client).get<GetApiDocsResponses, unknown, ThrowOnError>({ url: '/docs', ...options });
-
-/**
  * Health check
  */
-export const healthCheck = <ThrowOnError extends boolean = false>(options?: Options<HealthCheckData, ThrowOnError>) => (options?.client ?? client).get<HealthCheckResponses, unknown, ThrowOnError>({ url: '/health', ...options });
+export const getHealth = <ThrowOnError extends boolean = false>(options?: Options<GetHealthData, ThrowOnError>) => (options?.client ?? client).get<GetHealthResponses, unknown, ThrowOnError>({ url: '/health', ...options });
 
 /**
- * Lookup a Japanese word
- *
- * Looks up a Japanese word by exact match on kanji (`word`) or reading.
- * Returns `404` when the word does not exist, or when no translation is available for the requested language.
- *
+ * Look up one dictionary token
  */
-export const lookupWord = <ThrowOnError extends boolean = false>(options: Options<LookupWordData, ThrowOnError>) => (options.client ?? client).get<LookupWordResponses, LookupWordErrors, ThrowOnError>({ url: '/v1/lookup', ...options });
+export const getV2Lookup = <ThrowOnError extends boolean = false>(options?: Options<GetV2LookupData, ThrowOnError>) => (options?.client ?? client).get<GetV2LookupResponses, GetV2LookupErrors, ThrowOnError>({ url: '/v2/lookup', ...options });
+
+/**
+ * Look up tokenizer tokens in batch
+ */
+export const postV2LookupBatch = <ThrowOnError extends boolean = false>(options: Options<PostV2LookupBatchData, ThrowOnError>) => (options.client ?? client).post<PostV2LookupBatchResponses, PostV2LookupBatchErrors, ThrowOnError>({
+    url: '/v2/lookup/batch',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Get a canonical entry by Yori ID
+ */
+export const getV2EntriesById = <ThrowOnError extends boolean = false>(options: Options<GetV2EntriesByIdData, ThrowOnError>) => (options.client ?? client).get<GetV2EntriesByIdResponses, GetV2EntriesByIdErrors, ThrowOnError>({ url: '/v2/entries/{id}', ...options });
+
+/**
+ * Get kanji details by literal
+ */
+export const getV2KanjiByLiteral = <ThrowOnError extends boolean = false>(options: Options<GetV2KanjiByLiteralData, ThrowOnError>) => (options.client ?? client).get<GetV2KanjiByLiteralResponses, GetV2KanjiByLiteralErrors, ThrowOnError>({ url: '/v2/kanji/{literal}', ...options });
