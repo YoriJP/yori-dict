@@ -108,6 +108,8 @@ sdk/                          generated TypeScript client
 | `bun run import:wiktionary:canonical` | import Wiktionary/Kaikki glosses into an existing canonical snapshot |
 | `bun run apply:canonical-overlays` | apply approved manual/AI overlay operations to a canonical snapshot |
 | `bun run curate:canonical-overlays` | create or review canonical overlay operations |
+| `bun run queue:curation` | build a target-language curation queue from a canonical snapshot |
+| `bun run suggest:ai-overlays` | convert AI suggestion records into unreviewed overlay operations |
 | `bun run preview:canonical-release` | preview overlays in a temporary canonical release DB |
 | `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
 | `bun run release:build:canonical` | build a canonical SQLite release DB from a snapshot |
@@ -162,6 +164,22 @@ Review overlay operations:
 bun run curate:canonical-overlays list-pending-ai --overlay data/overlays/canonical-overlays.json
 bun run curate:canonical-overlays approve --overlay data/overlays/canonical-overlays.json --id manual-yds_00000001-add-example-zh-tw-20260604
 bun run curate:canonical-overlays reject --overlay data/overlays/canonical-overlays.json --id ai-yds_00000001-add-gloss-zh-tw-canonical-gloss-v1-20260604
+```
+
+Build a quality-driven curation queue:
+
+```bash
+bun run queue:curation --lang zh-tw --common-only --limit 100
+```
+
+Convert AI suggestion output into unreviewed overlay operations:
+
+```bash
+bun run suggest:ai-overlays \
+  --queue data/curation/queue.zh-tw.json \
+  --suggestions data/curation/suggestions.zh-tw.jsonl \
+  --model gemini-3.1-flash-lite \
+  --prompt-version canonical-gloss-v1
 ```
 
 Apply overlays during rebuild:
