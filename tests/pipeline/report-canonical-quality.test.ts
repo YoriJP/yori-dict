@@ -113,13 +113,15 @@ describe('canonical quality report CLI', () => {
       '--fail-on', 'warning',
       '--alias-fanout-threshold', '5',
       '--sample-limit', '3',
+      '--target-lang', 'zh-tw',
+      '--target-lang', 'zh-tw',
     ])).toEqual({
       snapshot: 'snapshot.json',
       jsonOut: 'report.json',
       failOn: 'warning',
       aliasFanoutThreshold: 5,
       sampleLimit: 3,
-      targetLanguages: [],
+      targetLanguages: ['zh-tw'],
     })
   })
 

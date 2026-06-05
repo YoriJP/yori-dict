@@ -83,7 +83,8 @@ export function parseArgs(args: string[]): CliOptions {
       opts.sampleLimit = parsePositiveInt(next, '--sample-limit')
       i++
     } else if (arg === '--target-lang' && next) {
-      opts.targetLanguages.push(parseLang(next))
+      const lang = parseLang(next)
+      if (!opts.targetLanguages.includes(lang)) opts.targetLanguages.push(lang)
       i++
     } else {
       throw new Error(`Unknown or incomplete argument: ${arg}`)

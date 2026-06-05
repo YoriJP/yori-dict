@@ -1,6 +1,6 @@
 import {
-  appendCanonicalOverlayOperation,
   loadCanonicalOverlayFile,
+  saveCanonicalOverlayFile,
 } from '../../src/domain/overlay-store'
 import { createAiAddGlossOverlay, type CanonicalOverlayOperation } from '../../src/domain/overlays'
 import type { CurationQueue, CurationQueueItem } from '../../src/domain/curation-queue'
@@ -113,6 +113,11 @@ function assertQueue(value: unknown): CurationQueue {
   if (!queue || queue.schemaVersion !== '1.0.0' || !Array.isArray(queue.items)) {
     throw new Error('Curation queue is invalid')
   }
+  const ids = new Set<string>()
+  for (const item of queue.items) {
+    if (ids.has(item.id)) throw new Error(`Duplicate curation queue item id: ${item.id}`)
+    ids.add(item.id)
+  }
   return queue
 }
 
@@ -160,6 +165,17 @@ async function loadSuggestions(path: string): Promise<AiGlossSuggestion[]> {
   return parseSuggestionText(await Bun.file(path).text())
 }
 
+function mapSuggestions(suggestions: AiGlossSuggestion[]): Map<string, AiGlossSuggestion> {
+  const result = new Map<string, AiGlossSuggestion>()
+  for (const suggestion of suggestions) {
+    if (result.has(suggestion.queueItemId)) {
+      throw new Error(`Duplicate suggestion queueItemId: ${suggestion.queueItemId}`)
+    }
+    result.set(suggestion.queueItemId, suggestion)
+  }
+  return result
+}
+
 function createOperation(
   item: CurationQueueItem,
   suggestion: AiGlossSuggestion,
@@ -177,12 +193,59 @@ function createOperation(
   })
 }
 
+function pendingAiTargetKey(operation: CanonicalOverlayOperation): string | null {
+  if (
+    operation.sourceKind !== 'ai'
+    || operation.reviewStatus !== 'unreviewed'
+    || operation.type !== 'addGloss'
+    || !operation.promptVersion
+  ) return null
+
+  return `${operation.type}:${operation.senseId}:${operation.lang}:${operation.promptVersion}`
+}
+
+function requireNoUnmatchedSuggestions(queue: CurationQueue, suggestions: AiGlossSuggestion[]): void {
+  const queueItemIds = new Set(queue.items.map((item) => item.id))
+  const unmatched = suggestions
+    .map((suggestion) => suggestion.queueItemId)
+    .filter((id) => !queueItemIds.has(id))
+
+  if (unmatched.length > 0) {
+    throw new Error(`Suggestions do not match queue items: ${unmatched.join(', ')}`)
+  }
+}
+
+function assertCanWriteOperations(
+  existing: CanonicalOverlayOperation[],
+  operations: CanonicalOverlayOperation[]
+): void {
+  const existingIds = new Set(existing.map((operation) => operation.id))
+  const existingPendingTargets = new Set(existing.map(pendingAiTargetKey).filter((key): key is string => Boolean(key)))
+  const newIds = new Set<string>()
+  const newPendingTargets = new Set<string>()
+
+  for (const operation of operations) {
+    if (existingIds.has(operation.id) || newIds.has(operation.id)) {
+      throw new Error(`Overlay operation already exists: ${operation.id}`)
+    }
+    newIds.add(operation.id)
+
+    const targetKey = pendingAiTargetKey(operation)
+    if (!targetKey) continue
+    if (existingPendingTargets.has(targetKey) || newPendingTargets.has(targetKey)) {
+      throw new Error(`Pending AI overlay already exists for ${targetKey}`)
+    }
+    newPendingTargets.add(targetKey)
+  }
+}
+
 export async function runCreateAiCurationOverlays(opts: CliOptions): Promise<CanonicalOverlayOperation[]> {
   const queue = await loadQueue(opts.queue)
   const suggestions = await loadSuggestions(opts.suggestions)
-  const suggestionsByQueueItemId = new Map(suggestions.map((suggestion) => [suggestion.queueItemId, suggestion]))
+  if (suggestions.length === 0) throw new Error('No AI suggestions found')
+  requireNoUnmatchedSuggestions(queue, suggestions)
+  const suggestionsByQueueItemId = mapSuggestions(suggestions)
   const existing = await loadCanonicalOverlayFile(opts.overlay)
-  const existingIds = new Set(existing.operations.map((operation) => operation.id))
 
   const operations: CanonicalOverlayOperation[] = []
   for (const item of queue.items) {
@@ -192,11 +255,15 @@ export async function runCreateAiCurationOverlays(opts: CliOptions): Promise<Can
     if (!suggestion) continue
 
     const operation = createOperation(item, suggestion, opts)
-    if (existingIds.has(operation.id)) throw new Error(`Overlay operation already exists: ${operation.id}`)
-    await appendCanonicalOverlayOperation(opts.overlay, operation)
-    existingIds.add(operation.id)
     operations.push(operation)
   }
+  if (operations.length === 0) throw new Error('No AI suggestions matched queue items')
+
+  assertCanWriteOperations(existing.operations, operations)
+  await saveCanonicalOverlayFile(opts.overlay, {
+    ...existing,
+    operations: [...existing.operations, ...operations],
+  })
 
   console.log('\n=== AI Curation Overlays ===')
   console.log(`Queue: ${opts.queue}`)
