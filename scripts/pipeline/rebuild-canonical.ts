@@ -4,6 +4,8 @@ import { prepareKanjidic2 } from './prepare-kanjidic2'
 import { runImport as importJmdictCanonical } from './import-jmdict-canonical'
 import { importKanjidic2Canonical } from './import-kanjidic2-canonical'
 import { importTatoebaCanonical } from './import-tatoeba-canonical'
+import { importWiktionaryCanonical } from './import-wiktionary-canonical'
+import { applyCanonicalOverlays } from './apply-canonical-overlays'
 import { buildCanonicalRelease } from './build-canonical-release'
 import type { TargetLanguage } from '../../src/domain/types'
 import { SUPPORTED_LANGUAGES, normalizeLanguage } from '../../src/types'
@@ -18,6 +20,10 @@ interface CliOptions {
   tatoebaFile?: string
   tatoebaLang?: TargetLanguage
   tatoebaMaxExamplesPerSense: number
+  wiktionaryFile?: string
+  wiktionaryLang?: TargetLanguage
+  wiktionaryMaxGlossesPerSense: number
+  overlayFile?: string
   snapshot: string
   registry: string
   releaseDb: string
@@ -36,6 +42,7 @@ const DEFAULT_SNAPSHOT = 'data/snapshots/yori-dict.snapshot.json'
 const DEFAULT_REGISTRY = 'data/registry/ids.json'
 const DEFAULT_RELEASE_DB = 'data/releases/canonical/yori-dict.sqlite'
 const DEFAULT_TATOEBA_MAX_EXAMPLES_PER_SENSE = 3
+const DEFAULT_WIKTIONARY_MAX_GLOSSES_PER_SENSE = 8
 
 function printHelp(): void {
   console.log(`
@@ -58,6 +65,11 @@ Options:
   --tatoeba-lang <lang>      Required for Tatoeba TSV input. Supported: ${SUPPORTED_LANGUAGES.join(', ')}
   --tatoeba-max-examples-per-sense <n>
                               Max Tatoeba examples per sense/language (default: ${DEFAULT_TATOEBA_MAX_EXAMPLES_PER_SENSE})
+  --wiktionary-file <path>   Optional Wiktionary/Kaikki JSON/JSONL gloss file.
+  --wiktionary-lang <lang>   Fallback language for records missing lang. Supported: ${SUPPORTED_LANGUAGES.join(', ')}
+  --wiktionary-max-glosses-per-sense <n>
+                              Max Wiktionary glosses per sense/language (default: ${DEFAULT_WIKTIONARY_MAX_GLOSSES_PER_SENSE})
+  --overlay-file <path>      Optional manual/AI canonical overlay JSON file.
   --snapshot <path>          Canonical snapshot path (default: ${DEFAULT_SNAPSHOT})
   --registry <path>          Stable Yori ID registry path (default: ${DEFAULT_REGISTRY})
   --release-db <path>        Canonical SQLite release path (default: ${DEFAULT_RELEASE_DB})
@@ -85,6 +97,7 @@ export function parseArgs(args: string[]): CliOptions {
     kanjidic2Url: DEFAULT_KANJIDIC2_URL,
     kanjidic2Source: DEFAULT_KANJIDIC2_SOURCE,
     tatoebaMaxExamplesPerSense: DEFAULT_TATOEBA_MAX_EXAMPLES_PER_SENSE,
+    wiktionaryMaxGlossesPerSense: DEFAULT_WIKTIONARY_MAX_GLOSSES_PER_SENSE,
     snapshot: DEFAULT_SNAPSHOT,
     registry: DEFAULT_REGISTRY,
     releaseDb: DEFAULT_RELEASE_DB,
@@ -129,6 +142,20 @@ export function parseArgs(args: string[]): CliOptions {
       i++
     } else if (arg === '--tatoeba-max-examples-per-sense' && next) {
       opts.tatoebaMaxExamplesPerSense = parsePositiveInt(next, '--tatoeba-max-examples-per-sense')
+      i++
+    } else if (arg === '--wiktionary-file' && next) {
+      opts.wiktionaryFile = next
+      i++
+    } else if (arg === '--wiktionary-lang' && next) {
+      const lang = normalizeLanguage(next)
+      if (!lang) throw new Error(`--wiktionary-lang must be one of: ${SUPPORTED_LANGUAGES.join(', ')}`)
+      opts.wiktionaryLang = lang
+      i++
+    } else if (arg === '--wiktionary-max-glosses-per-sense' && next) {
+      opts.wiktionaryMaxGlossesPerSense = parsePositiveInt(next, '--wiktionary-max-glosses-per-sense')
+      i++
+    } else if (arg === '--overlay-file' && next) {
+      opts.overlayFile = next
       i++
     } else if (arg === '--snapshot' && next) {
       opts.snapshot = next
@@ -210,6 +237,25 @@ export async function rebuildCanonical(opts: CliOptions): Promise<void> {
       importedAt: opts.importedAt,
       lang: opts.tatoebaLang,
       maxExamplesPerSense: opts.tatoebaMaxExamplesPerSense,
+    })
+  }
+  if (opts.wiktionaryFile) {
+    await importWiktionaryCanonical({
+      file: opts.wiktionaryFile,
+      snapshot: opts.snapshot,
+      out: opts.snapshot,
+      registry: opts.registry,
+      importedAt: opts.importedAt,
+      lang: opts.wiktionaryLang,
+      maxGlossesPerSense: opts.wiktionaryMaxGlossesPerSense,
+    })
+  }
+  if (opts.overlayFile) {
+    await applyCanonicalOverlays({
+      overlay: opts.overlayFile,
+      snapshot: opts.snapshot,
+      out: opts.snapshot,
+      registry: opts.registry,
     })
   }
   await buildCanonicalRelease({

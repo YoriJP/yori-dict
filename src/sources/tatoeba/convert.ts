@@ -154,6 +154,92 @@ function hasExample(sense: Sense, pair: TatoebaExamplePair): boolean {
   )
 }
 
+const LATIN_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'be',
+  'i',
+  'in',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+])
+
+const IRREGULAR_LATIN_TOKEN_BASES: Record<string, string> = {
+  ate: 'eat',
+  eaten: 'eat',
+}
+
+function addLatinTokenVariants(token: string, tokens: Set<string>): void {
+  if (LATIN_STOP_WORDS.has(token) || token.length <= 1) return
+  tokens.add(token)
+
+  const irregular = IRREGULAR_LATIN_TOKEN_BASES[token]
+  if (irregular) tokens.add(irregular)
+  if (token.length > 4 && token.endsWith('ing')) tokens.add(token.slice(0, -3))
+  if (token.length > 3 && token.endsWith('ed')) tokens.add(token.slice(0, -2))
+  if (token.length > 3 && token.endsWith('s')) tokens.add(token.slice(0, -1))
+}
+
+function tokenizeForOverlap(text: string): string[] {
+  const tokens = new Set<string>()
+  for (const token of text.toLowerCase().match(/[\p{Letter}\p{Number}]+/gu) ?? []) {
+    if (/^[a-z0-9]+$/.test(token)) {
+      addLatinTokenVariants(token, tokens)
+      continue
+    }
+
+    if (/[\u3400-\u9FFF\uAC00-\uD7AF]/.test(token)) {
+      tokens.add(token)
+      for (const char of token) {
+        if (/[\u3400-\u9FFF\uAC00-\uD7AF]/.test(char)) tokens.add(char)
+      }
+      continue
+    }
+
+    if (token.length > 1) tokens.add(token)
+  }
+  return [...tokens]
+}
+
+function translationGlossOverlapScore(sense: Sense, pair: TatoebaExamplePair): number {
+  const translationTokens = new Set(tokenizeForOverlap(pair.translation))
+  if (translationTokens.size === 0) return 0
+
+  let score = 0
+  for (const gloss of sense.glosses) {
+    if (gloss.lang !== pair.lang) continue
+    for (const token of tokenizeForOverlap(gloss.text)) {
+      if (translationTokens.has(token)) score++
+    }
+  }
+  return score
+}
+
+function chooseTargetSenses(pair: TatoebaExamplePair, match: CandidateMatch): Sense[] {
+  const applicable = match.entry.senses.filter((sense) => {
+    if (pair.senseId && sense.id !== pair.senseId) return false
+    return senseAppliesToMatch(sense, match)
+  })
+
+  if (pair.senseId || applicable.length <= 1) return applicable
+
+  const scored = applicable.map((sense) => ({
+    sense,
+    score: translationGlossOverlapScore(sense, pair),
+  }))
+  const bestScore = Math.max(...scored.map((item) => item.score))
+  if (bestScore <= 0) return []
+
+  const best = scored.filter((item) => item.score === bestScore)
+  return best.length === 1 ? [best[0].sense] : []
+}
+
 function buildExample(
   pair: TatoebaExamplePair,
   sense: Sense,
@@ -196,9 +282,7 @@ export function importTatoebaExamplesIntoSnapshot(
     if (matches.length > 0) stats.pairsMatched++
 
     for (const match of matches) {
-      for (const sense of match.entry.senses) {
-        if (pair.senseId && sense.id !== pair.senseId) continue
-        if (!senseAppliesToMatch(sense, match)) continue
+      for (const sense of chooseTargetSenses(pair, match)) {
         if (hasExample(sense, pair)) continue
         if (countExistingTatoebaExamples(sense, pair.lang) >= maxExamplesPerSense) continue
 

@@ -79,6 +79,10 @@ describe('canonical rebuild pipeline', () => {
       '--tatoeba-file', 'examples.json',
       '--tatoeba-lang', 'en',
       '--tatoeba-max-examples-per-sense', '2',
+      '--wiktionary-file', 'wiktionary.json',
+      '--wiktionary-lang', 'zh-cn',
+      '--wiktionary-max-glosses-per-sense', '4',
+      '--overlay-file', 'overlays.json',
       '--overwrite',
     ])).toMatchObject({
       jmdictFile: 'JMdict_e.xml',
@@ -86,6 +90,10 @@ describe('canonical rebuild pipeline', () => {
       tatoebaFile: 'examples.json',
       tatoebaLang: 'en',
       tatoebaMaxExamplesPerSense: 2,
+      wiktionaryFile: 'wiktionary.json',
+      wiktionaryLang: 'zh-cn',
+      wiktionaryMaxGlossesPerSense: 4,
+      overlayFile: 'overlays.json',
       snapshot: 'snapshot.json',
       registry: 'ids.json',
       releaseDb: 'release.sqlite',
@@ -101,6 +109,8 @@ describe('canonical rebuild pipeline', () => {
     const rawJmdictPath = join(dir, 'JMdict_e.xml')
     const rawKanjidic2Path = join(dir, 'kanjidic2.xml')
     const tatoebaPath = join(dir, 'examples.json')
+    const wiktionaryPath = join(dir, 'wiktionary.json')
+    const overlayPath = join(dir, 'overlays.json')
     const jmdictSource = join(dir, 'sources', 'jmdict.xml')
     const kanjidic2Source = join(dir, 'sources', 'kanjidic2.xml')
     const snapshotPath = join(dir, 'snapshot.json')
@@ -118,6 +128,31 @@ describe('canonical rebuild pipeline', () => {
         lang: 'en',
       },
     ]))
+    await Bun.write(wiktionaryPath, JSON.stringify([
+      {
+        sourceId: 'kaikki:食べる',
+        word: '食べる',
+        reading: 'たべる',
+        lang: 'zh-cn',
+        pos: ['v1'],
+        glosses: ['吃'],
+      },
+    ]))
+    await Bun.write(overlayPath, JSON.stringify({
+      schemaVersion: '1.0.0',
+      operations: [
+        {
+          id: 'manual-replace-en',
+          type: 'replaceGlosses',
+          sourceKind: 'manual',
+          importedAt,
+          reviewStatus: 'approved',
+          senseId: 'yds_00000001',
+          lang: 'en',
+          glosses: ['to eat food'],
+        },
+      ],
+    }))
 
     await rebuildCanonical({
       jmdictFile: rawJmdictPath,
@@ -128,6 +163,9 @@ describe('canonical rebuild pipeline', () => {
       kanjidic2Source,
       tatoebaFile: tatoebaPath,
       tatoebaMaxExamplesPerSense: 3,
+      wiktionaryFile: wiktionaryPath,
+      wiktionaryMaxGlossesPerSense: 8,
+      overlayFile: overlayPath,
       snapshot: snapshotPath,
       registry: registryPath,
       releaseDb: releaseDbPath,
@@ -152,7 +190,7 @@ describe('canonical rebuild pipeline', () => {
       const service = new CanonicalLookupService(db)
       expect(service.lookup({ query: '食べる', lang: 'en' }).entries[0]).toMatchObject({
         id: 'yde_00000001',
-        definitions: ['to eat'],
+        definitions: ['to eat food'],
       })
       expect(service.getKanji('食', 'en')).toMatchObject({
         id: 'ydk_00000001',
@@ -176,6 +214,23 @@ describe('canonical rebuild pipeline', () => {
           ],
         },
       ])
+      expect(service.getEntry('yde_00000001', 'zh-cn')?.senses[0].glosses).toEqual([
+        {
+          id: 'ydg_00000002',
+          lang: 'zh-cn',
+          text: '吃',
+          sourceType: 'source',
+          reviewStatus: 'approved',
+          sourceRefs: [
+            {
+              kind: 'wiktionary',
+              sourceId: 'kaikki:食べる',
+              license: 'CC-BY-SA-3.0',
+              importedAt,
+            },
+          ],
+        },
+      ])
     } finally {
       db.close()
     }
@@ -190,6 +245,7 @@ describe('canonical rebuild pipeline', () => {
       kanjidic2Url: 'unused',
       kanjidic2Source: join(dir, 'missing-kanjidic2.xml'),
       tatoebaMaxExamplesPerSense: 3,
+      wiktionaryMaxGlossesPerSense: 8,
       snapshot: join(dir, 'snapshot.json'),
       registry: join(dir, 'ids.json'),
       releaseDb: join(dir, 'release.sqlite'),

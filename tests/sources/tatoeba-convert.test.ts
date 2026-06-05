@@ -188,6 +188,97 @@ describe('importTatoebaExamplesIntoSnapshot', () => {
     expect(result.snapshot.entries[0].senses[1].examples).toEqual([])
   })
 
+  test('uses translation gloss overlap to avoid broad multi-sense attachment', () => {
+    const source = snapshot()
+    source.entries[0].senses[1].appliesToFormIds = 'all'
+    source.entries[0].senses[1].glosses[0].text = 'to live on a salary'
+
+    const result = importTatoebaExamplesIntoSnapshot(source, [
+      {
+        japaneseId: '8878337',
+        translationId: '7114453',
+        japanese: '食べることが大好きなんです。',
+        translation: 'I love to eat.',
+        lang: 'en',
+      },
+    ], {
+      registry: createEmptyIdRegistry(),
+      importedAt,
+    })
+
+    expect(result.stats).toMatchObject({
+      pairsProcessed: 1,
+      pairsMatched: 1,
+      examplesAdded: 1,
+      entriesUpdated: 1,
+    })
+    expect(result.snapshot.entries[0].senses[0].examples).toHaveLength(1)
+    expect(result.snapshot.entries[0].senses[1].examples).toEqual([])
+  })
+
+  test('matches simple English inflections when choosing a sense', () => {
+    const source = snapshot()
+    source.entries[0].senses[1].appliesToFormIds = 'all'
+    source.entries[0].senses[1].glosses[0].text = 'to live on a salary'
+
+    const result = importTatoebaExamplesIntoSnapshot(source, [
+      {
+        japaneseId: '100',
+        translationId: '200',
+        japanese: '寿司を食べる。',
+        translation: 'I ate sushi.',
+        lang: 'en',
+      },
+    ], {
+      registry: createEmptyIdRegistry(),
+      importedAt,
+    })
+
+    expect(result.stats.examplesAdded).toBe(1)
+    expect(result.snapshot.entries[0].senses[0].examples).toHaveLength(1)
+    expect(result.snapshot.entries[0].senses[1].examples).toEqual([])
+  })
+
+  test('matches CJK gloss characters when choosing a sense', () => {
+    const source = snapshot()
+    source.entries[0].senses[1].appliesToFormIds = 'all'
+    source.entries[0].senses[0].glosses.push({
+      id: 'ydg_00000003',
+      senseId: 'yds_00000001',
+      lang: 'zh-tw',
+      text: '吃',
+      sourceType: 'source',
+      reviewStatus: 'approved',
+      sourceRefs: [sourceRef('kaikki:食べる')],
+    })
+    source.entries[0].senses[1].glosses.push({
+      id: 'ydg_00000004',
+      senseId: 'yds_00000002',
+      lang: 'zh-tw',
+      text: '維持生計',
+      sourceType: 'source',
+      reviewStatus: 'approved',
+      sourceRefs: [sourceRef('kaikki:食べる')],
+    })
+
+    const result = importTatoebaExamplesIntoSnapshot(source, [
+      {
+        japaneseId: '101',
+        translationId: '201',
+        japanese: '寿司を食べる。',
+        translation: '我吃壽司。',
+        lang: 'zh-tw',
+      },
+    ], {
+      registry: createEmptyIdRegistry(),
+      importedAt,
+    })
+
+    expect(result.stats.examplesAdded).toBe(1)
+    expect(result.snapshot.entries[0].senses[0].examples).toHaveLength(1)
+    expect(result.snapshot.entries[0].senses[1].examples).toEqual([])
+  })
+
   test('deduplicates examples and respects per-sense limits', () => {
     const result = importTatoebaExamplesIntoSnapshot(snapshot(), [
       {

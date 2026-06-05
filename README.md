@@ -115,7 +115,7 @@ Important rules:
 The canonical model adds a cleaner rebuild path for the next API:
 
 ```text
-JMdict / KANJIDIC2 / Tatoeba sources -> canonical snapshot -> canonical SQLite release DB -> /v2 API
+JMdict / KANJIDIC2 / Tatoeba / Wiktionary sources -> canonical snapshot -> canonical SQLite release DB -> /v2 API
 ```
 
 Canonical rules:
@@ -123,6 +123,7 @@ Canonical rules:
 - Yori owns canonical IDs such as `yde_00000001`; source IDs stay in `sourceRefs`.
 - `sourceRefs.kind` records where data came from, including `jmdict`, `jmnedict`, `kanjidic2`, `wiktionary`, `tatoeba`, `manual`, and `ai`.
 - Tatoeba canonical imports enrich existing entries with examples; they do not create new dictionary entries.
+- Wiktionary canonical imports enrich existing senses with glosses; ambiguous multi-sense entries require direct IDs or a POS match.
 - downloaded source files, generated snapshots, and generated canonical release DBs are ignored by git.
 - source parsers and importers should be covered by focused tests before real data rebuilds.
 
@@ -156,6 +157,8 @@ sdk/                     generated TypeScript client
 | `bun run release:build` | build a release without using the dev wrapper |
 | `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
 | `bun run import:tatoeba:canonical` | import Tatoeba examples into an existing canonical snapshot |
+| `bun run import:wiktionary:canonical` | import Wiktionary/Kaikki glosses into an existing canonical snapshot |
+| `bun run apply:canonical-overlays` | apply approved manual/AI overlay operations to a canonical snapshot |
 | `bun run validate:snapshot` | validate canonical snapshot structure |
 | `bun run quality:canonical` | report dictionary quality issues in a canonical snapshot |
 | `bun run release:activate --version <version>` | switch to an existing release |
@@ -186,6 +189,8 @@ Admin workflow summary:
 - build or activate immutable releases
 - promote approved effective updates into a release
 - inspect update batches and failures
+
+Canonical manual/AI data should be stored as overlay operations and applied after source imports. For rebuilds, pass `--overlay-file <path>` to `bun run rebuild:canonical`; only approved operations are applied to the release snapshot.
 
 ## Environment
 
