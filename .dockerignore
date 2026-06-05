@@ -14,13 +14,16 @@ tests/
 # Examples
 examples/
 
-# Raw JMdict files (large, not needed for build)
+# Generated or local dictionary data
+data/cache/
 data/raw/
-
-# Local database (will be built from JSON)
-dict.sqlite
-dict.sqlite-shm
-dict.sqlite-wal
+data/reports/
+data/sources/
+data/snapshots/
+data/releases/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Environment files
 .env

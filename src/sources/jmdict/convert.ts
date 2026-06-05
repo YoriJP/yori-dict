@@ -201,7 +201,7 @@ function buildGlosses(
 ): Gloss[] {
   const refs = [sourceRef(word.id, options)]
   return (sense.gloss ?? [])
-    .map((gloss, glossIndex) => {
+    .map((gloss, glossIndex): Gloss | null => {
       const text = gloss.text.trim()
       if (!text) return null
       const lang = mapGlossLang(gloss.lang)
@@ -220,7 +220,7 @@ function buildGlosses(
         sourceRefs: refs,
       } satisfies Gloss
     })
-    .filter((gloss): gloss is Gloss => Boolean(gloss))
+    .filter((gloss): gloss is Gloss => gloss !== null)
 }
 
 function buildSenses(

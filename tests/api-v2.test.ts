@@ -3,17 +3,11 @@ import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { buildCanonicalRelease } from '../scripts/pipeline/build-canonical-release'
-import { writeReleaseSnapshotToDb } from '../scripts/release/lib'
-import { closeDb } from '../src/db'
 import { closeCanonicalDb } from '../src/runtime/canonical-db'
-import { createEmptySnapshot } from '../src/storage'
 import type { CanonicalSnapshot, SourceKind, SourceRef } from '../src/domain/types'
 
 let app: { fetch: (request: Request) => Response | Promise<Response> }
 let tempDir = ''
-let originalReleaseDbPath: string | undefined
-let originalReleaseVersion: string | undefined
-let originalUpdatesDatabasePath: string | undefined
 let originalCanonicalReleaseDbPath: string | undefined
 
 const importedAt = '2026-06-03T00:00:00.000Z'
@@ -262,24 +256,15 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 }
 
 beforeAll(async () => {
-  originalReleaseDbPath = process.env.RELEASE_DB_PATH
-  originalReleaseVersion = process.env.RELEASE_VERSION
-  originalUpdatesDatabasePath = process.env.UPDATES_DATABASE_PATH
   originalCanonicalReleaseDbPath = process.env.CANONICAL_RELEASE_DB_PATH
 
   tempDir = mkdtempSync(join(tmpdir(), 'yori-api-v2-test-'))
-  const legacyDbPath = join(tempDir, 'legacy-release.sqlite')
-  const updatesDbPath = join(tempDir, 'updates.sqlite')
   const snapshotPath = join(tempDir, 'canonical-snapshot.json')
   const canonicalDbPath = join(tempDir, 'canonical-release.sqlite')
 
-  writeReleaseSnapshotToDb(legacyDbPath, createEmptySnapshot())
   await Bun.write(snapshotPath, JSON.stringify(canonicalSnapshot()))
   await buildCanonicalRelease({ snapshot: snapshotPath, out: canonicalDbPath, overwrite: false })
 
-  process.env.RELEASE_DB_PATH = legacyDbPath
-  process.env.RELEASE_VERSION = 'api-v2-test'
-  process.env.UPDATES_DATABASE_PATH = updatesDbPath
   process.env.CANONICAL_RELEASE_DB_PATH = canonicalDbPath
 
   const module = await import('../src/index')
@@ -288,16 +273,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   closeCanonicalDb()
-  closeDb()
-
-  if (originalReleaseDbPath === undefined) delete process.env.RELEASE_DB_PATH
-  else process.env.RELEASE_DB_PATH = originalReleaseDbPath
-
-  if (originalReleaseVersion === undefined) delete process.env.RELEASE_VERSION
-  else process.env.RELEASE_VERSION = originalReleaseVersion
-
-  if (originalUpdatesDatabasePath === undefined) delete process.env.UPDATES_DATABASE_PATH
-  else process.env.UPDATES_DATABASE_PATH = originalUpdatesDatabasePath
 
   if (originalCanonicalReleaseDbPath === undefined) delete process.env.CANONICAL_RELEASE_DB_PATH
   else process.env.CANONICAL_RELEASE_DB_PATH = originalCanonicalReleaseDbPath

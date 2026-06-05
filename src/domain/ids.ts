@@ -1,6 +1,14 @@
 export type YoriEntityType = 'entry' | 'sense' | 'form' | 'reading' | 'gloss' | 'example' | 'alias' | 'kanji'
 
-export type IdRegistrySection = `${YoriEntityType}s`
+export type IdRegistrySection =
+  | 'entries'
+  | 'senses'
+  | 'forms'
+  | 'readings'
+  | 'glosses'
+  | 'examples'
+  | 'aliases'
+  | 'kanjis'
 
 export interface IdRegistry {
   schemaVersion: '1.0.0'

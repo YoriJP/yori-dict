@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This file covers the setup issues that actually block local development.
+This file covers setup issues for the canonical dictionary runtime.
 
 ## Start Here
 
@@ -8,191 +8,159 @@ For a normal local run:
 
 ```bash
 bun install
-bun run data:pull
-bun run build:db
+bun run rebuild:canonical --overwrite
+export CANONICAL_RELEASE_DB_PATH=data/releases/canonical/yori-dict.sqlite
 bun run dev
 ```
 
 If a command fails, check the matching section below.
 
-## No Active Release Database
+## Canonical Dictionary Is Not Configured
 
-Error:
+Response:
 
-```text
-No active release database found. Run "bun run build:db" or set RELEASE_DB_PATH.
+```json
+{ "error": "Canonical dictionary is not configured" }
 ```
 
 Fix:
 
 ```bash
-bun run build:db
+bun run rebuild:canonical --overwrite
+export CANONICAL_RELEASE_DB_PATH=data/releases/canonical/yori-dict.sqlite
 ```
 
-For tests that intentionally use a fixture DB, set:
+`CANONICAL_RELEASE_DB_PATH` must point at a canonical SQLite release DB built by:
 
 ```bash
-export RELEASE_DB_PATH=/path/to/release.sqlite
-export RELEASE_VERSION=test
+bun run release:build:canonical
 ```
 
-## Git LFS Pointer Instead Of JSON
-
-Error:
-
-```text
-SyntaxError: Failed to parse JSON
-```
-
-Or the file starts with:
-
-```text
-version https://git-lfs.github.com/spec/v1
-```
-
-Fix:
+or:
 
 ```bash
-git lfs install
-bun run data:pull
-bun run build:db
+bun run rebuild:canonical
 ```
 
-## Missing Data Files
+## Missing Source Files
 
-If `build:db` cannot find `data/core.json` or `data/lang/*.json`, either pull the checked-in snapshots:
+`rebuild:canonical` expects local source files unless you pass explicit paths.
+
+Common options:
 
 ```bash
-bun run data:pull
+bun run rebuild:canonical \
+  --jmdict-file data/sources/JMdict_e.xml \
+  --kanjidic2-file data/sources/kanjidic2.xml \
+  --overwrite
 ```
 
-Or rebuild from sources:
+If you already prepared the source files:
 
 ```bash
-bun run rebuild:all
-bun run release:activate --version <version>
+bun run rebuild:canonical --skip-prepare --overwrite
 ```
 
-## Import Download Problems
+## Invalid Snapshot
 
-If an importer fails after a partial or corrupt download:
+Validate the canonical snapshot directly:
 
 ```bash
-rm -rf data/cache
-bun run import:jmdict --lang en --mode diff
+bun run validate:snapshot --snapshot data/snapshots/yori-dict.snapshot.json
 ```
 
-Use `--mode diff` first when you only want to verify the importer can run.
+Common causes:
 
-## Import Modes
+- duplicate product-owned IDs
+- aliases pointing to unknown entries/forms/readings
+- AI source refs missing `model`, `promptVersion`, or `inputRefs`
+- examples or glosses attached to the wrong sense
 
-Common importer modes:
+## Overlay Validation Fails
 
-| Mode | Behavior |
-| --- | --- |
-| `diff` | preview changes without writing files |
-| `merge` | add missing data and merge with existing entries |
-| `refresh` | remove and re-import data from that source |
-| `replace` | treat incoming data as the full source snapshot |
-
-Not every importer supports every mode. Check the script help when unsure:
+Validate and apply overlays with:
 
 ```bash
-bun run import:jmdict --help
+bun run apply:canonical-overlays --overlay data/overlays/canonical-overlays.json
 ```
 
-## Database Locked
+Rules:
 
-Usually another server or SQLite process is using the DB.
-
-```bash
-lsof -i :3000
-```
-
-Stop the extra process, then retry. Avoid deleting release files while the server is running.
+- the overlay file must have `schemaVersion: "1.0.0"`
+- operations must have unique `id` values
+- only `reviewStatus: "approved"` operations are applied
+- AI operations must include `model`, `promptVersion`, and `inputRefs`
 
 ## Word Not Found
 
-First confirm which DB is active:
+First confirm the canonical DB is being used:
 
 ```bash
-cat releases/current.json | jq
+echo "$CANONICAL_RELEASE_DB_PATH"
+ls -lh "$CANONICAL_RELEASE_DB_PATH"
 ```
 
-Then query the active release:
+Then inspect aliases:
 
 ```bash
-ACTIVE_DB="$(jq -r '.dbPath' releases/current.json)"
-sqlite3 "$ACTIVE_DB" "SELECT id, word, reading FROM words WHERE word = '食べる' OR reading = 'たべる';"
+sqlite3 "$CANONICAL_RELEASE_DB_PATH" \
+  "SELECT surface, reading, entry_public_id, alias_type, score FROM lookup_aliases WHERE surface = '食べる' OR normalized_surface = '食べる';"
 ```
 
-If the word exists in snapshot JSON but not lookup, build and activate a release:
+If aliases exist but lookup still fails, check whether the requested language has glosses:
 
 ```bash
-bun run build:db
+sqlite3 "$CANONICAL_RELEASE_DB_PATH" \
+  "SELECT g.lang, g.text FROM glosses g JOIN senses s ON s.public_id = g.sense_public_id WHERE s.entry_public_id = 'yde_00000001';"
 ```
-
-If an AI update exists but lookup does not show it, inspect `/admin/entry`. Pending and rejected AI updates are ignored, and source updates can outrank AI updates.
 
 ## Missing Translations
 
-Check release counts:
+Run the quality report:
 
 ```bash
-ACTIVE_DB="$(jq -r '.dbPath' releases/current.json)"
-sqlite3 "$ACTIVE_DB" "SELECT lang, COUNT(*) FROM translations GROUP BY lang;"
+bun run quality:canonical --snapshot data/snapshots/yori-dict.snapshot.json
 ```
 
-If a language is missing, run the relevant importer or rebuild:
+If the source has data but the release DB does not, rebuild:
 
 ```bash
-bun run rebuild:all
+bun run rebuild:canonical --overwrite
 ```
 
-## Admin Login Fails
-
-Set `ADMIN_TOKEN` before starting the server:
+If the missing content is manual or AI-reviewed, make sure the rebuild includes the overlay file:
 
 ```bash
-export ADMIN_TOKEN="change-me"
-bun run dev
+bun run rebuild:canonical --overlay-file data/overlays/canonical-overlays.json --overwrite
 ```
 
-Basic Auth uses any username and `ADMIN_TOKEN` as the password.
+## Docker Build
 
-## Docker Build Fails On Data
+The Docker image expects a canonical release DB to be present in the build context under:
 
-Docker needs real LFS files on the host before building:
+```text
+data/releases/canonical/yori-dict.sqlite
+```
+
+Build it first:
 
 ```bash
-bun run data:pull
+bun run rebuild:canonical --overwrite
 bun run docker:build
 ```
 
 ## Slow Lookup
 
-Check the active DB and indexes:
+Check the release DB and indexes:
 
 ```bash
-ACTIVE_DB="$(jq -r '.dbPath' releases/current.json)"
-ls -lh "$ACTIVE_DB"
-sqlite3 "$ACTIVE_DB" ".indexes"
+ls -lh "$CANONICAL_RELEASE_DB_PATH"
+sqlite3 "$CANONICAL_RELEASE_DB_PATH" ".indexes"
 ```
 
-Profile one query:
+Profile a query:
 
 ```bash
-sqlite3 "$ACTIVE_DB" "EXPLAIN QUERY PLAN SELECT * FROM words WHERE word = '食べる' LIMIT 1;"
+sqlite3 "$CANONICAL_RELEASE_DB_PATH" \
+  "EXPLAIN QUERY PLAN SELECT * FROM lookup_aliases WHERE normalized_surface = '食べる' LIMIT 20;"
 ```
-
-## Conjugations Missing
-
-Conjugations depend on part-of-speech tags.
-
-```bash
-curl "http://localhost:3000/v1/lookup?word=食べる" | jq '.partOfSpeech'
-```
-
-Expected tags include `ichidan verb`, `godan verb`, `suru verb`, `kuru verb`, or `i-adjective`.
-
-If the tag is wrong, fix the source data or add a reviewed manual entry, then build or promote as appropriate.

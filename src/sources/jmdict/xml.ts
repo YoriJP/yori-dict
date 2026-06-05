@@ -60,6 +60,7 @@ function parseKana(entryXml: string): JmdictKana[] {
   return elementBlocks(entryXml, 'r_ele').map((block) => {
     const priority = texts(block.content, 're_pri')
     const restrictions = texts(block.content, 're_restr')
+    const appliesToKanji: JmdictKana['appliesToKanji'] = restrictions.length > 0 ? restrictions : 'all'
     return {
       text: firstText(block.content, 'reb') ?? '',
       common: priority.length > 0,
@@ -68,7 +69,7 @@ function parseKana(entryXml: string): JmdictKana[] {
         ...(hasEmptyElement(block.content, 're_nokanji') ? ['no kanji'] : []),
       ],
       priority,
-      appliesToKanji: restrictions.length > 0 ? restrictions : 'all',
+      appliesToKanji,
     }
   }).filter((kana) => kana.text)
 }
