@@ -12,6 +12,9 @@ releases/
 data/cache/
 data/raw/
 data/reports/
+data/sources/
+data/snapshots/
+data/releases/
 
 # Build output
 dist/
