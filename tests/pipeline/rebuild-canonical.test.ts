@@ -76,10 +76,16 @@ describe('canonical rebuild pipeline', () => {
       '--imported-at', importedAt,
       '--jmdict-limit', '1',
       '--kanjidic2-limit', '1',
+      '--tatoeba-file', 'examples.json',
+      '--tatoeba-lang', 'en',
+      '--tatoeba-max-examples-per-sense', '2',
       '--overwrite',
     ])).toMatchObject({
       jmdictFile: 'JMdict_e.xml',
       kanjidic2File: 'kanjidic2.xml',
+      tatoebaFile: 'examples.json',
+      tatoebaLang: 'en',
+      tatoebaMaxExamplesPerSense: 2,
       snapshot: 'snapshot.json',
       registry: 'ids.json',
       releaseDb: 'release.sqlite',
@@ -94,6 +100,7 @@ describe('canonical rebuild pipeline', () => {
     const dir = makeTempDir()
     const rawJmdictPath = join(dir, 'JMdict_e.xml')
     const rawKanjidic2Path = join(dir, 'kanjidic2.xml')
+    const tatoebaPath = join(dir, 'examples.json')
     const jmdictSource = join(dir, 'sources', 'jmdict.xml')
     const kanjidic2Source = join(dir, 'sources', 'kanjidic2.xml')
     const snapshotPath = join(dir, 'snapshot.json')
@@ -102,6 +109,15 @@ describe('canonical rebuild pipeline', () => {
 
     await Bun.write(rawJmdictPath, jmdictXml)
     await Bun.write(rawKanjidic2Path, kanjidic2Xml)
+    await Bun.write(tatoebaPath, JSON.stringify([
+      {
+        japaneseId: '100',
+        translationId: '200',
+        japanese: '寿司を食べる。',
+        translation: 'I eat sushi.',
+        lang: 'en',
+      },
+    ]))
 
     await rebuildCanonical({
       jmdictFile: rawJmdictPath,
@@ -110,6 +126,8 @@ describe('canonical rebuild pipeline', () => {
       kanjidic2File: rawKanjidic2Path,
       kanjidic2Url: 'unused',
       kanjidic2Source,
+      tatoebaFile: tatoebaPath,
+      tatoebaMaxExamplesPerSense: 3,
       snapshot: snapshotPath,
       registry: registryPath,
       releaseDb: releaseDbPath,
@@ -141,6 +159,23 @@ describe('canonical rebuild pipeline', () => {
         literal: '食',
         meanings: [{ lang: 'en', text: 'eat' }],
       })
+      expect(service.getEntry('yde_00000001', 'en')?.senses[0].examples).toEqual([
+        {
+          id: 'ydx_00000001',
+          senseId: 'yds_00000001',
+          lang: 'en',
+          japanese: '寿司を食べる。',
+          translation: 'I eat sushi.',
+          sourceRefs: [
+            {
+              kind: 'tatoeba',
+              sourceId: '100-200',
+              license: 'CC-BY 2.0 FR',
+              importedAt,
+            },
+          ],
+        },
+      ])
     } finally {
       db.close()
     }
@@ -154,6 +189,7 @@ describe('canonical rebuild pipeline', () => {
       jmdictSource: join(dir, 'missing-jmdict.xml'),
       kanjidic2Url: 'unused',
       kanjidic2Source: join(dir, 'missing-kanjidic2.xml'),
+      tatoebaMaxExamplesPerSense: 3,
       snapshot: join(dir, 'snapshot.json'),
       registry: join(dir, 'ids.json'),
       releaseDb: join(dir, 'release.sqlite'),

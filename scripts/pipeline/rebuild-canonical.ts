@@ -3,7 +3,10 @@ import { prepareJmdict } from './prepare-jmdict'
 import { prepareKanjidic2 } from './prepare-kanjidic2'
 import { runImport as importJmdictCanonical } from './import-jmdict-canonical'
 import { importKanjidic2Canonical } from './import-kanjidic2-canonical'
+import { importTatoebaCanonical } from './import-tatoeba-canonical'
 import { buildCanonicalRelease } from './build-canonical-release'
+import type { TargetLanguage } from '../../src/domain/types'
+import { SUPPORTED_LANGUAGES, normalizeLanguage } from '../../src/types'
 
 interface CliOptions {
   jmdictFile?: string
@@ -12,6 +15,9 @@ interface CliOptions {
   kanjidic2File?: string
   kanjidic2Url: string
   kanjidic2Source: string
+  tatoebaFile?: string
+  tatoebaLang?: TargetLanguage
+  tatoebaMaxExamplesPerSense: number
   snapshot: string
   registry: string
   releaseDb: string
@@ -29,6 +35,7 @@ const DEFAULT_KANJIDIC2_SOURCE = 'data/sources/kanjidic2/kanjidic2.xml'
 const DEFAULT_SNAPSHOT = 'data/snapshots/yori-dict.snapshot.json'
 const DEFAULT_REGISTRY = 'data/registry/ids.json'
 const DEFAULT_RELEASE_DB = 'data/releases/canonical/yori-dict.sqlite'
+const DEFAULT_TATOEBA_MAX_EXAMPLES_PER_SENSE = 3
 
 function printHelp(): void {
   console.log(`
@@ -47,6 +54,10 @@ Options:
   --kanjidic2-file <path>    Local KANJIDIC2 XML/XML.gz source.
   --kanjidic2-url <url>      KANJIDIC2 download URL (default: ${DEFAULT_KANJIDIC2_URL})
   --kanjidic2-source <path>  Prepared KANJIDIC2 XML path (default: ${DEFAULT_KANJIDIC2_SOURCE})
+  --tatoeba-file <path>      Optional Tatoeba JSON/TSV examples file.
+  --tatoeba-lang <lang>      Required for Tatoeba TSV input. Supported: ${SUPPORTED_LANGUAGES.join(', ')}
+  --tatoeba-max-examples-per-sense <n>
+                              Max Tatoeba examples per sense/language (default: ${DEFAULT_TATOEBA_MAX_EXAMPLES_PER_SENSE})
   --snapshot <path>          Canonical snapshot path (default: ${DEFAULT_SNAPSHOT})
   --registry <path>          Stable Yori ID registry path (default: ${DEFAULT_REGISTRY})
   --release-db <path>        Canonical SQLite release path (default: ${DEFAULT_RELEASE_DB})
@@ -73,6 +84,7 @@ export function parseArgs(args: string[]): CliOptions {
     jmdictSource: DEFAULT_JMDICT_SOURCE,
     kanjidic2Url: DEFAULT_KANJIDIC2_URL,
     kanjidic2Source: DEFAULT_KANJIDIC2_SOURCE,
+    tatoebaMaxExamplesPerSense: DEFAULT_TATOEBA_MAX_EXAMPLES_PER_SENSE,
     snapshot: DEFAULT_SNAPSHOT,
     registry: DEFAULT_REGISTRY,
     releaseDb: DEFAULT_RELEASE_DB,
@@ -106,6 +118,17 @@ export function parseArgs(args: string[]): CliOptions {
       i++
     } else if (arg === '--kanjidic2-source' && next) {
       opts.kanjidic2Source = next
+      i++
+    } else if (arg === '--tatoeba-file' && next) {
+      opts.tatoebaFile = next
+      i++
+    } else if (arg === '--tatoeba-lang' && next) {
+      const lang = normalizeLanguage(next)
+      if (!lang) throw new Error(`--tatoeba-lang must be one of: ${SUPPORTED_LANGUAGES.join(', ')}`)
+      opts.tatoebaLang = lang
+      i++
+    } else if (arg === '--tatoeba-max-examples-per-sense' && next) {
+      opts.tatoebaMaxExamplesPerSense = parsePositiveInt(next, '--tatoeba-max-examples-per-sense')
       i++
     } else if (arg === '--snapshot' && next) {
       opts.snapshot = next
@@ -178,6 +201,17 @@ export async function rebuildCanonical(opts: CliOptions): Promise<void> {
     importedAt: opts.importedAt,
     limit: opts.kanjidic2Limit,
   })
+  if (opts.tatoebaFile) {
+    await importTatoebaCanonical({
+      file: opts.tatoebaFile,
+      snapshot: opts.snapshot,
+      out: opts.snapshot,
+      registry: opts.registry,
+      importedAt: opts.importedAt,
+      lang: opts.tatoebaLang,
+      maxExamplesPerSense: opts.tatoebaMaxExamplesPerSense,
+    })
+  }
   await buildCanonicalRelease({
     snapshot: opts.snapshot,
     out: opts.releaseDb,
