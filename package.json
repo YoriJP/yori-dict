@@ -19,6 +19,7 @@
     "apply:canonical-overlays": "bun run scripts/pipeline/apply-canonical-overlays.ts",
     "curate:canonical-overlays": "bun run scripts/pipeline/curate-canonical-overlays.ts",
     "queue:curation": "bun run scripts/pipeline/build-curation-queue.ts",
+    "generate:ai-suggestions": "bun run scripts/pipeline/generate-ai-curation-suggestions.ts",
     "suggest:ai-overlays": "bun run scripts/pipeline/create-ai-curation-overlays.ts",
     "preview:canonical-release": "bun run scripts/pipeline/preview-canonical-release.ts",
     "rebuild:canonical": "bun run scripts/pipeline/rebuild-canonical.ts",

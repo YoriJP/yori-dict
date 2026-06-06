@@ -10,11 +10,13 @@ releases/
 # Downloaded source data (re-fetchable via import scripts)
 data/cache/
 data/raw/
+data/curation/
 data/reports/
 data/previews/
 data/sources/
 data/snapshots/
 data/releases/
+reports/
 
 # Build output
 dist/

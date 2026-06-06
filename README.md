@@ -109,6 +109,7 @@ sdk/                          generated TypeScript client
 | `bun run apply:canonical-overlays` | apply approved manual/AI overlay operations to a canonical snapshot |
 | `bun run curate:canonical-overlays` | create or review canonical overlay operations |
 | `bun run queue:curation` | build a target-language curation queue from a canonical snapshot |
+| `bun run generate:ai-suggestions` | generate AI suggestion JSONL from a curation queue |
 | `bun run suggest:ai-overlays` | convert AI suggestion records into unreviewed overlay operations |
 | `bun run preview:canonical-release` | preview overlays in a temporary canonical release DB |
 | `bun run rebuild:canonical` | rebuild the canonical snapshot and canonical SQLite DB |
@@ -139,6 +140,12 @@ Canonical overlays are JSON files with approved operations:
   ]
 }
 ```
+
+File policy:
+
+- `data/curation/` and `reports/` are generated local output and are ignored.
+- `data/overlays/` and `data/registry/` are not ignored. Commit those only when they contain intentional product-owned overlay operations or stable ID registry changes.
+- Pending AI suggestions do not change the dictionary and do not remove queue items. A queue item is resolved only after the operation is approved, applied to the canonical snapshot, and the release is rebuilt.
 
 Create manual curation operations:
 
@@ -175,10 +182,17 @@ bun run queue:curation --lang zh-tw --common-only --limit 100
 Convert AI suggestion output into unreviewed overlay operations:
 
 ```bash
+bun run generate:ai-suggestions \
+  --queue data/curation/queue.zh-tw.json \
+  --out data/curation/suggestions.zh-tw.jsonl \
+  --model gemini-2.5-flash \
+  --prompt-version canonical-gloss-v1 \
+  --limit 20
+
 bun run suggest:ai-overlays \
   --queue data/curation/queue.zh-tw.json \
   --suggestions data/curation/suggestions.zh-tw.jsonl \
-  --model gemini-3.1-flash-lite \
+  --model gemini-2.5-flash \
   --prompt-version canonical-gloss-v1
 ```
 
