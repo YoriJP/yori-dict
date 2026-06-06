@@ -12,6 +12,12 @@ import type {
 
 type OverlaySourceKind = 'manual' | 'ai'
 
+export interface AiOverlayMetadata {
+  model: string
+  promptVersion: string
+  inputRefs: string[]
+}
+
 interface OverlayBase {
   id: string
   sourceKind: OverlaySourceKind
@@ -85,6 +91,42 @@ export interface OverlayApplyOptions {
   registry: IdRegistry
 }
 
+export interface OverlayOperationIdInput {
+  sourceKind: OverlaySourceKind
+  targetId: string
+  action: CanonicalOverlayOperation['type']
+  lang?: TargetLanguage
+  promptVersion?: string
+  date: string | Date
+}
+
+export interface ManualOverlayBaseInput {
+  id?: string
+  importedAt: string
+  reviewStatus?: ReviewStatus
+}
+
+export interface CreateGlossOverlayInput extends ManualOverlayBaseInput {
+  senseId: string
+  lang: TargetLanguage
+  text: string
+}
+
+export interface CreateReplaceGlossesOverlayInput extends ManualOverlayBaseInput {
+  senseId: string
+  lang: TargetLanguage
+  glosses: string[]
+}
+
+export interface CreateExampleOverlayInput extends ManualOverlayBaseInput {
+  senseId: string
+  lang: TargetLanguage
+  japanese: string
+  translation: string
+}
+
+export interface CreateAiGlossOverlayInput extends CreateGlossOverlayInput, AiOverlayMetadata {}
+
 function issue(path: string, message: string): OverlayIssue {
   return { path, message }
 }
@@ -115,6 +157,155 @@ function sourceKey(op: OverlayBase, entity: 'gloss' | 'example', suffix = ''): s
 
 function isApproved(op: OverlayBase): boolean {
   return op.reviewStatus === 'approved'
+}
+
+function compactIdPart(value: string): string {
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function formatOperationDate(date: string | Date): string {
+  if (date instanceof Date) {
+    if (Number.isNaN(date.getTime())) throw new Error('date must be valid')
+    return date.toISOString().slice(0, 10).replace(/-/g, '')
+  }
+
+  const normalized = date.trim()
+  if (/^\d{8}$/.test(normalized)) return normalized
+
+  const parsed = new Date(normalized)
+  if (Number.isNaN(parsed.getTime())) throw new Error('date must be YYYYMMDD, an ISO date string, or a Date')
+  return parsed.toISOString().slice(0, 10).replace(/-/g, '')
+}
+
+function assertManualInput(input: ManualOverlayBaseInput): void {
+  if (!input.importedAt?.trim()) throw new Error('importedAt is required')
+  if (input.reviewStatus && !['unreviewed', 'approved', 'rejected'].includes(input.reviewStatus)) {
+    throw new Error('reviewStatus is invalid')
+  }
+}
+
+function assertAiMetadata(input: AiOverlayMetadata): void {
+  if (!input.model?.trim()) throw new Error('AI overlays must include model')
+  if (!input.promptVersion?.trim()) throw new Error('AI overlays must include promptVersion')
+  if (!Array.isArray(input.inputRefs) || input.inputRefs.length === 0) {
+    throw new Error('AI overlays must include inputRefs')
+  }
+}
+
+function defaultOperationId(
+  sourceKind: OverlaySourceKind,
+  targetId: string,
+  action: CanonicalOverlayOperation['type'],
+  lang: TargetLanguage | undefined,
+  importedAt: string,
+  promptVersion?: string
+): string {
+  return formatOverlayOperationId({
+    sourceKind,
+    targetId,
+    action,
+    lang,
+    promptVersion,
+    date: importedAt,
+  })
+}
+
+export function formatOverlayOperationId(input: OverlayOperationIdInput): string {
+  if (!input.targetId?.trim()) throw new Error('targetId is required')
+  if (input.sourceKind === 'ai' && !input.promptVersion?.trim()) {
+    throw new Error('AI overlay operation IDs require promptVersion')
+  }
+
+  const parts = [
+    input.sourceKind,
+    compactIdPart(input.targetId),
+    compactIdPart(input.action),
+    input.lang,
+    input.sourceKind === 'ai' ? compactIdPart(input.promptVersion ?? '') : undefined,
+    formatOperationDate(input.date),
+  ].filter((part): part is string => Boolean(part))
+
+  return parts.join('-')
+}
+
+export function createManualAddGlossOverlay(input: CreateGlossOverlayInput): AddGlossOverlay {
+  assertManualInput(input)
+  return {
+    id: input.id ?? defaultOperationId('manual', input.senseId, 'addGloss', input.lang, input.importedAt),
+    type: 'addGloss',
+    sourceKind: 'manual',
+    importedAt: input.importedAt,
+    reviewStatus: input.reviewStatus ?? 'unreviewed',
+    senseId: input.senseId,
+    lang: input.lang,
+    text: input.text,
+  }
+}
+
+export function createManualReplaceGlossesOverlay(input: CreateReplaceGlossesOverlayInput): ReplaceGlossesOverlay {
+  assertManualInput(input)
+  return {
+    id: input.id ?? defaultOperationId('manual', input.senseId, 'replaceGlosses', input.lang, input.importedAt),
+    type: 'replaceGlosses',
+    sourceKind: 'manual',
+    importedAt: input.importedAt,
+    reviewStatus: input.reviewStatus ?? 'unreviewed',
+    senseId: input.senseId,
+    lang: input.lang,
+    glosses: input.glosses,
+  }
+}
+
+export function createManualAddExampleOverlay(input: CreateExampleOverlayInput): AddExampleOverlay {
+  assertManualInput(input)
+  return {
+    id: input.id ?? defaultOperationId('manual', input.senseId, 'addExample', input.lang, input.importedAt),
+    type: 'addExample',
+    sourceKind: 'manual',
+    importedAt: input.importedAt,
+    reviewStatus: input.reviewStatus ?? 'unreviewed',
+    senseId: input.senseId,
+    lang: input.lang,
+    japanese: input.japanese,
+    translation: input.translation,
+  }
+}
+
+export function createAiAddGlossOverlay(input: CreateAiGlossOverlayInput): AddGlossOverlay {
+  assertManualInput(input)
+  assertAiMetadata(input)
+  return {
+    id: input.id ?? defaultOperationId('ai', input.senseId, 'addGloss', input.lang, input.importedAt, input.promptVersion),
+    type: 'addGloss',
+    sourceKind: 'ai',
+    importedAt: input.importedAt,
+    reviewStatus: input.reviewStatus ?? 'unreviewed',
+    model: input.model,
+    promptVersion: input.promptVersion,
+    inputRefs: input.inputRefs,
+    senseId: input.senseId,
+    lang: input.lang,
+    text: input.text,
+  }
+}
+
+export function approveOverlayOperation(operation: CanonicalOverlayOperation): CanonicalOverlayOperation {
+  return {
+    ...operation,
+    reviewStatus: 'approved',
+  }
+}
+
+export function rejectOverlayOperation(operation: CanonicalOverlayOperation): CanonicalOverlayOperation {
+  return {
+    ...operation,
+    reviewStatus: 'rejected',
+  }
 }
 
 function validateOperationBase(op: CanonicalOverlayOperation, path: string, errors: OverlayIssue[]): void {

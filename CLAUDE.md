@@ -21,3 +21,5 @@ Future admin or curation UI should be canonical-first:
 - preview release output before publishing
 
 Keep the interface dense, quiet, and task-focused. This is a working dictionary curation tool, not a marketing site.
+
+Use `CANONICAL_EDITING_WORKFLOW.md` as the source of truth for replacement admin and curation workflow decisions.

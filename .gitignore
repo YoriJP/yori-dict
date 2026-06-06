@@ -11,6 +11,7 @@ releases/
 data/cache/
 data/raw/
 data/reports/
+data/previews/
 data/sources/
 data/snapshots/
 data/releases/
