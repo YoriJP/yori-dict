@@ -113,12 +113,15 @@ describe('canonical quality report CLI', () => {
       '--fail-on', 'warning',
       '--alias-fanout-threshold', '5',
       '--sample-limit', '3',
+      '--target-lang', 'zh-tw',
+      '--target-lang', 'zh-tw',
     ])).toEqual({
       snapshot: 'snapshot.json',
       jsonOut: 'report.json',
       failOn: 'warning',
       aliasFanoutThreshold: 5,
       sampleLimit: 3,
+      targetLanguages: ['zh-tw'],
     })
   })
 
@@ -134,6 +137,7 @@ describe('canonical quality report CLI', () => {
       failOn: 'none',
       aliasFanoutThreshold: 20,
       sampleLimit: 10,
+      targetLanguages: [],
     })
 
     expect(report.findings.find((finding) => finding.code === 'entries_without_glosses')?.count).toBe(1)
