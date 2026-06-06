@@ -108,6 +108,7 @@ sdk/                          generated TypeScript client
 | `bun run import:wiktionary:canonical` | import Wiktionary/Kaikki glosses into an existing canonical snapshot |
 | `bun run apply:canonical-overlays` | apply approved manual/AI overlay operations to a canonical snapshot |
 | `bun run curate:canonical-overlays` | create or review canonical overlay operations |
+| `bun run validate:canonical-overlays` | validate overlay JSON and optional apply behavior before release |
 | `bun run queue:curation` | build a target-language curation queue from a canonical snapshot |
 | `bun run generate:ai-suggestions` | generate AI suggestion JSONL from a curation queue |
 | `bun run suggest:ai-overlays` | convert AI suggestion records into unreviewed overlay operations |
@@ -168,7 +169,8 @@ bun run curate:canonical-overlays add-example \
 Review overlay operations:
 
 ```bash
-bun run curate:canonical-overlays list-pending-ai --overlay data/overlays/canonical-overlays.json
+bun run curate:canonical-overlays list-pending-ai --overlay data/overlays/canonical-overlays.json --lang zh-tw --limit 20
+bun run curate:canonical-overlays show --overlay data/overlays/canonical-overlays.json --id ai-yds_00000001-add-gloss-zh-tw-canonical-gloss-v1-20260604
 bun run curate:canonical-overlays approve --overlay data/overlays/canonical-overlays.json --id manual-yds_00000001-add-example-zh-tw-20260604
 bun run curate:canonical-overlays reject --overlay data/overlays/canonical-overlays.json --id ai-yds_00000001-add-gloss-zh-tw-canonical-gloss-v1-20260604
 ```
@@ -185,14 +187,14 @@ Convert AI suggestion output into unreviewed overlay operations:
 bun run generate:ai-suggestions \
   --queue data/curation/queue.zh-tw.json \
   --out data/curation/suggestions.zh-tw.jsonl \
-  --model gemini-2.5-flash \
+  --model gemini-3.1-flash-lite \
   --prompt-version canonical-gloss-v1 \
   --limit 20
 
 bun run suggest:ai-overlays \
   --queue data/curation/queue.zh-tw.json \
   --suggestions data/curation/suggestions.zh-tw.jsonl \
-  --model gemini-2.5-flash \
+  --model gemini-3.1-flash-lite \
   --prompt-version canonical-gloss-v1
 ```
 
@@ -205,7 +207,23 @@ bun run rebuild:canonical --overlay-file data/overlays/canonical-overlays.json -
 Or apply to an existing snapshot:
 
 ```bash
+bun run validate:canonical-overlays \
+  --overlay data/overlays/canonical-overlays.json \
+  --snapshot data/snapshots/yori-dict.snapshot.json
+
 bun run apply:canonical-overlays --overlay data/overlays/canonical-overlays.json
+```
+
+Minimal internal curation HTTP endpoints are available only when both
+`CURATION_OVERLAY_PATH` and `CURATION_API_TOKEN` are configured. They are for
+thin internal tooling, not public website traffic.
+
+```bash
+curl "http://localhost:3000/admin/curation/overlays?sourceKind=ai&reviewStatus=unreviewed&lang=zh-tw" \
+  -H "Authorization: Bearer $CURATION_API_TOKEN" | jq
+
+curl -X POST "http://localhost:3000/admin/curation/overlays/<operation-id>/approve" \
+  -H "Authorization: Bearer $CURATION_API_TOKEN" | jq
 ```
 
 Preview overlays before promotion:
@@ -230,6 +248,8 @@ The replacement admin and curation workflow is defined in `CANONICAL_EDITING_WOR
 | --- | --- |
 | `PORT` | server port, default `3000` |
 | `CANONICAL_RELEASE_DB_PATH` | canonical SQLite release DB used by `/v2` |
+| `CURATION_OVERLAY_PATH` | canonical overlay JSON file used by internal curation endpoints |
+| `CURATION_API_TOKEN` | bearer token required by internal curation endpoints |
 
 ## Development Notes
 

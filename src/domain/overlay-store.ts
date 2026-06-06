@@ -5,6 +5,7 @@ import {
   type CanonicalOverlayFile,
   type CanonicalOverlayOperation,
 } from './overlays'
+import type { ReviewStatus, TargetLanguage } from './types'
 
 const SCHEMA_VERSION = '1.0.0'
 const MAX_ERROR_DETAILS = 5
@@ -34,6 +35,10 @@ function assertUniqueOperationId(file: CanonicalOverlayFile, id: string): void {
   if (file.operations.some((operation) => operation.id === id)) {
     throw new Error(`Overlay operation already exists: ${id}`)
   }
+}
+
+function operationLang(operation: CanonicalOverlayOperation): TargetLanguage | undefined {
+  return operation.type === 'upsertEntry' ? undefined : operation.lang
 }
 
 export async function loadCanonicalOverlayFile(path: string): Promise<CanonicalOverlayFile> {
@@ -88,8 +93,37 @@ export async function updateCanonicalOverlayOperation(
   return operation
 }
 
+export interface ListCanonicalOverlayOperationsOptions {
+  sourceKind?: CanonicalOverlayOperation['sourceKind']
+  reviewStatus?: ReviewStatus
+  lang?: TargetLanguage
+  limit?: number
+}
+
+export function getCanonicalOverlayOperation(
+  file: CanonicalOverlayFile,
+  id: string
+): CanonicalOverlayOperation | undefined {
+  return file.operations.find((operation) => operation.id === id)
+}
+
+export function listCanonicalOverlayOperations(
+  file: CanonicalOverlayFile,
+  opts: ListCanonicalOverlayOperationsOptions = {}
+): CanonicalOverlayOperation[] {
+  const operations = file.operations.filter((operation) => {
+    if (opts.sourceKind && operation.sourceKind !== opts.sourceKind) return false
+    if (opts.reviewStatus && operation.reviewStatus !== opts.reviewStatus) return false
+    if (opts.lang && operationLang(operation) !== opts.lang) return false
+    return true
+  })
+
+  return typeof opts.limit === 'number' ? operations.slice(0, opts.limit) : operations
+}
+
 export function listPendingAiOverlayOperations(file: CanonicalOverlayFile): CanonicalOverlayOperation[] {
-  return file.operations.filter((operation) =>
-    operation.sourceKind === 'ai' && operation.reviewStatus === 'unreviewed'
-  )
+  return listCanonicalOverlayOperations(file, {
+    sourceKind: 'ai',
+    reviewStatus: 'unreviewed',
+  })
 }

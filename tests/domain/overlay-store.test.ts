@@ -4,6 +4,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import {
   appendCanonicalOverlayOperation,
+  getCanonicalOverlayOperation,
+  listCanonicalOverlayOperations,
   listPendingAiOverlayOperations,
   loadCanonicalOverlayFile,
   updateCanonicalOverlayOperation,
@@ -93,6 +95,36 @@ describe('canonical overlay store', () => {
     expect(listPendingAiOverlayOperations({
       schemaVersion: '1.0.0',
       operations: [ai, manual, approveOverlayOperation(ai)],
+    })).toEqual([ai])
+  })
+
+  test('lists and finds operations with filters', async () => {
+    const ai = createAiAddGlossOverlay({
+      importedAt,
+      model: 'gemini-3.1-flash-lite',
+      promptVersion: 'canonical-gloss-v1',
+      inputRefs: ['jmdict:1358280'],
+      senseId: 'yds_00000001',
+      lang: 'zh-tw',
+      text: '吃',
+    })
+    const manual = createManualAddGlossOverlay({
+      importedAt,
+      senseId: 'yds_00000001',
+      lang: 'zh-cn',
+      text: '吃',
+    })
+    const file = {
+      schemaVersion: '1.0.0' as const,
+      operations: [ai, manual],
+    }
+
+    expect(getCanonicalOverlayOperation(file, ai.id)).toEqual(ai)
+    expect(listCanonicalOverlayOperations(file, {
+      sourceKind: 'ai',
+      reviewStatus: 'unreviewed',
+      lang: 'zh-tw',
+      limit: 1,
     })).toEqual([ai])
   })
 })

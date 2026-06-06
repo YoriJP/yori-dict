@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -9,6 +9,9 @@ import type { CanonicalSnapshot, SourceKind, SourceRef } from '../src/domain/typ
 let app: { fetch: (request: Request) => Response | Promise<Response> }
 let tempDir = ''
 let originalCanonicalReleaseDbPath: string | undefined
+let originalCurationOverlayPath: string | undefined
+let originalCurationApiToken: string | undefined
+let curationOverlayPath = ''
 
 const importedAt = '2026-06-03T00:00:00.000Z'
 
@@ -255,20 +258,66 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, init))
 }
 
+function curationHeaders(): HeadersInit {
+  return { authorization: 'Bearer test-curation-token' }
+}
+
+async function writeCurationOverlay(): Promise<void> {
+  await Bun.write(curationOverlayPath, JSON.stringify({
+    schemaVersion: '1.0.0',
+    operations: [
+      {
+        id: 'ai-yds_00000002-add-gloss-zh-tw-canonical-gloss-v1-20260604',
+        type: 'addGloss',
+        sourceKind: 'ai',
+        importedAt,
+        reviewStatus: 'unreviewed',
+        model: 'gemini-3.1-flash-lite',
+        promptVersion: 'canonical-gloss-v1',
+        inputRefs: ['entry:yde_00000002', 'sense:yds_00000002'],
+        senseId: 'yds_00000002',
+        lang: 'zh-tw',
+        text: '壽司',
+      },
+      {
+        id: 'manual-yds_00000001-add-example-en-20260604',
+        type: 'addExample',
+        sourceKind: 'manual',
+        importedAt,
+        reviewStatus: 'approved',
+        senseId: 'yds_00000001',
+        lang: 'en',
+        japanese: '寿司を食べる。',
+        translation: 'I eat sushi.',
+      },
+    ],
+  }))
+}
+
 beforeAll(async () => {
   originalCanonicalReleaseDbPath = process.env.CANONICAL_RELEASE_DB_PATH
+  originalCurationOverlayPath = process.env.CURATION_OVERLAY_PATH
+  originalCurationApiToken = process.env.CURATION_API_TOKEN
 
   tempDir = mkdtempSync(join(tmpdir(), 'yori-api-v2-test-'))
   const snapshotPath = join(tempDir, 'canonical-snapshot.json')
   const canonicalDbPath = join(tempDir, 'canonical-release.sqlite')
+  curationOverlayPath = join(tempDir, 'curation-overlays.json')
 
   await Bun.write(snapshotPath, JSON.stringify(canonicalSnapshot()))
+  await writeCurationOverlay()
   await buildCanonicalRelease({ snapshot: snapshotPath, out: canonicalDbPath, overwrite: false })
 
   process.env.CANONICAL_RELEASE_DB_PATH = canonicalDbPath
+  process.env.CURATION_OVERLAY_PATH = curationOverlayPath
+  process.env.CURATION_API_TOKEN = 'test-curation-token'
 
   const module = await import('../src/index')
   app = module.default
+})
+
+beforeEach(async () => {
+  if (curationOverlayPath) await writeCurationOverlay()
 })
 
 afterAll(() => {
@@ -276,6 +325,10 @@ afterAll(() => {
 
   if (originalCanonicalReleaseDbPath === undefined) delete process.env.CANONICAL_RELEASE_DB_PATH
   else process.env.CANONICAL_RELEASE_DB_PATH = originalCanonicalReleaseDbPath
+  if (originalCurationOverlayPath === undefined) delete process.env.CURATION_OVERLAY_PATH
+  else process.env.CURATION_OVERLAY_PATH = originalCurationOverlayPath
+  if (originalCurationApiToken === undefined) delete process.env.CURATION_API_TOKEN
+  else process.env.CURATION_API_TOKEN = originalCurationApiToken
 
   if (tempDir && existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true })
 })
@@ -520,5 +573,99 @@ describe('GET /v2/kanji/:literal', () => {
 
     const body = await res.json()
     expect(body).toEqual({ error: 'Kanji not found' })
+  })
+})
+
+describe('admin curation endpoints', () => {
+  test('requires curation API authorization', async () => {
+    const res = await request('/admin/curation/overlays')
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Unauthorized' })
+  })
+
+  test('looks up canonical entries through the curation API', async () => {
+    const res = await request('/admin/curation/lookup?query=食べる&lang=en', {
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.entries[0]).toMatchObject({
+      id: 'yde_00000001',
+      definitions: ['to eat'],
+    })
+  })
+
+  test('returns canonical entry details through the curation API', async () => {
+    const res = await request('/admin/curation/entries/yde_00000001?lang=zh-tw', {
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.senses[0].glosses).toEqual([
+      expect.objectContaining({
+        lang: 'zh-tw',
+        text: '吃',
+      }),
+    ])
+  })
+
+  test('lists overlay operations with review filters', async () => {
+    const res = await request('/admin/curation/overlays?sourceKind=ai&reviewStatus=unreviewed&lang=zh-tw', {
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.total).toBe(1)
+    expect(body.operations[0]).toMatchObject({
+      id: 'ai-yds_00000002-add-gloss-zh-tw-canonical-gloss-v1-20260604',
+      sourceKind: 'ai',
+      reviewStatus: 'unreviewed',
+      lang: 'zh-tw',
+    })
+  })
+
+  test('shows one overlay operation', async () => {
+    const res = await request('/admin/curation/overlays/manual-yds_00000001-add-example-en-20260604', {
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+
+    const body = await res.json()
+    expect(body.operation).toMatchObject({
+      id: 'manual-yds_00000001-add-example-en-20260604',
+      type: 'addExample',
+      sourceKind: 'manual',
+    })
+  })
+
+  test('approves and rejects overlay operations', async () => {
+    const id = 'ai-yds_00000002-add-gloss-zh-tw-canonical-gloss-v1-20260604'
+    let res = await request(`/admin/curation/overlays/${id}/approve`, {
+      method: 'POST',
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+    let body = await res.json()
+    expect(body.operation.reviewStatus).toBe('approved')
+
+    res = await request(`/admin/curation/overlays/${id}/reject`, {
+      method: 'POST',
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+    body = await res.json()
+    expect(body.operation.reviewStatus).toBe('rejected')
+  })
+
+  test('returns 404 when reviewing an unknown overlay operation', async () => {
+    const res = await request('/admin/curation/overlays/unknown/approve', {
+      method: 'POST',
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Overlay operation not found' })
   })
 })

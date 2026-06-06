@@ -40,6 +40,7 @@ describe('canonical overlay curation CLI', () => {
       '--lang', 'zh-tw',
       '--text', '吃',
       '--imported-at', importedAt,
+      '--limit', '5',
       '--approved',
     ])).toEqual({
       command: 'add-gloss',
@@ -52,6 +53,7 @@ describe('canonical overlay curation CLI', () => {
       glosses: [],
       japanese: undefined,
       translation: undefined,
+      limit: 5,
       approved: true,
     })
   })
@@ -149,5 +151,57 @@ describe('canonical overlay curation CLI', () => {
     ]))
 
     expect(result).toEqual([ai])
+  })
+
+  test('filters pending AI operations by language and limit', async () => {
+    const overlay = join(makeTempDir(), 'overlays.json')
+    const zhTw = createAiAddGlossOverlay({
+      importedAt,
+      model: 'gemini-3.1-flash-lite',
+      promptVersion: 'canonical-gloss-v1',
+      inputRefs: ['jmdict:1358280'],
+      senseId: 'yds_00000001',
+      lang: 'zh-tw',
+      text: '吃',
+    })
+    const zhCn = createAiAddGlossOverlay({
+      importedAt,
+      model: 'gemini-3.1-flash-lite',
+      promptVersion: 'canonical-gloss-v1',
+      inputRefs: ['jmdict:1358280'],
+      senseId: 'yds_00000001',
+      lang: 'zh-cn',
+      text: '吃',
+    })
+    await appendCanonicalOverlayOperation(overlay, zhTw)
+    await appendCanonicalOverlayOperation(overlay, zhCn)
+
+    const result = await runCurationCommand(parseArgs([
+      'list-pending-ai',
+      '--overlay', overlay,
+      '--lang', 'zh-tw',
+      '--limit', '1',
+    ]))
+
+    expect(result).toEqual([zhTw])
+  })
+
+  test('shows one operation by id', async () => {
+    const overlay = join(makeTempDir(), 'overlays.json')
+    const operation = createManualAddGlossOverlay({
+      importedAt,
+      senseId: 'yds_00000001',
+      lang: 'zh-tw',
+      text: '吃',
+    })
+    await appendCanonicalOverlayOperation(overlay, operation)
+
+    const result = await runCurationCommand(parseArgs([
+      'show',
+      '--overlay', overlay,
+      '--id', operation.id,
+    ]))
+
+    expect(result).toEqual(operation)
   })
 })
