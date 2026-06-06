@@ -55,6 +55,14 @@ function parseLookupLimit(rawLimit: string | undefined): number | undefined {
   return Math.min(Math.max(parsed, 1), 20)
 }
 
+function parseCurationListLimit(rawLimit: string | undefined): number | null | undefined {
+  if (!rawLimit) return undefined
+  if (!/^\d+$/.test(rawLimit)) return null
+  const parsed = Number.parseInt(rawLimit, 10)
+  if (parsed < 1 || parsed > 100) return null
+  return parsed
+}
+
 function hasLookupQuery(input: Pick<CanonicalLookupInput, 'query' | 'surface' | 'lemma' | 'reading'>): boolean {
   return Boolean(
     input.query?.trim()
@@ -393,12 +401,17 @@ app.get('/admin/curation/overlays', async (c) => {
   const reviewStatus = parseReviewStatus(rawReviewStatus)
   if (rawReviewStatus && !reviewStatus) return c.json({ error: 'Invalid reviewStatus' }, 400)
 
+  const limit = parseCurationListLimit(c.req.query('limit'))
+  if (limit === null) {
+    return c.json({ error: 'Invalid limit. Use an integer between 1 and 100.' }, 400)
+  }
+
   const file = await loadCanonicalOverlayFile(overlayPath)
   const operations = listCanonicalOverlayOperations(file, {
     sourceKind,
     reviewStatus,
     lang,
-    limit: parseLookupLimit(c.req.query('limit')),
+    limit,
   })
   return c.json({ operations, total: operations.length })
 })

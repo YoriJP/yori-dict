@@ -262,6 +262,32 @@ function curationHeaders(): HeadersInit {
   return { authorization: 'Bearer test-curation-token' }
 }
 
+async function withCurationEnv(
+  env: { overlayPath?: string | null, token?: string | null },
+  run: () => Promise<void>
+): Promise<void> {
+  const previousOverlayPath = process.env.CURATION_OVERLAY_PATH
+  const previousToken = process.env.CURATION_API_TOKEN
+
+  if ('overlayPath' in env) {
+    if (env.overlayPath === null) delete process.env.CURATION_OVERLAY_PATH
+    else process.env.CURATION_OVERLAY_PATH = env.overlayPath
+  }
+  if ('token' in env) {
+    if (env.token === null) delete process.env.CURATION_API_TOKEN
+    else process.env.CURATION_API_TOKEN = env.token
+  }
+
+  try {
+    await run()
+  } finally {
+    if (previousOverlayPath === undefined) delete process.env.CURATION_OVERLAY_PATH
+    else process.env.CURATION_OVERLAY_PATH = previousOverlayPath
+    if (previousToken === undefined) delete process.env.CURATION_API_TOKEN
+    else process.env.CURATION_API_TOKEN = previousToken
+  }
+}
+
 async function writeCurationOverlay(): Promise<void> {
   await Bun.write(curationOverlayPath, JSON.stringify({
     schemaVersion: '1.0.0',
@@ -583,6 +609,32 @@ describe('admin curation endpoints', () => {
     expect(await res.json()).toEqual({ error: 'Unauthorized' })
   })
 
+  test('returns 503 when curation API config is missing', async () => {
+    await withCurationEnv({ overlayPath: null }, async () => {
+      const res = await request('/admin/curation/overlays', {
+        headers: curationHeaders(),
+      })
+      expect(res.status).toBe(503)
+      expect(await res.json()).toEqual({ error: 'Curation API is not configured' })
+    })
+
+    await withCurationEnv({ token: null }, async () => {
+      const res = await request('/admin/curation/overlays', {
+        headers: curationHeaders(),
+      })
+      expect(res.status).toBe(503)
+      expect(await res.json()).toEqual({ error: 'Curation API is not configured' })
+    })
+  })
+
+  test('rejects an incorrect curation API token', async () => {
+    const res = await request('/admin/curation/overlays', {
+      headers: { authorization: 'Bearer wrong-token' },
+    })
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Unauthorized' })
+  })
+
   test('looks up canonical entries through the curation API', async () => {
     const res = await request('/admin/curation/lookup?query=食べる&lang=en', {
       headers: curationHeaders(),
@@ -624,6 +676,29 @@ describe('admin curation endpoints', () => {
       sourceKind: 'ai',
       reviewStatus: 'unreviewed',
       lang: 'zh-tw',
+    })
+  })
+
+  test('rejects invalid overlay list limits', async () => {
+    for (const limit of ['abc', '0', '101']) {
+      const res = await request(`/admin/curation/overlays?limit=${limit}`, {
+        headers: curationHeaders(),
+      })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid limit. Use an integer between 1 and 100.' })
+    }
+  })
+
+  test('lists an empty overlay file when the configured file does not exist', async () => {
+    const missingOverlayPath = join(tempDir, 'missing-curation-overlays.json')
+    if (existsSync(missingOverlayPath)) rmSync(missingOverlayPath, { force: true })
+
+    await withCurationEnv({ overlayPath: missingOverlayPath }, async () => {
+      const res = await request('/admin/curation/overlays', {
+        headers: curationHeaders(),
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ operations: [], total: 0 })
     })
   })
 
