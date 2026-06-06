@@ -31,6 +31,13 @@ function queue(): CurationQueue {
     generatedAt: importedAt,
     snapshotGeneratedAt: importedAt,
     targetLang: 'zh-tw',
+    summary: {
+      itemCount: 1,
+      totalCandidateCount: 1,
+      filters: {
+        commonOnly: false,
+      },
+    },
     items: [
       {
         id: 'missingGloss-yds_00000001-zh-tw',
@@ -62,6 +69,11 @@ function queueWithTwoItems(): CurationQueue {
     primaryReading: 'のむ',
     inputRefs: ['entry:yde_00000002', 'sense:yds_00000002', 'jmdict:1358290'],
   })
+  result.summary = {
+    ...result.summary,
+    itemCount: 2,
+    totalCandidateCount: 2,
+  }
   return result
 }
 

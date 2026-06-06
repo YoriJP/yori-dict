@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
+  generateGeminiGlossSuggestion,
   parseArgs,
   parseModelSuggestion,
   runGenerateAiCurationSuggestions,
@@ -32,6 +33,13 @@ function queue(): CurationQueue {
     generatedAt: importedAt,
     snapshotGeneratedAt: importedAt,
     targetLang: 'zh-tw',
+    summary: {
+      itemCount: 2,
+      totalCandidateCount: 2,
+      filters: {
+        commonOnly: false,
+      },
+    },
     items: [
       {
         id: 'missingGloss-yds_00000001-zh-tw',
@@ -147,5 +155,50 @@ describe('AI curation suggestion generator CLI', () => {
 
     expect(calls).toBe(0)
     expect(await Bun.file(outPath).text()).toBe('existing\n')
+  })
+
+  test('does not write partial suggestions when generation fails', async () => {
+    const dir = makeTempDir()
+    const queuePath = join(dir, 'queue.json')
+    const outPath = join(dir, 'suggestions.jsonl')
+    process.env.GEMINI_API_KEY = 'test-key'
+    await Bun.write(queuePath, JSON.stringify(queue()))
+
+    await expect(runGenerateAiCurationSuggestions({
+      queue: queuePath,
+      out: outPath,
+      model: 'gemini-3.1-flash-lite',
+      promptVersion: 'canonical-gloss-v1',
+      apiKeyEnv: 'GEMINI_API_KEY',
+      apiBase: 'https://example.test',
+      overwrite: false,
+    }, async ({ item }) => {
+      if (item.id === 'missingGloss-yds_00000002-zh-tw') {
+        throw new Error('quota exhausted')
+      }
+      return { queueItemId: item.id, text: '吃' }
+    })).rejects.toThrow('AI suggestion failed for missingGloss-yds_00000002-zh-tw: quota exhausted')
+
+    expect(existsSync(outPath)).toBe(false)
+  })
+
+  test('reports Gemini quota and rate-limit failures clearly', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = Object.assign(
+      async () => new Response('quota exhausted', { status: 429 }),
+      { preconnect: originalFetch.preconnect }
+    )
+
+    try {
+      await expect(generateGeminiGlossSuggestion({
+        item: queue().items[0],
+        model: 'gemini-3.1-flash-lite',
+        promptVersion: 'canonical-gloss-v1',
+        apiKey: 'test-key',
+        apiBase: 'https://example.test',
+      })).rejects.toThrow('Gemini quota or rate limit exceeded (429): quota exhausted')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

@@ -108,7 +108,7 @@ export async function runBuildCurationQueue(opts: CliOptions): Promise<CurationQ
   console.log('\n=== Canonical Curation Queue ===')
   console.log(`Snapshot: ${opts.snapshot}`)
   console.log(`Target language: ${opts.lang}`)
-  console.log(`Items: ${queue.items.length.toLocaleString()}`)
+  console.log(`Items: ${queue.summary.itemCount.toLocaleString()} of ${queue.summary.totalCandidateCount.toLocaleString()}`)
   console.log(`Queue: ${opts.out}`)
   for (const item of queue.items.slice(0, 10)) {
     console.log(`  - ${item.id}\t${item.primaryForm}\t${item.primaryReading}\tpriority=${item.priority}`)

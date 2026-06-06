@@ -302,6 +302,9 @@ export function approveOverlayOperation(operation: CanonicalOverlayOperation): C
 }
 
 export function rejectOverlayOperation(operation: CanonicalOverlayOperation): CanonicalOverlayOperation {
+  if (operation.reviewStatus === 'approved') {
+    throw new Error('Approved overlay operations cannot be rejected in place')
+  }
   return {
     ...operation,
     reviewStatus: 'rejected',

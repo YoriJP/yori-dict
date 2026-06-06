@@ -69,7 +69,7 @@ manual-yds_00000001-replace-glosses-zh-tw-20260604
 ai-yds_00000001-add-gloss-en-canonical-gloss-v1-20260604
 ```
 
-Once an operation is approved and used in a release, do not rewrite its meaning. If a correction changes again, add a new operation that supersedes the old result.
+Once an operation is approved, do not reject it in place. If a correction changes again, add a new operation that supersedes the old result.
 
 ## Manual Correction Workflow
 
@@ -111,7 +111,7 @@ AI output is a suggestion, not dictionary data.
 6. Reviewer chooses one of:
    - approve as-is
    - edit and approve as a manual operation
-   - reject
+   - reject while the operation is still unreviewed
 7. Only approved operations enter the release rebuild.
 
 Rejected AI operations may be kept for audit, but they must never affect the release because the overlay applier skips unapproved operations.

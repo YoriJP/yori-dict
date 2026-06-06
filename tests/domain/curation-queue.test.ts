@@ -90,6 +90,14 @@ describe('buildCurationQueue', () => {
     const queue = buildCurationQueue(snapshot([entry()]), { targetLang: 'zh-tw' })
 
     expect(queue.targetLang).toBe('zh-tw')
+    expect(queue.summary).toEqual({
+      itemCount: 1,
+      totalCandidateCount: 1,
+      filters: {
+        commonOnly: false,
+        limit: undefined,
+      },
+    })
     expect(queue.items).toHaveLength(1)
     expect(queue.items[0]).toMatchObject({
       id: 'missingGloss-yds_00000001-zh-tw',
@@ -139,5 +147,35 @@ describe('buildCurationQueue', () => {
 
     expect(queue.items).toHaveLength(1)
     expect(queue.items[0].entryId).toBe('yde_00000001')
+  })
+
+  test('reports total candidates before limit is applied', () => {
+    const second = entry({
+      id: 'yde_00000002',
+      primaryForm: '飲む',
+      primaryReading: 'のむ',
+      senses: [
+        {
+          ...entry().senses[0],
+          id: 'yds_00000002',
+          entryId: 'yde_00000002',
+        },
+      ],
+    })
+
+    const queue = buildCurationQueue(snapshot([entry(), second]), {
+      targetLang: 'zh-tw',
+      limit: 1,
+    })
+
+    expect(queue.summary).toEqual({
+      itemCount: 1,
+      totalCandidateCount: 2,
+      filters: {
+        commonOnly: false,
+        limit: 1,
+      },
+    })
+    expect(queue.items).toHaveLength(1)
   })
 })
