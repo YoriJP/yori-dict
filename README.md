@@ -33,6 +33,7 @@ The repo keeps the small fixture in git for tests. Full JMdict-simplified data i
 ```sh
 bun run download:jmdict
 bun run import:jmdict:full
+bun run lookup:check
 ```
 
 This creates:

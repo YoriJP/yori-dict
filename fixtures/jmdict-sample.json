@@ -39,7 +39,7 @@
       ]
     },
     {
-      "id": "1406250",
+      "id": "1206730",
       "kanji": [
         { "text": "学校", "common": true, "tags": [] }
       ],
@@ -128,6 +128,111 @@
           "languageSource": [],
           "gloss": [
             { "lang": "eng", "gender": null, "type": null, "text": "to arrange" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1456360",
+      "kanji": [
+        { "text": "読む", "common": true, "tags": [] }
+      ],
+      "kana": [
+        { "text": "よむ", "common": true, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["v5m", "vt"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "to read" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1578850",
+      "kanji": [
+        { "text": "行く", "common": true, "tags": [] }
+      ],
+      "kana": [
+        { "text": "いく", "common": true, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["v5k-s", "vi"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "to go" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1259210",
+      "kanji": [
+        { "text": "見せる", "common": true, "tags": [] }
+      ],
+      "kana": [
+        { "text": "みせる", "common": true, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["v1", "vt"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "to show" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1283190",
+      "kanji": [
+        { "text": "高い", "common": true, "tags": [] }
+      ],
+      "kana": [
+        { "text": "たかい", "common": true, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["adj-i"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "high" },
+            { "lang": "eng", "gender": null, "type": null, "text": "expensive" }
           ]
         }
       ]

@@ -9,7 +9,7 @@ import type {
   PublicSense
 } from "./types";
 import { normalizeQuery } from "./normalize";
-import { deinflect } from "./deinflect";
+import { deinflect, type DeinflectionCandidate } from "./deinflect";
 import { apiLanguages } from "./lang";
 
 type EntryRow = {
@@ -91,6 +91,7 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
       input: normalizedQuery,
       matchedForm: normalizedQuery,
       matchType: "exact",
+      rank: 0,
       reasons: []
     });
     for (const entryId of exactEntryIds) entryIds.add(entryId);
@@ -104,6 +105,7 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
       input: normalizedQuery,
       matchedForm: candidate.text,
       matchType: "deinflected",
+      rank: matchRank(candidate),
       reasons: candidate.reasons
     });
     for (const entryId of candidateEntryIds) entryIds.add(entryId);
@@ -121,10 +123,21 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
 function findEntryIds(db: Database, term: string): string[] {
   return db
     .query<{ entry_id: string }, [string]>(
-      "select distinct entry_id from lookup_terms where term = ? order by entry_id"
+      `select lt.entry_id
+       from lookup_terms lt
+       join forms f on f.entry_id = lt.entry_id and f.text = lt.term
+       where lt.term = ?
+       group by lt.entry_id
+       order by max(f.common) desc, lt.entry_id`
     )
     .all(term)
     .map((row) => row.entry_id);
+}
+
+function matchRank(candidate: DeinflectionCandidate): number {
+  return candidate.reasons.some((reason) => reason.includes("potential") || reason.includes("passive"))
+    ? 20
+    : 10;
 }
 
 function readEntries(db: Database, entryIds: string[], requestedLang: ApiLang | null): PublicEntry[] {

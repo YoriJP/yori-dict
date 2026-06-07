@@ -49,6 +49,7 @@ export type LookupMatch = {
   input: string;
   matchedForm: string;
   matchType: MatchType;
+  rank: number;
   reasons: string[];
 };
 

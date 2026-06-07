@@ -67,9 +67,48 @@ test("returns deinflected matches", async () => {
     input: "食べました",
     matchedForm: "食べる",
     matchType: "deinflected",
+    rank: 10,
     reasons: ["polite past"]
   });
   expect(body.entries[0].id).toBe("yori:e_jmdict_1358280");
+});
+
+test("returns deinflected godan matches", async () => {
+  const res = await app.request("/v1/lookup?q=%E8%AA%AD%E3%82%93%E3%81%A0");
+  const body = await res.json();
+  expect(body.matches).toContainEqual({
+    input: "読んだ",
+    matchedForm: "読む",
+    matchType: "deinflected",
+    rank: 10,
+    reasons: ["godan past"]
+  });
+  expect(body.entries[0].id).toBe("yori:e_jmdict_1456360");
+});
+
+test("returns deinflected godan negative matches", async () => {
+  const res = await app.request("/v1/lookup?q=%E8%A1%8C%E3%81%8B%E3%81%AA%E3%81%8B%E3%81%A3%E3%81%9F");
+  const body = await res.json();
+  expect(body.matches).toContainEqual({
+    input: "行かなかった",
+    matchedForm: "行く",
+    matchType: "deinflected",
+    rank: 10,
+    reasons: ["godan negative past"]
+  });
+  expect(body.entries[0].id).toBe("yori:e_jmdict_1578850");
+});
+
+test("keeps exact matches ranked first", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%AB%98%E3%81%84");
+  const body = await res.json();
+  expect(body.matches[0]).toEqual({
+    input: "高い",
+    matchedForm: "高い",
+    matchType: "exact",
+    rank: 0,
+    reasons: []
+  });
 });
 
 test("returns one result per batch query in input order", async () => {
@@ -85,6 +124,6 @@ test("returns one result per batch query in input order", async () => {
     "存在しない語"
   ]);
   expect(body.results[0].entries[0].id).toBe("yori:e_jmdict_1358280");
-  expect(body.results[1].entries[0].id).toBe("yori:e_jmdict_1406250");
+  expect(body.results[1].entries[0].id).toBe("yori:e_jmdict_1206730");
   expect(body.results[2].entries).toEqual([]);
 });
