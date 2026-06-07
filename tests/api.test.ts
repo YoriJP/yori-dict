@@ -31,24 +31,31 @@ test("looks up an exact Japanese headword", async () => {
   const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-tw");
   expect(res.status).toBe(200);
   const body = await res.json();
-  expect(body.matches[0].matchType).toBe("exact");
-  expect(body.entries[0].id).toBe("yori:e_jmdict_1358280");
-  expect(body.entries[0].senses[0].glosses["zh-tw"]).toEqual([]);
-  expect(body.entries[0].senses[0].glosses.en[0].text).toBe("to eat");
+  expect(body.item.id).toBe("yori:e_jmdict_1358280");
+  expect(body.item.word).toBe("食べる");
+  expect(body.item.reading).toBe("たべる");
+  expect(body.item.matchedFrom).toEqual({
+    input: "食べる",
+    form: "食べる",
+    type: "exact",
+    reasons: []
+  });
+  expect(body.item.senses[0].glosses["zh-tw"]).toEqual([]);
+  expect(body.item.senses[0].glosses.en[0].text).toBe("to eat");
 });
 
 test("preserves form tags and sense applicability", async () => {
   const res = await app.request("/v1/lookup?q=%E9%85%8D%E3%81%86");
   expect(res.status).toBe(200);
   const body = await res.json();
-  expect(body.entries[0].headwords).toContainEqual({
+  expect(body.item.headwords).toContainEqual({
     text: "配う",
     reading: "あしらう",
     kind: "kanji",
     common: false,
     tags: ["sK"]
   });
-  expect(body.entries[0].senses[0].appliesTo).toEqual({
+  expect(body.item.senses[0].appliesTo).toEqual({
     kanji: ["遇う"],
     kana: ["*"]
   });
@@ -57,58 +64,55 @@ test("preserves form tags and sense applicability", async () => {
 test("looks up by reading", async () => {
   const res = await app.request("/v1/lookup?q=%E3%81%9F%E3%81%B9%E3%82%8B");
   const body = await res.json();
-  expect(body.entries[0].headwords[0].text).toBe("食べる");
+  expect(body.item.word).toBe("食べる");
 });
 
 test("returns deinflected matches", async () => {
   const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%81%BE%E3%81%97%E3%81%9F");
   const body = await res.json();
-  expect(body.matches).toContainEqual({
+  expect(body.item.matchedFrom).toEqual({
     input: "食べました",
-    matchedForm: "食べる",
-    matchType: "deinflected",
-    rank: 10,
+    form: "食べる",
+    type: "deinflected",
     reasons: ["polite past"]
   });
-  expect(body.entries[0].id).toBe("yori:e_jmdict_1358280");
+  expect(body.item.id).toBe("yori:e_jmdict_1358280");
 });
 
 test("returns deinflected godan matches", async () => {
   const res = await app.request("/v1/lookup?q=%E8%AA%AD%E3%82%93%E3%81%A0");
   const body = await res.json();
-  expect(body.matches).toContainEqual({
+  expect(body.item.matchedFrom).toEqual({
     input: "読んだ",
-    matchedForm: "読む",
-    matchType: "deinflected",
-    rank: 10,
+    form: "読む",
+    type: "deinflected",
     reasons: ["godan past"]
   });
-  expect(body.entries[0].id).toBe("yori:e_jmdict_1456360");
+  expect(body.item.id).toBe("yori:e_jmdict_1456360");
 });
 
 test("returns deinflected godan negative matches", async () => {
   const res = await app.request("/v1/lookup?q=%E8%A1%8C%E3%81%8B%E3%81%AA%E3%81%8B%E3%81%A3%E3%81%9F");
   const body = await res.json();
-  expect(body.matches).toContainEqual({
+  expect(body.item.matchedFrom).toEqual({
     input: "行かなかった",
-    matchedForm: "行く",
-    matchType: "deinflected",
-    rank: 10,
+    form: "行く",
+    type: "deinflected",
     reasons: ["godan negative past"]
   });
-  expect(body.entries[0].id).toBe("yori:e_jmdict_1578850");
+  expect(body.item.id).toBe("yori:e_jmdict_1578850");
 });
 
 test("keeps exact matches ranked first", async () => {
   const res = await app.request("/v1/lookup?q=%E9%AB%98%E3%81%84");
   const body = await res.json();
-  expect(body.matches[0]).toEqual({
+  expect(body.item.matchedFrom).toEqual({
     input: "高い",
-    matchedForm: "高い",
-    matchType: "exact",
-    rank: 0,
+    form: "高い",
+    type: "exact",
     reasons: []
   });
+  expect(body.item.id).toBe("yori:e_jmdict_1283190");
 });
 
 test("returns one result per batch query in input order", async () => {
@@ -118,12 +122,12 @@ test("returns one result per batch query in input order", async () => {
     body: JSON.stringify({ queries: ["食べました", "学校", "存在しない語"], lang: "zh-tw" })
   });
   const body = await res.json();
-  expect(body.results.map((result: { query: string }) => result.query)).toEqual([
+  expect(body.results.map((result: { input: string }) => result.input)).toEqual([
     "食べました",
     "学校",
     "存在しない語"
   ]);
-  expect(body.results[0].entries[0].id).toBe("yori:e_jmdict_1358280");
-  expect(body.results[1].entries[0].id).toBe("yori:e_jmdict_1206730");
-  expect(body.results[2].entries).toEqual([]);
+  expect(body.results[0].item.id).toBe("yori:e_jmdict_1358280");
+  expect(body.results[1].item.id).toBe("yori:e_jmdict_1206730");
+  expect(body.results[2].item).toBeNull();
 });

@@ -54,11 +54,33 @@ export type LookupMatch = {
 };
 
 export type LookupResponse = {
-  query: string;
-  normalizedQuery: string;
-  requestedLang: ApiLang | null;
-  matches: LookupMatch[];
-  entries: PublicEntry[];
+  item: PublicLookupItem | null;
+};
+
+export type BatchLookupResponse = {
+  results: BatchLookupResult[];
+};
+
+export type BatchLookupResult = {
+  input: string;
+  item: PublicLookupItem | null;
+};
+
+export type PublicLookupItem = {
+  id: string;
+  word: string;
+  reading: string | null;
+  common: boolean;
+  matchedFrom: {
+    input: string;
+    form: string;
+    type: MatchType;
+    reasons: string[];
+  };
+  source: "jmdict";
+  sourceId: string;
+  headwords: PublicHeadword[];
+  senses: PublicSense[];
 };
 
 export type PublicEntry = {

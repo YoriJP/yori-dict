@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { parseApiLang } from "./lang";
 import type { LookupDb } from "./db";
+import type { BatchLookupResponse } from "./types";
 
 const maxBatchSize = 100;
 
@@ -38,9 +39,13 @@ export function createApp(db: LookupDb) {
     }
 
     const lang = parseApiLang(body.lang ?? null);
-    return c.json({
-      results: body.queries.map((query) => db.lookup(query, lang))
-    });
+    const response: BatchLookupResponse = {
+      results: body.queries.map((query) => ({
+        input: query,
+        item: db.lookup(query, lang).item
+      }))
+    };
+    return c.json(response);
   });
 
   return app;

@@ -23,9 +23,9 @@ for (const check of checks) {
   const start = performance.now();
   const result = db.lookup(check.query, "en");
   const elapsedMs = performance.now() - start;
-  const foundEntry = result.entries.some((entry) => entry.id === check.expectedEntryId);
-  const foundMatch = result.matches.some((match) => match.matchedForm === check.expectedMatchedForm);
-  const ok = foundEntry && foundMatch;
+  const ok =
+    result.item?.id === check.expectedEntryId &&
+    result.item.matchedFrom.form === check.expectedMatchedForm;
 
   if (!ok) failures += 1;
 

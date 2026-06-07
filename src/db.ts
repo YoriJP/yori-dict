@@ -6,6 +6,7 @@ import type {
   PublicEntry,
   PublicGloss,
   PublicHeadword,
+  PublicLookupItem,
   PublicSense
 } from "./types";
 import { normalizeQuery } from "./normalize";
@@ -40,6 +41,11 @@ type GlossRow = {
   sense_id: string;
   lang: ApiLang;
   text: string;
+};
+
+type LookupCandidate = {
+  match: LookupMatch;
+  entryIds: string[];
 };
 
 export type LookupDb = {
@@ -82,42 +88,39 @@ export function openLookupDb(path: string): LookupDb {
 
 function lookup(db: Database, query: string, requestedLang: ApiLang | null): LookupResponse {
   const normalizedQuery = normalizeQuery(query);
-  const exactEntryIds = findEntryIds(db, normalizedQuery);
-  const matches: LookupMatch[] = [];
-  const entryIds = new Set<string>();
+  const candidates: LookupCandidate[] = [];
 
+  const exactEntryIds = findEntryIds(db, normalizedQuery);
   if (exactEntryIds.length > 0) {
-    matches.push({
-      input: normalizedQuery,
-      matchedForm: normalizedQuery,
-      matchType: "exact",
-      rank: 0,
-      reasons: []
+    candidates.push({
+      match: {
+        input: normalizedQuery,
+        matchedForm: normalizedQuery,
+        matchType: "exact",
+        rank: 0,
+        reasons: []
+      },
+      entryIds: exactEntryIds
     });
-    for (const entryId of exactEntryIds) entryIds.add(entryId);
   }
 
   for (const candidate of deinflect(normalizedQuery)) {
     const candidateEntryIds = findEntryIds(db, candidate.text);
     if (candidateEntryIds.length === 0) continue;
 
-    matches.push({
-      input: normalizedQuery,
-      matchedForm: candidate.text,
-      matchType: "deinflected",
-      rank: matchRank(candidate),
-      reasons: candidate.reasons
+    candidates.push({
+      match: {
+        input: normalizedQuery,
+        matchedForm: candidate.text,
+        matchType: "deinflected",
+        rank: matchRank(candidate),
+        reasons: candidate.reasons
+      },
+      entryIds: candidateEntryIds
     });
-    for (const entryId of candidateEntryIds) entryIds.add(entryId);
   }
 
-  return {
-    query,
-    normalizedQuery,
-    requestedLang,
-    matches,
-    entries: readEntries(db, Array.from(entryIds), requestedLang)
-  };
+  return { item: readBestItem(db, candidates, requestedLang) };
 }
 
 function findEntryIds(db: Database, term: string): string[] {
@@ -138,6 +141,40 @@ function matchRank(candidate: DeinflectionCandidate): number {
   return candidate.reasons.some((reason) => reason.includes("potential") || reason.includes("passive"))
     ? 20
     : 10;
+}
+
+function readBestItem(
+  db: Database,
+  candidates: LookupCandidate[],
+  requestedLang: ApiLang | null
+): PublicLookupItem | null {
+  const best = candidates.sort((a, b) => a.match.rank - b.match.rank)[0];
+  if (!best) return null;
+
+  const entry = readEntries(db, [best.entryIds[0]], requestedLang)[0];
+  if (!entry) return null;
+
+  return toLookupItem(entry, best.match);
+}
+
+function toLookupItem(entry: PublicEntry, match: LookupMatch): PublicLookupItem {
+  const headword = entry.headwords[0];
+  return {
+    id: entry.id,
+    word: headword?.text ?? "",
+    reading: headword?.reading ?? null,
+    common: entry.headwords.some((item) => item.common),
+    matchedFrom: {
+      input: match.input,
+      form: match.matchedForm,
+      type: match.matchType,
+      reasons: match.reasons
+    },
+    source: entry.source,
+    sourceId: entry.sourceId,
+    headwords: entry.headwords,
+    senses: entry.senses
+  };
 }
 
 function readEntries(db: Database, entryIds: string[], requestedLang: ApiLang | null): PublicEntry[] {
@@ -165,7 +202,7 @@ function readHeadwords(db: Database, entryId: string): PublicHeadword[] {
       `select entry_id, text, reading, kind, common, tags
        from forms
        where entry_id = ?
-       order by case kind when 'kanji' then 0 else 1 end, text, reading`
+       order by common desc, case kind when 'kanji' then 0 else 1 end, text, reading`
     )
     .all(entryId)
     .map((row) => ({
