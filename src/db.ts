@@ -24,12 +24,15 @@ type FormRow = {
   reading: string | null;
   kind: "kanji" | "kana";
   common: 0 | 1;
+  tags: string;
 };
 
 type SenseRow = {
   id: string;
   entry_id: string;
   position: number;
+  applies_to_kanji: string;
+  applies_to_kana: string;
   part_of_speech: string;
 };
 
@@ -146,7 +149,7 @@ function readEntries(db: Database, entryIds: string[], requestedLang: ApiLang | 
 function readHeadwords(db: Database, entryId: string): PublicHeadword[] {
   return db
     .query<FormRow, [string]>(
-      `select entry_id, text, reading, kind, common
+      `select entry_id, text, reading, kind, common, tags
        from forms
        where entry_id = ?
        order by case kind when 'kanji' then 0 else 1 end, text, reading`
@@ -156,19 +159,27 @@ function readHeadwords(db: Database, entryId: string): PublicHeadword[] {
       text: row.text,
       reading: row.reading,
       kind: row.kind,
-      common: row.common === 1
+      common: row.common === 1,
+      tags: JSON.parse(row.tags) as string[]
     }));
 }
 
 function readSenses(db: Database, entryId: string, requestedLang: ApiLang | null): PublicSense[] {
   return db
     .query<SenseRow, [string]>(
-      "select id, entry_id, position, part_of_speech from senses where entry_id = ? order by position"
+      `select id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech
+       from senses
+       where entry_id = ?
+       order by position`
     )
     .all(entryId)
     .map((row) => ({
       id: row.id,
       position: row.position,
+      appliesTo: {
+        kanji: JSON.parse(row.applies_to_kanji) as string[],
+        kana: JSON.parse(row.applies_to_kana) as string[]
+      },
       partOfSpeech: JSON.parse(row.part_of_speech) as string[],
       glosses: groupGlosses(readGlosses(db, row.id), requestedLang)
     }));

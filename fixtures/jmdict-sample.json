@@ -88,6 +88,49 @@
           ]
         }
       ]
+    },
+    {
+      "id": "1000300",
+      "kanji": [
+        { "text": "遇う", "common": false, "tags": [] },
+        { "text": "配う", "common": false, "tags": ["sK"] }
+      ],
+      "kana": [
+        { "text": "あしらう", "common": false, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["v5u", "vt"],
+          "appliesToKanji": ["遇う"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": ["uk"],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "to treat" },
+            { "lang": "eng", "gender": null, "type": null, "text": "to handle" }
+          ]
+        },
+        {
+          "partOfSpeech": ["v5u", "vt"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": ["uk"],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "to arrange" }
+          ]
+        }
+      ]
     }
   ]
 }

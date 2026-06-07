@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
+    "download:jmdict": "bun run scripts/download-jmdict.ts --out-dir data/raw",
     "import:jmdict": "bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out data/yori.sqlite",
+    "import:jmdict:full": "bun run scripts/import-jmdict.ts --input data/raw/jmdict-all.json --out data/yori.sqlite",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

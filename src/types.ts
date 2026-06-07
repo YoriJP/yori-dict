@@ -24,6 +24,8 @@ export type JmdictKana = {
 
 export type JmdictSense = {
   partOfSpeech: string[];
+  appliesToKanji: string[];
+  appliesToKana: string[];
   gloss: JmdictGloss[];
 };
 
@@ -71,11 +73,16 @@ export type PublicHeadword = {
   reading: string | null;
   kind: "kanji" | "kana";
   common: boolean;
+  tags: string[];
 };
 
 export type PublicSense = {
   id: string;
   position: number;
+  appliesTo: {
+    kanji: string[];
+    kana: string[];
+  };
   partOfSpeech: string[];
   glosses: Record<string, PublicGloss[]>;
 };

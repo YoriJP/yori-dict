@@ -37,6 +37,23 @@ test("looks up an exact Japanese headword", async () => {
   expect(body.entries[0].senses[0].glosses.en[0].text).toBe("to eat");
 });
 
+test("preserves form tags and sense applicability", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%85%8D%E3%81%86");
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.entries[0].headwords).toContainEqual({
+    text: "配う",
+    reading: "あしらう",
+    kind: "kanji",
+    common: false,
+    tags: ["sK"]
+  });
+  expect(body.entries[0].senses[0].appliesTo).toEqual({
+    kanji: ["遇う"],
+    kana: ["*"]
+  });
+});
+
 test("looks up by reading", async () => {
   const res = await app.request("/v1/lookup?q=%E3%81%9F%E3%81%B9%E3%82%8B");
   const body = await res.json();

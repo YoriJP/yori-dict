@@ -11,6 +11,8 @@ type Args = {
 const args = parseArgs(Bun.argv.slice(2));
 await Bun.$`mkdir -p ${dirname(args.out)}`;
 await Bun.$`rm -f ${args.out}`;
+await Bun.$`rm -f ${args.out}-shm`;
+await Bun.$`rm -f ${args.out}-wal`;
 
 const source = (await Bun.file(args.input).json()) as JmdictFile;
 const db = new Database(args.out);
@@ -40,7 +42,8 @@ function readFlag(argv: string[], flag: string): string | null {
 
 function createSchema(db: Database) {
   db.exec(`
-    pragma journal_mode = WAL;
+    pragma journal_mode = DELETE;
+    pragma synchronous = OFF;
 
     create table metadata (
       key text primary key,
@@ -58,13 +61,16 @@ function createSchema(db: Database) {
       text text not null,
       reading text,
       kind text not null check (kind in ('kanji', 'kana')),
-      common integer not null check (common in (0, 1))
+      common integer not null check (common in (0, 1)),
+      tags text not null
     );
 
     create table senses (
       id text primary key,
       entry_id text not null references entries(id),
       position integer not null,
+      applies_to_kanji text not null,
+      applies_to_kana text not null,
       part_of_speech text not null
     );
 
@@ -97,10 +103,12 @@ function insertMetadata(db: Database, source: JmdictFile) {
 function insertWords(db: Database, words: JmdictWord[]) {
   const insertEntry = db.prepare("insert into entries (id, source, source_id) values (?, 'jmdict', ?)");
   const insertForm = db.prepare(
-    "insert into forms (entry_id, text, reading, kind, common) values (?, ?, ?, ?, ?)"
+    "insert into forms (entry_id, text, reading, kind, common, tags) values (?, ?, ?, ?, ?, ?)"
   );
   const insertSense = db.prepare(
-    "insert into senses (id, entry_id, position, part_of_speech) values (?, ?, ?, ?)"
+    `insert into senses
+      (id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech)
+     values (?, ?, ?, ?, ?, ?)`
   );
   const insertGloss = db.prepare("insert into glosses (sense_id, lang, text) values (?, ?, ?)");
   const insertLookup = db.prepare(
@@ -115,12 +123,12 @@ function insertWords(db: Database, words: JmdictWord[]) {
       const lookupTerms = new Set<string>();
       for (const kanji of word.kanji) {
         const reading = readingForKanji(word, kanji.text);
-        insertForm.run(entryId, kanji.text, reading, "kanji", kanji.common ? 1 : 0);
+        insertForm.run(entryId, kanji.text, reading, "kanji", kanji.common ? 1 : 0, JSON.stringify(kanji.tags));
         lookupTerms.add(`kanji:${kanji.text}`);
       }
 
       for (const kana of word.kana) {
-        insertForm.run(entryId, kana.text, null, "kana", kana.common ? 1 : 0);
+        insertForm.run(entryId, kana.text, null, "kana", kana.common ? 1 : 0, JSON.stringify(kana.tags));
         lookupTerms.add(`reading:${kana.text}`);
       }
 
@@ -131,7 +139,14 @@ function insertWords(db: Database, words: JmdictWord[]) {
 
       word.sense.forEach((sense, index) => {
         const senseId = yoriSenseId(word.id, index + 1);
-        insertSense.run(senseId, entryId, index + 1, JSON.stringify(sense.partOfSpeech));
+        insertSense.run(
+          senseId,
+          entryId,
+          index + 1,
+          JSON.stringify(sense.appliesToKanji),
+          JSON.stringify(sense.appliesToKana),
+          JSON.stringify(sense.partOfSpeech)
+        );
 
         for (const gloss of sense.gloss) {
           const apiLang = toApiLang(gloss.lang);

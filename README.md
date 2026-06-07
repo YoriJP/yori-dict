@@ -26,6 +26,24 @@ Then:
 curl 'http://localhost:3000/v1/lookup?q=食べました&lang=zh-tw'
 ```
 
+## Full JMdict Data
+
+The repo keeps the small fixture in git for tests. Full JMdict-simplified data is downloaded into ignored local files:
+
+```sh
+bun run download:jmdict
+bun run import:jmdict:full
+```
+
+This creates:
+
+```txt
+data/raw/jmdict-all.json
+data/yori.sqlite
+```
+
+Both are local generated data and are not committed.
+
 ## API
 
 ```txt
