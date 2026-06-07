@@ -190,6 +190,19 @@ function extractGeminiText(value: unknown): string {
   return text
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function geminiErrorMessage(response: Response): Promise<string> {
+  const body = await response.text()
+  const detail = body.trim() ? `: ${body}` : ''
+  if (response.status === 429) {
+    return `Gemini quota or rate limit exceeded (429)${detail}`
+  }
+  return `Gemini request failed (${response.status})${detail}`
+}
+
 export async function generateGeminiGlossSuggestion(input: GenerateSuggestionInput): Promise<AiSuggestionRecord> {
   const url = `${input.apiBase.replace(/\/+$/, '')}/v1beta/${geminiModelPath(input.model)}:generateContent`
   const response = await fetch(url, {
@@ -213,7 +226,7 @@ export async function generateGeminiGlossSuggestion(input: GenerateSuggestionInp
   })
 
   if (!response.ok) {
-    throw new Error(`Gemini request failed (${response.status}): ${await response.text()}`)
+    throw new Error(await geminiErrorMessage(response))
   }
 
   const text = extractGeminiText(await response.json())
@@ -248,13 +261,17 @@ export async function runGenerateAiCurationSuggestions(
 
   const suggestions: AiSuggestionRecord[] = []
   for (const item of items) {
-    suggestions.push(await generateSuggestion({
-      item,
-      model: opts.model,
-      promptVersion: opts.promptVersion,
-      apiKey,
-      apiBase: opts.apiBase,
-    }))
+    try {
+      suggestions.push(await generateSuggestion({
+        item,
+        model: opts.model,
+        promptVersion: opts.promptVersion,
+        apiKey,
+        apiBase: opts.apiBase,
+      }))
+    } catch (error) {
+      throw new Error(`AI suggestion failed for ${item.id}: ${errorMessage(error)}`)
+    }
   }
 
   await writeSuggestions(opts.out, suggestions, opts.overwrite)

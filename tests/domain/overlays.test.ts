@@ -215,7 +215,7 @@ describe('canonical overlays', () => {
     })).toThrow('AI overlays must include model')
   })
 
-  test('approves and rejects overlay operations without changing creation metadata', () => {
+  test('approves and rejects unreviewed overlay operations without changing creation metadata', () => {
     const op = createAiAddGlossOverlay({
       importedAt,
       model: 'gemini-3.1-flash-lite',
@@ -236,6 +236,9 @@ describe('canonical overlays', () => {
       importedAt,
       reviewStatus: 'rejected',
     })
+    expect(() => rejectOverlayOperation(approveOverlayOperation(op))).toThrow(
+      'Approved overlay operations cannot be rejected in place'
+    )
   })
 
   test('adds approved manual glosses and examples', () => {

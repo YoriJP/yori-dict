@@ -716,23 +716,42 @@ describe('admin curation endpoints', () => {
     })
   })
 
-  test('approves and rejects overlay operations', async () => {
+  test('approves overlay operations', async () => {
+    const id = 'ai-yds_00000002-add-gloss-zh-tw-canonical-gloss-v1-20260604'
+    const res = await request(`/admin/curation/overlays/${id}/approve`, {
+      method: 'POST',
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.operation.reviewStatus).toBe('approved')
+  })
+
+  test('rejects unreviewed overlay operations', async () => {
+    const id = 'ai-yds_00000002-add-gloss-zh-tw-canonical-gloss-v1-20260604'
+    const res = await request(`/admin/curation/overlays/${id}/reject`, {
+      method: 'POST',
+      headers: curationHeaders(),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.operation.reviewStatus).toBe('rejected')
+  })
+
+  test('does not reject approved overlay operations in place', async () => {
     const id = 'ai-yds_00000002-add-gloss-zh-tw-canonical-gloss-v1-20260604'
     let res = await request(`/admin/curation/overlays/${id}/approve`, {
       method: 'POST',
       headers: curationHeaders(),
     })
     expect(res.status).toBe(200)
-    let body = await res.json()
-    expect(body.operation.reviewStatus).toBe('approved')
 
     res = await request(`/admin/curation/overlays/${id}/reject`, {
       method: 'POST',
       headers: curationHeaders(),
     })
-    expect(res.status).toBe(200)
-    body = await res.json()
-    expect(body.operation.reviewStatus).toBe('rejected')
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'Approved overlay operations cannot be rejected in place' })
   })
 
   test('returns 404 when reviewing an unknown overlay operation', async () => {

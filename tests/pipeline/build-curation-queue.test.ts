@@ -112,7 +112,22 @@ describe('canonical curation queue CLI', () => {
     })
 
     expect(queue.items).toHaveLength(1)
+    expect(queue.summary).toEqual({
+      itemCount: 1,
+      totalCandidateCount: 1,
+      filters: {
+        commonOnly: false,
+        limit: undefined,
+      },
+    })
     const saved = await Bun.file(outPath).json()
+    expect(saved.summary).toEqual({
+      itemCount: 1,
+      totalCandidateCount: 1,
+      filters: {
+        commonOnly: false,
+      },
+    })
     expect(saved.items[0]).toMatchObject({
       id: 'missingGloss-yds_00000001-zh-tw',
       entryId: 'yde_00000001',

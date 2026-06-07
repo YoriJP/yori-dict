@@ -29,6 +29,14 @@ export interface CurationQueue {
   generatedAt: string
   snapshotGeneratedAt: string
   targetLang: TargetLanguage
+  summary: {
+    itemCount: number
+    totalCandidateCount: number
+    filters: {
+      commonOnly: boolean
+      limit?: number
+    }
+  }
   items: CurationQueueItem[]
 }
 
@@ -119,12 +127,22 @@ export function buildCurationQueue(snapshot: CanonicalSnapshot, opts: CurationQu
     || left.primaryForm.localeCompare(right.primaryForm)
     || left.senseId.localeCompare(right.senseId)
   )
+  const totalCandidateCount = items.length
+  const selectedItems = typeof opts.limit === 'number' ? items.slice(0, opts.limit) : items
 
   return {
     schemaVersion: '1.0.0',
     generatedAt: new Date().toISOString(),
     snapshotGeneratedAt: snapshot.generatedAt,
     targetLang: opts.targetLang,
-    items: typeof opts.limit === 'number' ? items.slice(0, opts.limit) : items,
+    summary: {
+      itemCount: selectedItems.length,
+      totalCandidateCount,
+      filters: {
+        commonOnly: opts.commonOnly ?? false,
+        limit: opts.limit,
+      },
+    },
+    items: selectedItems,
   }
 }

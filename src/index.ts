@@ -450,6 +450,9 @@ app.post('/admin/curation/overlays/:id/reject', async (c) => {
     if (error instanceof Error && error.message.startsWith('Overlay operation not found:')) {
       return c.json({ error: 'Overlay operation not found' }, 404)
     }
+    if (error instanceof Error && error.message === 'Approved overlay operations cannot be rejected in place') {
+      return c.json({ error: error.message }, 409)
+    }
     throw error
   }
 })

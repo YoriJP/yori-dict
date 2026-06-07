@@ -98,7 +98,7 @@ describe('canonical overlay curation CLI', () => {
     })
   })
 
-  test('approves and rejects operations by id', async () => {
+  test('approves operations by id and rejects only unreviewed operations', async () => {
     const overlay = join(makeTempDir(), 'overlays.json')
     const operation = createManualAddGlossOverlay({
       importedAt,
@@ -116,13 +116,29 @@ describe('canonical overlay curation CLI', () => {
     let file = await loadCanonicalOverlayFile(overlay)
     expect(file.operations[0].reviewStatus).toBe('approved')
 
-    await runCurationCommand(parseArgs([
+    await expect(runCurationCommand(parseArgs([
       'reject',
       '--overlay', overlay,
       '--id', operation.id,
+    ]))).rejects.toThrow('Approved overlay operations cannot be rejected in place')
+    file = await loadCanonicalOverlayFile(overlay)
+    expect(file.operations[0].reviewStatus).toBe('approved')
+
+    const rejected = createManualAddGlossOverlay({
+      id: 'manual-gloss-to-reject',
+      importedAt,
+      senseId: 'yds_00000002',
+      lang: 'zh-tw',
+      text: '喝',
+    })
+    await appendCanonicalOverlayOperation(overlay, rejected)
+    await runCurationCommand(parseArgs([
+      'reject',
+      '--overlay', overlay,
+      '--id', rejected.id,
     ]))
     file = await loadCanonicalOverlayFile(overlay)
-    expect(file.operations[0].reviewStatus).toBe('rejected')
+    expect(file.operations.find((op) => op.id === rejected.id)?.reviewStatus).toBe('rejected')
   })
 
   test('lists pending AI operations', async () => {

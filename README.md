@@ -147,6 +147,7 @@ File policy:
 - `data/curation/` and `reports/` are generated local output and are ignored.
 - `data/overlays/` and `data/registry/` are not ignored. Commit those only when they contain intentional product-owned overlay operations or stable ID registry changes.
 - Pending AI suggestions do not change the dictionary and do not remove queue items. A queue item is resolved only after the operation is approved, applied to the canonical snapshot, and the release is rebuilt.
+- Approved overlay operations cannot be rejected in place. Add a new corrective operation if the approved result needs to change.
 
 Create manual curation operations:
 
@@ -180,6 +181,8 @@ Build a quality-driven curation queue:
 ```bash
 bun run queue:curation --lang zh-tw --common-only --limit 100
 ```
+
+The queue JSON includes a `summary` block with selected item count, total candidate count before `--limit`, and active filters.
 
 Convert AI suggestion output into unreviewed overlay operations:
 
