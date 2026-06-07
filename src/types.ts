@@ -91,7 +91,7 @@ export type PublicSense = {
     kana: string[];
   };
   partOfSpeech: string[];
-  glosses: Record<string, PublicGloss[]>;
+  glosses: PublicGloss[];
 };
 
 export type PublicGloss = {

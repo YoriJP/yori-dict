@@ -87,6 +87,7 @@ export function openLookupDb(path: string): LookupDb {
 
 function lookup(db: Database, query: string, requestedLang: ApiLang | null): LookupResponse {
   const normalizedQuery = normalizeQuery(query);
+  const lang = requestedLang ?? "en";
   const candidates: LookupCandidate[] = [];
 
   const exactEntryIds = findEntryIds(db, normalizedQuery);
@@ -107,7 +108,7 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
     });
   }
 
-  return { item: readBestItem(db, candidates, requestedLang) };
+  return { item: readBestItem(db, candidates, lang) };
 }
 
 function findEntryIds(db: Database, term: string): string[] {
@@ -133,12 +134,12 @@ function matchRank(candidate: DeinflectionCandidate): number {
 function readBestItem(
   db: Database,
   candidates: LookupCandidate[],
-  requestedLang: ApiLang | null
+  lang: ApiLang
 ): PublicLookupItem | null {
   const best = candidates.sort((a, b) => a.rank - b.rank)[0];
   if (!best) return null;
 
-  const entry = readEntries(db, [best.entryIds[0]], requestedLang)[0];
+  const entry = readEntries(db, [best.entryIds[0]], lang)[0];
   if (!entry) return null;
 
   return toLookupItem(entry);
@@ -158,7 +159,7 @@ function toLookupItem(entry: PublicEntry): PublicLookupItem {
   };
 }
 
-function readEntries(db: Database, entryIds: string[], requestedLang: ApiLang | null): PublicEntry[] {
+function readEntries(db: Database, entryIds: string[], lang: ApiLang): PublicEntry[] {
   if (entryIds.length === 0) return [];
 
   const entryQuery = db.query<EntryRow, [string]>(
@@ -173,7 +174,7 @@ function readEntries(db: Database, entryIds: string[], requestedLang: ApiLang | 
     source: entry.source,
     sourceId: entry.source_id,
     headwords: readHeadwords(db, entry.id),
-    senses: readSenses(db, entry.id, requestedLang)
+    senses: readSenses(db, entry.id, lang)
   }));
 }
 
@@ -195,7 +196,7 @@ function readHeadwords(db: Database, entryId: string): PublicHeadword[] {
     }));
 }
 
-function readSenses(db: Database, entryId: string, requestedLang: ApiLang | null): PublicSense[] {
+function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[] {
   return db
     .query<SenseRow, [string]>(
       `select id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech
@@ -212,38 +213,21 @@ function readSenses(db: Database, entryId: string, requestedLang: ApiLang | null
         kana: JSON.parse(row.applies_to_kana) as string[]
       },
       partOfSpeech: JSON.parse(row.part_of_speech) as string[],
-      glosses: groupGlosses(readGlosses(db, row.id), requestedLang)
+      glosses: readGlosses(db, row.id, lang)
     }));
 }
 
-function readGlosses(db: Database, senseId: string): GlossRow[] {
+function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {
   return db
-    .query<GlossRow, [string]>(
-      "select sense_id, lang, text from glosses where sense_id = ? order by lang, rowid"
+    .query<GlossRow, [string, ApiLang]>(
+      "select sense_id, lang, text from glosses where sense_id = ? and lang = ? order by rowid"
     )
-    .all(senseId);
-}
-
-function groupGlosses(rows: GlossRow[], requestedLang: ApiLang | null): Record<string, PublicGloss[]> {
-  const langOrder = requestedLang ? [requestedLang, "en"] : ["en"];
-  const remaining = Array.from(new Set(rows.map((row) => row.lang))).sort();
-  const orderedLangs = Array.from(new Set([...langOrder, ...remaining]));
-  const grouped: Record<string, PublicGloss[]> = {};
-
-  for (const lang of orderedLangs) {
-    const glosses = rows
-      .filter((row) => row.lang === lang)
-      .map((row) => ({
-        text: row.text,
-        source: "jmdict" as const,
-        reviewStatus: "source" as const
-      }));
-    if (glosses.length > 0 || lang === requestedLang || lang === "en") {
-      grouped[lang] = glosses;
-    }
-  }
-
-  return grouped;
+    .all(senseId, lang)
+    .map((row) => ({
+      text: row.text,
+      source: "jmdict" as const,
+      reviewStatus: "source" as const
+    }));
 }
 
 function readMetadata(db: Database, key: string): string | null {

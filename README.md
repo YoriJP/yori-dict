@@ -54,6 +54,8 @@ GET /v1/lookup?q=食べる&lang=zh-tw
 POST /v1/lookup/batch
 ```
 
+`lang` defaults to `en`. Lookup returns glosses only for the requested language; it does not fall back to English when that language has no glosses.
+
 Batch request:
 
 ```json

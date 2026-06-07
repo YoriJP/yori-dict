@@ -34,8 +34,14 @@ test("looks up an exact Japanese headword", async () => {
   expect(body.item.id).toBe("yori:e_jmdict_1358280");
   expect(body.item.word).toBe("食べる");
   expect(body.item.reading).toBe("たべる");
-  expect(body.item.senses[0].glosses["zh-tw"]).toEqual([]);
-  expect(body.item.senses[0].glosses.en[0].text).toBe("to eat");
+  expect(body.item.senses[0].glosses).toEqual([]);
+});
+
+test("defaults lookup glosses to English", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.item.senses[0].glosses[0].text).toBe("to eat");
 });
 
 test("preserves form tags and sense applicability", async () => {
