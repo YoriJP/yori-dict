@@ -5,6 +5,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { applyCanonicalOverlays } from '../../scripts/pipeline/apply-canonical-overlays'
 import { buildCanonicalRelease } from '../../scripts/pipeline/build-canonical-release'
+import { runBuildCurationQueue } from '../../scripts/pipeline/build-curation-queue'
+import { runCreateAiCurationOverlays } from '../../scripts/pipeline/create-ai-curation-overlays'
 import {
   parseArgs as parseCurationArgs,
   runCurationCommand,
@@ -190,6 +192,85 @@ describe('canonical curation workflow', () => {
           translation: '我吃壽司。',
         }),
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test('keeps queue items until AI gloss suggestions are approved and applied', async () => {
+    const dir = makeTempDir()
+    const snapshotPath = join(dir, 'snapshot.json')
+    const queuePath = join(dir, 'queue.zh-tw.json')
+    const suggestionsPath = join(dir, 'suggestions.jsonl')
+    const overlayPath = join(dir, 'overlays.json')
+    const registryPath = join(dir, 'registry', 'ids.json')
+    const releasePath = join(dir, 'release.sqlite')
+
+    await Bun.write(snapshotPath, JSON.stringify(snapshot()))
+    await writeRegistry(registryPath)
+
+    const initialQueue = await runBuildCurationQueue({
+      snapshot: snapshotPath,
+      lang: 'zh-tw',
+      out: queuePath,
+      commonOnly: false,
+    })
+    expect(initialQueue.items.map((item) => item.id)).toEqual(['missingGloss-yds_00000001-zh-tw'])
+
+    await Bun.write(suggestionsPath, JSON.stringify({
+      queueItemId: 'missingGloss-yds_00000001-zh-tw',
+      text: '吃',
+    }) + '\n')
+
+    const operations = await runCreateAiCurationOverlays({
+      queue: queuePath,
+      suggestions: suggestionsPath,
+      overlay: overlayPath,
+      model: 'gemini-2.5-flash',
+      promptVersion: 'canonical-gloss-v1',
+      importedAt,
+    })
+    expect(operations).toHaveLength(1)
+    expect(operations[0].reviewStatus).toBe('unreviewed')
+
+    const stillPendingQueue = await runBuildCurationQueue({
+      snapshot: snapshotPath,
+      lang: 'zh-tw',
+      out: queuePath,
+      commonOnly: false,
+    })
+    expect(stillPendingQueue.items).toHaveLength(1)
+
+    await runCurationCommand(parseCurationArgs([
+      'approve',
+      '--overlay', overlayPath,
+      '--id', operations[0].id,
+    ]))
+
+    await applyCanonicalOverlays({
+      snapshot: snapshotPath,
+      overlay: overlayPath,
+      out: snapshotPath,
+      registry: registryPath,
+    })
+
+    const resolvedQueue = await runBuildCurationQueue({
+      snapshot: snapshotPath,
+      lang: 'zh-tw',
+      out: queuePath,
+      commonOnly: false,
+    })
+    expect(resolvedQueue.items).toEqual([])
+
+    await buildCanonicalRelease({ snapshot: snapshotPath, out: releasePath, overwrite: false })
+    const db = new Database(releasePath, { readonly: true })
+    try {
+      const service = new CanonicalLookupService(db)
+      const lookup = service.lookup({ query: '食べる', lang: 'zh-tw' })
+      expect(lookup.entries[0]).toMatchObject({
+        id: 'yde_00000001',
+        definitions: ['吃'],
+      })
     } finally {
       db.close()
     }

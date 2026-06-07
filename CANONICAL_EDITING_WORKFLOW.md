@@ -100,17 +100,19 @@ Once an operation is approved and used in a release, do not rewrite its meaning.
 
 AI output is a suggestion, not dictionary data.
 
-1. Generate candidate overlay operations with `reviewStatus: "unreviewed"`.
-2. Include required AI metadata:
+1. Build a curation queue with `bun run queue:curation`.
+2. Generate suggestion JSONL with `bun run generate:ai-suggestions`.
+3. Convert suggestion JSONL into overlay operations with `reviewStatus: "unreviewed"` using `bun run suggest:ai-overlays`.
+4. Include required AI metadata:
    - `model`
    - `promptVersion`
    - `inputRefs`
-3. Show reviewers the candidate text, target entry, target sense, source refs, and prompt version.
-4. Reviewer chooses one of:
+5. Show reviewers the candidate text, target entry, target sense, source refs, and prompt version.
+6. Reviewer chooses one of:
    - approve as-is
    - edit and approve as a manual operation
    - reject
-5. Only approved operations enter the release rebuild.
+7. Only approved operations enter the release rebuild.
 
 Rejected AI operations may be kept for audit, but they must never affect the release because the overlay applier skips unapproved operations.
 
