@@ -45,6 +45,16 @@ data/yori.sqlite
 
 Both are local generated data and are not committed.
 
+## AI Seeds
+
+Export a small local JSONL file of English JMdict senses that are missing a target language:
+
+```sh
+bun run export:ai-seeds -- --lang zh-tw --limit 20
+```
+
+This writes to `data/ai-seeds/`, which is ignored.
+
 ## API
 
 ```txt

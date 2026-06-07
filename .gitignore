@@ -1,4 +1,5 @@
 node_modules/
+data/ai-seeds/
 data/raw/
 data/*.sqlite
 data/*.sqlite-shm
