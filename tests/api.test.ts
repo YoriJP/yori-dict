@@ -34,12 +34,6 @@ test("looks up an exact Japanese headword", async () => {
   expect(body.item.id).toBe("yori:e_jmdict_1358280");
   expect(body.item.word).toBe("食べる");
   expect(body.item.reading).toBe("たべる");
-  expect(body.item.matchedFrom).toEqual({
-    input: "食べる",
-    form: "食べる",
-    type: "exact",
-    reasons: []
-  });
   expect(body.item.senses[0].glosses["zh-tw"]).toEqual([]);
   expect(body.item.senses[0].glosses.en[0].text).toBe("to eat");
 });
@@ -67,52 +61,32 @@ test("looks up by reading", async () => {
   expect(body.item.word).toBe("食べる");
 });
 
-test("returns deinflected matches", async () => {
+test("returns an item for deinflected ichidan forms", async () => {
   const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%81%BE%E3%81%97%E3%81%9F");
   const body = await res.json();
-  expect(body.item.matchedFrom).toEqual({
-    input: "食べました",
-    form: "食べる",
-    type: "deinflected",
-    reasons: ["polite past"]
-  });
   expect(body.item.id).toBe("yori:e_jmdict_1358280");
+  expect(body.item.word).toBe("食べる");
 });
 
-test("returns deinflected godan matches", async () => {
+test("returns an item for deinflected godan forms", async () => {
   const res = await app.request("/v1/lookup?q=%E8%AA%AD%E3%82%93%E3%81%A0");
   const body = await res.json();
-  expect(body.item.matchedFrom).toEqual({
-    input: "読んだ",
-    form: "読む",
-    type: "deinflected",
-    reasons: ["godan past"]
-  });
   expect(body.item.id).toBe("yori:e_jmdict_1456360");
+  expect(body.item.word).toBe("読む");
 });
 
-test("returns deinflected godan negative matches", async () => {
+test("returns an item for deinflected godan negative forms", async () => {
   const res = await app.request("/v1/lookup?q=%E8%A1%8C%E3%81%8B%E3%81%AA%E3%81%8B%E3%81%A3%E3%81%9F");
   const body = await res.json();
-  expect(body.item.matchedFrom).toEqual({
-    input: "行かなかった",
-    form: "行く",
-    type: "deinflected",
-    reasons: ["godan negative past"]
-  });
   expect(body.item.id).toBe("yori:e_jmdict_1578850");
+  expect(body.item.word).toBe("行く");
 });
 
 test("keeps exact matches ranked first", async () => {
   const res = await app.request("/v1/lookup?q=%E9%AB%98%E3%81%84");
   const body = await res.json();
-  expect(body.item.matchedFrom).toEqual({
-    input: "高い",
-    form: "高い",
-    type: "exact",
-    reasons: []
-  });
   expect(body.item.id).toBe("yori:e_jmdict_1283190");
+  expect(body.item.word).toBe("高い");
 });
 
 test("returns one result per batch query in input order", async () => {

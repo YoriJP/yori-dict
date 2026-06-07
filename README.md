@@ -54,51 +54,12 @@ GET /v1/lookup?q=食べる&lang=zh-tw
 POST /v1/lookup/batch
 ```
 
-Lookup returns one best item:
-
-```json
-{
-  "item": {
-    "id": "yori:e_jmdict_1358280",
-    "word": "食べる",
-    "reading": "たべる",
-    "common": true,
-    "matchedFrom": {
-      "input": "食べました",
-      "form": "食べる",
-      "type": "deinflected",
-      "reasons": ["polite past"]
-    },
-    "senses": [
-      {
-        "partOfSpeech": ["v1", "vt"],
-        "glosses": {
-          "zh-tw": [],
-          "en": [{ "text": "to eat", "source": "jmdict", "reviewStatus": "source" }]
-        }
-      }
-    ]
-  }
-}
-```
-
 Batch request:
 
 ```json
 {
   "queries": ["食べました", "学校"],
   "lang": "zh-tw"
-}
-```
-
-Batch lookup returns one result per input:
-
-```json
-{
-  "results": [
-    { "input": "食べました", "item": {} },
-    { "input": "存在しない語", "item": null }
-  ]
 }
 ```
 

@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import type {
   ApiLang,
-  LookupMatch,
   LookupResponse,
   PublicEntry,
   PublicGloss,
@@ -44,7 +43,7 @@ type GlossRow = {
 };
 
 type LookupCandidate = {
-  match: LookupMatch;
+  rank: number;
   entryIds: string[];
 };
 
@@ -93,13 +92,7 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
   const exactEntryIds = findEntryIds(db, normalizedQuery);
   if (exactEntryIds.length > 0) {
     candidates.push({
-      match: {
-        input: normalizedQuery,
-        matchedForm: normalizedQuery,
-        matchType: "exact",
-        rank: 0,
-        reasons: []
-      },
+      rank: 0,
       entryIds: exactEntryIds
     });
   }
@@ -109,13 +102,7 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
     if (candidateEntryIds.length === 0) continue;
 
     candidates.push({
-      match: {
-        input: normalizedQuery,
-        matchedForm: candidate.text,
-        matchType: "deinflected",
-        rank: matchRank(candidate),
-        reasons: candidate.reasons
-      },
+      rank: matchRank(candidate),
       entryIds: candidateEntryIds
     });
   }
@@ -148,28 +135,22 @@ function readBestItem(
   candidates: LookupCandidate[],
   requestedLang: ApiLang | null
 ): PublicLookupItem | null {
-  const best = candidates.sort((a, b) => a.match.rank - b.match.rank)[0];
+  const best = candidates.sort((a, b) => a.rank - b.rank)[0];
   if (!best) return null;
 
   const entry = readEntries(db, [best.entryIds[0]], requestedLang)[0];
   if (!entry) return null;
 
-  return toLookupItem(entry, best.match);
+  return toLookupItem(entry);
 }
 
-function toLookupItem(entry: PublicEntry, match: LookupMatch): PublicLookupItem {
+function toLookupItem(entry: PublicEntry): PublicLookupItem {
   const headword = entry.headwords[0];
   return {
     id: entry.id,
     word: headword?.text ?? "",
     reading: headword?.reading ?? null,
     common: entry.headwords.some((item) => item.common),
-    matchedFrom: {
-      input: match.input,
-      form: match.matchedForm,
-      type: match.matchType,
-      reasons: match.reasons
-    },
     source: entry.source,
     sourceId: entry.sourceId,
     headwords: entry.headwords,

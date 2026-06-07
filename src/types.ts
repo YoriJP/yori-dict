@@ -43,16 +43,6 @@ export type JmdictFile = {
   words: JmdictWord[];
 };
 
-export type MatchType = "exact" | "deinflected";
-
-export type LookupMatch = {
-  input: string;
-  matchedForm: string;
-  matchType: MatchType;
-  rank: number;
-  reasons: string[];
-};
-
 export type LookupResponse = {
   item: PublicLookupItem | null;
 };
@@ -71,12 +61,6 @@ export type PublicLookupItem = {
   word: string;
   reading: string | null;
   common: boolean;
-  matchedFrom: {
-    input: string;
-    form: string;
-    type: MatchType;
-    reasons: string[];
-  };
   source: "jmdict";
   sourceId: string;
   headwords: PublicHeadword[];
