@@ -226,7 +226,7 @@ describe('canonical curation workflow', () => {
       queue: queuePath,
       suggestions: suggestionsPath,
       overlay: overlayPath,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       promptVersion: 'canonical-gloss-v1',
       importedAt,
     })

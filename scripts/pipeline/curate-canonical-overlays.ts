@@ -1,5 +1,7 @@
 import {
   appendCanonicalOverlayOperation,
+  getCanonicalOverlayOperation,
+  listCanonicalOverlayOperations,
   listPendingAiOverlayOperations,
   loadCanonicalOverlayFile,
   updateCanonicalOverlayOperation,
@@ -21,6 +23,7 @@ type Command =
   | 'add-example'
   | 'approve'
   | 'reject'
+  | 'show'
   | 'list-pending-ai'
 
 export interface CliOptions {
@@ -34,6 +37,7 @@ export interface CliOptions {
   glosses: string[]
   japanese?: string
   translation?: string
+  limit?: number
   approved: boolean
 }
 
@@ -55,12 +59,14 @@ Commands:
   add-example       Create a manual addExample operation.
   approve           Mark an operation approved.
   reject            Mark an operation rejected.
+  show              Print one operation as JSON.
   list-pending-ai   List unreviewed AI operations.
 
 Common options:
   --overlay <path>      Overlay file (default: ${DEFAULT_OVERLAY})
   --id <id>             Operation ID. Required for approve/reject, optional for create commands.
   --imported-at <iso>   Creation timestamp (default: now)
+  --limit <n>           Max operations for list commands.
   --approved            Create a manual operation as approved.
   --help, -h            Show this help.
 
@@ -92,6 +98,12 @@ function requireString(value: string | undefined, name: string): string {
 function requireLang(value: TargetLanguage | undefined): TargetLanguage {
   if (!value) throw new Error('--lang is required')
   return value
+}
+
+function parsePositiveInt(value: string, name: string): number {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed) || parsed < 1) throw new Error(`${name} must be a positive integer`)
+  return parsed
 }
 
 export function parseArgs(args: string[]): CliOptions {
@@ -147,6 +159,9 @@ export function parseArgs(args: string[]): CliOptions {
     } else if (arg === '--translation' && next) {
       opts.translation = next
       i++
+    } else if (arg === '--limit' && next) {
+      opts.limit = parsePositiveInt(next, '--limit')
+      i++
     } else if (arg === '--approved') {
       opts.approved = true
     } else {
@@ -164,6 +179,7 @@ function isCommand(value: string): value is Command {
     'add-example',
     'approve',
     'reject',
+    'show',
     'list-pending-ai',
   ].includes(value)
 }
@@ -240,8 +256,23 @@ export async function runCurationCommand(opts: CliOptions): Promise<CanonicalOve
     return operation
   }
 
+  if (opts.command === 'show') {
+    const file = await loadCanonicalOverlayFile(opts.overlay)
+    const operation = getCanonicalOverlayOperation(file, requireString(opts.id, '--id'))
+    if (!operation) throw new Error(`Overlay operation not found: ${opts.id}`)
+    console.log(JSON.stringify(operation, null, 2))
+    return operation
+  }
+
   const file = await loadCanonicalOverlayFile(opts.overlay)
-  const operations = listPendingAiOverlayOperations(file)
+  const operations = opts.lang || opts.limit
+    ? listCanonicalOverlayOperations(file, {
+      sourceKind: 'ai',
+      reviewStatus: 'unreviewed',
+      lang: opts.lang,
+      limit: opts.limit,
+    })
+    : listPendingAiOverlayOperations(file)
   for (const operation of operations) console.log(describeOperation(operation))
   return operations
 }

@@ -72,7 +72,7 @@ describe('AI curation suggestion generator CLI', () => {
     expect(parseArgs([
       '--queue', 'queue.json',
       '--out', 'suggestions.jsonl',
-      '--model', 'gemini-2.5-flash',
+      '--model', 'gemini-3.1-flash-lite',
       '--prompt-version', 'canonical-gloss-v1',
       '--api-key-env', 'TEST_GEMINI_KEY',
       '--api-base', 'https://example.test',
@@ -81,7 +81,7 @@ describe('AI curation suggestion generator CLI', () => {
     ])).toEqual({
       queue: 'queue.json',
       out: 'suggestions.jsonl',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       promptVersion: 'canonical-gloss-v1',
       apiKeyEnv: 'TEST_GEMINI_KEY',
       apiBase: 'https://example.test',
@@ -104,7 +104,7 @@ describe('AI curation suggestion generator CLI', () => {
     const suggestions = await runGenerateAiCurationSuggestions({
       queue: queuePath,
       out: outPath,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       promptVersion: 'canonical-gloss-v1',
       apiKeyEnv: 'GEMINI_API_KEY',
       apiBase: 'https://example.test',
@@ -135,7 +135,7 @@ describe('AI curation suggestion generator CLI', () => {
     await expect(runGenerateAiCurationSuggestions({
       queue: queuePath,
       out: outPath,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       promptVersion: 'canonical-gloss-v1',
       apiKeyEnv: 'GEMINI_API_KEY',
       apiBase: 'https://example.test',

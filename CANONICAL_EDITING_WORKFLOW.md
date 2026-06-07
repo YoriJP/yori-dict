@@ -135,19 +135,25 @@ If internal HTTP endpoints are added later, keep them scoped to curation:
 GET  /admin/curation/lookup
 GET  /admin/curation/entries/:id
 GET  /admin/curation/overlays
-POST /admin/curation/overlays
+GET  /admin/curation/overlays/:id
 POST /admin/curation/overlays/:id/approve
 POST /admin/curation/overlays/:id/reject
-POST /admin/curation/preview-release
 ```
 
 Those endpoints should read canonical snapshots or release DBs, write overlay operations, and run validation. They should not mutate release DB rows directly.
+
+The first HTTP version is intentionally smaller than a replacement admin UI. It
+requires `CURATION_OVERLAY_PATH` and `CURATION_API_TOKEN`, supports lookup,
+entry inspection, overlay listing, overlay inspection, and approve/reject. Manual
+operation creation and release preview stay in the CLI until the review workflow
+is stable.
 
 ## Release Gate
 
 A canonical release can be promoted only when all of these pass:
 
 - overlay file validation
+- overlay apply validation for approved operations
 - canonical snapshot validation after overlays
 - quality report generated
 - release DB build succeeds
