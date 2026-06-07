@@ -53,7 +53,13 @@ Export a small local JSONL file of English JMdict senses that are missing a targ
 bun run export:ai-seeds -- --lang zh-tw --limit 20
 ```
 
-This writes to `data/ai-seeds/`, which is ignored.
+Generate local AI candidates from those seeds:
+
+```sh
+GEMINI_API_KEY=... bun run enrich:ai -- --limit 20
+```
+
+Both commands write to ignored files under `data/`.
 
 ## API
 

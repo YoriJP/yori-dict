@@ -1,4 +1,6 @@
 node_modules/
+.env
+data/ai-candidates/
 data/ai-seeds/
 data/raw/
 data/*.sqlite
