@@ -121,7 +121,16 @@ function findEntryIds(db: Database, term: string): string[] {
        join forms f on f.entry_id = lt.entry_id and f.text = lt.term
        where lt.term = ?
        group by lt.entry_id
-       order by max(f.common) desc, lt.entry_id`
+       order by
+         max(f.common) desc,
+         case when (
+           select best.text
+           from forms best
+           where best.entry_id = lt.entry_id
+           order by best.common desc, case best.kind when 'kanji' then 0 else 1 end, best.text, best.reading
+           limit 1
+         ) = lt.term then 0 else 1 end,
+         lt.entry_id`
     )
     .all(term)
     .map((row) => row.entry_id);

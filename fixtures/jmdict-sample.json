@@ -236,6 +236,56 @@
           ]
         }
       ]
+    },
+    {
+      "id": "2000001",
+      "kanji": [
+        { "text": "暗い", "common": true, "tags": [] }
+      ],
+      "kana": [
+        { "text": "くらい", "common": true, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["adj-i"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "dark" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2000002",
+      "kanji": [],
+      "kana": [
+        { "text": "くらい", "common": true, "tags": [], "appliesToKanji": [] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["prt"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "about" }
+          ]
+        }
+      ]
     }
   ]
 }

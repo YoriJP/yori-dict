@@ -95,6 +95,18 @@ test("keeps exact matches ranked first", async () => {
   expect(body.item.word).toBe("高い");
 });
 
+test("prefers a kana-primary entry for ambiguous kana queries", async () => {
+  const kanaRes = await app.request("/v1/lookup?q=%E3%81%8F%E3%82%89%E3%81%84");
+  const kanaBody = await kanaRes.json();
+  expect(kanaBody.item.id).toBe("yori:e_jmdict_2000002");
+  expect(kanaBody.item.word).toBe("くらい");
+
+  const kanjiRes = await app.request("/v1/lookup?q=%E6%9A%97%E3%81%84");
+  const kanjiBody = await kanjiRes.json();
+  expect(kanjiBody.item.id).toBe("yori:e_jmdict_2000001");
+  expect(kanjiBody.item.word).toBe("暗い");
+});
+
 test("returns one result per batch query in input order", async () => {
   const res = await app.request("/v1/lookup/batch", {
     method: "POST",
