@@ -70,7 +70,7 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
     reading: "あしらう",
     targetLang: "zh-tw",
     sourceGlosses: ["to treat"],
-    candidateGlosses: ["處理！", "...吧"],
+    candidateGlosses: ["處理！", "做嗎？"],
     model: "gemini-3-flash-preview",
     thinkingLevel: "low"
   };
@@ -107,8 +107,43 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
   expect(rejected).toHaveLength(3);
   expect(rejected[0].reasons).toContain("Chinese gloss has no Han text: school");
   expect(rejected[1].reasons).toContain("gloss contains sentence punctuation: 處理！");
-  expect(rejected[1].reasons).toContain("gloss contains sentence punctuation: ...吧");
+  expect(rejected[1].reasons).toContain("gloss contains sentence punctuation: 做嗎？");
   expect(rejected[2].reasons).toContain("Chinese gloss is too generic for this sense: 在");
+});
+
+test("normalizes ellipsis placeholders in accepted AI candidates", async () => {
+  const dbPath = tempPath("ai-check-ellipsis.sqlite");
+  const inputPath = tempPath("ai-candidates-ellipsis.jsonl");
+  const acceptedPath = tempPath("ai-accepted-ellipsis.jsonl");
+  const rejectedPath = tempPath("ai-rejected-ellipsis.jsonl");
+  await Bun.$`rm -f ${dbPath} ${inputPath} ${acceptedPath} ${rejectedPath}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
+
+  const candidate: Candidate = {
+    entryId: "yori:e_jmdict_1358280",
+    senseId: "yori:s_jmdict_1358280_1",
+    word: "食べる",
+    reading: "たべる",
+    targetLang: "zh-tw",
+    sourceGlosses: ["to eat"],
+    candidateGlosses: ["對...來說", "對……而言"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
+
+  await Bun.write(inputPath, `${JSON.stringify(candidate)}\n`);
+  await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath}`;
+
+  expect(await readJsonl(acceptedPath)).toEqual([
+    {
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "zh-tw",
+      glosses: ["對……來說", "對……而言"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    }
+  ]);
+  expect(await readJsonl(rejectedPath)).toEqual([]);
 });
 
 test("appends accepted AI candidates without duplicating existing source rows", async () => {

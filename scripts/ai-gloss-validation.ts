@@ -17,7 +17,7 @@ export type GlossValidationInput = {
 };
 
 export function normalizeGlosses(glosses: string[]): string[] {
-  return glosses.map((gloss) => gloss.trim()).filter(Boolean);
+  return glosses.map((gloss) => gloss.trim().replaceAll("...", "……")).filter(Boolean);
 }
 
 export function validateGlosses(input: GlossValidationInput): string[] {
@@ -66,7 +66,7 @@ export function formatJsonl(rows: unknown[]): string {
 }
 
 function containsSentencePunctuation(gloss: string): boolean {
-  return /[。！？!?…]/.test(gloss) || gloss.includes("...") || gloss.includes("\n");
+  return /[。！？!?]/.test(gloss) || gloss.includes("\n");
 }
 
 function hasHanText(gloss: string): boolean {
