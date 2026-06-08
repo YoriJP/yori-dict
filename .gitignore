@@ -2,6 +2,7 @@ node_modules/
 .env
 data/ai-candidates/
 data/ai-batches/
+data/ai-review/
 data/ai-seeds/
 data/raw/
 data/*.sqlite
