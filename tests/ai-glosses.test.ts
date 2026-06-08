@@ -204,6 +204,32 @@ test("validates accepted AI gloss source files", async () => {
   expect(result.stderr.toString()).toContain("Chinese gloss has no Han text: eat");
 });
 
+test("reports AI gloss coverage", async () => {
+  const dbPath = tempPath("ai-coverage.sqlite");
+  const sourcePath = tempPath("ai-coverage-source.jsonl");
+  await Bun.$`rm -f ${dbPath} ${sourcePath}`;
+  await Bun.write(
+    sourcePath,
+    JSON.stringify({
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "zh-tw",
+      glosses: ["吃"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    }) + "\n"
+  );
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${sourcePath}`;
+
+  const result = await Bun.$`bun run scripts/report-ai-coverage.ts --db ${dbPath} --lang zh-tw --source ${sourcePath} --samples 2`.text();
+
+  expect(result).toContain("lang: zh-tw");
+  expect(result).toContain("coveredSenses: 1");
+  expect(result).toContain("sourceRows: 1");
+  expect(result).toContain("zh-tw sources:");
+  expect(result).toContain("ai-assisted/checked: senses=1 glosses=1");
+  expect(result).toContain("nextMissingSamples: 2");
+});
+
 test("exports failed batch seeds from a manifest", async () => {
   const runDir = tempPath("ai-failed-run");
   const manifestPath = `${runDir}/manifest.json`;
