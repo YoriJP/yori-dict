@@ -339,6 +339,39 @@ test("exports AI gloss review bundles with an offset", async () => {
   expect(rows.map((row) => row.senseId)).toEqual(["yori:s_jmdict_1358280_1"]);
 });
 
+test("exports AI gloss review bundles for non-common rows", async () => {
+  const dbPath = tempPath("ai-review-non-common.sqlite");
+  const sourcePath = tempPath("ai-review-non-common-source.jsonl");
+  const outPath = tempPath("ai-review-non-common-bundle.jsonl");
+  await Bun.$`rm -f ${dbPath} ${sourcePath} ${outPath}`;
+  await Bun.write(
+    sourcePath,
+    [
+      JSON.stringify({
+        senseId: "yori:s_jmdict_1358280_1",
+        lang: "zh-tw",
+        glosses: ["吃"],
+        source: "ai-assisted",
+        model: "gemini-3-flash-preview"
+      }),
+      JSON.stringify({
+        senseId: "yori:s_jmdict_1000300_1",
+        lang: "zh-tw",
+        glosses: ["處理"],
+        source: "ai-assisted",
+        model: "gemini-3-flash-preview"
+      })
+    ].join("\n") + "\n"
+  );
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${sourcePath}`;
+
+  const result = await Bun.$`bun run scripts/review-ai-glosses.ts --db ${dbPath} --source ${sourcePath} --out ${outPath} --limit 10 --non-common-only`.text();
+  const rows = (await readJsonl(outPath)) as Array<{ senseId: string }>;
+
+  expect(result).toContain("Skipped 1 common AI row(s)");
+  expect(rows.map((row) => row.senseId)).toEqual(["yori:s_jmdict_1000300_1"]);
+});
+
 test("exports AI seeds while skipping rejected senses by default", async () => {
   const dbPath = tempPath("ai-export-skip.sqlite");
   const rejectedDir = tempPath("ai-export-rejected");

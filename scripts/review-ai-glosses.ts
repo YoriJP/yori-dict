@@ -13,6 +13,7 @@ type Args = {
   limit: number;
   offset: number;
   commonOnly: boolean;
+  nonCommonOnly: boolean;
 };
 
 type ContextRow = {
@@ -48,6 +49,7 @@ const reviewRows: ReviewRow[] = [];
 let skippedMissingContext = 0;
 let skippedLang = 0;
 let skippedCommon = 0;
+let skippedNonCommon = 0;
 let skippedOffset = 0;
 
 for (const row of sourceRows) {
@@ -62,6 +64,10 @@ for (const row of sourceRows) {
     continue;
   }
   if (args.commonOnly && context.common !== 1) {
+    skippedNonCommon += 1;
+    continue;
+  }
+  if (args.nonCommonOnly && context.common === 1) {
     skippedCommon += 1;
     continue;
   }
@@ -80,7 +86,8 @@ await Bun.$`mkdir -p ${dirname(args.outPath)}`;
 await Bun.write(args.outPath, formatJsonl(reviewRows));
 
 console.log(`Wrote ${reviewRows.length} ${args.lang} review row(s) to ${args.outPath}`);
-if (args.commonOnly) console.log(`Skipped ${skippedCommon} non-common AI row(s)`);
+if (args.commonOnly) console.log(`Skipped ${skippedNonCommon} non-common AI row(s)`);
+if (args.nonCommonOnly) console.log(`Skipped ${skippedCommon} common AI row(s)`);
 if (skippedOffset > 0) console.log(`Skipped ${skippedOffset} eligible AI row(s) by offset`);
 if (skippedLang > 0) console.log(`Skipped ${skippedLang} row(s) for another language`);
 if (skippedMissingContext > 0) console.log(`Skipped ${skippedMissingContext} row(s) missing DB context`);
@@ -103,6 +110,11 @@ function parseArgs(argv: string[]): Args {
   if (!lang) {
     throw new Error("Unsupported --lang. Expected one of: en, de, zh-tw, zh-cn, ko");
   }
+  const commonOnly = argv.includes("--common-only");
+  const nonCommonOnly = argv.includes("--non-common-only");
+  if (commonOnly && nonCommonOnly) {
+    throw new Error("Use either --common-only or --non-common-only, not both");
+  }
 
   return {
     dbPath: readFlag(argv, "--db") ?? "data/yori.sqlite",
@@ -111,7 +123,8 @@ function parseArgs(argv: string[]): Args {
     lang,
     limit: parsePositiveInt(readFlag(argv, "--limit") ?? "200", "--limit"),
     offset: parseNonNegativeInt(readFlag(argv, "--offset") ?? "0", "--offset"),
-    commonOnly: argv.includes("--common-only")
+    commonOnly,
+    nonCommonOnly
   };
 }
 
