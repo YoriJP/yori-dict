@@ -58,7 +58,7 @@ function readFlag(argv: string[], flag: string): string | null {
 
 function createSchema(db: Database) {
   db.exec(`
-    pragma journal_mode = DELETE;
+    pragma journal_mode = OFF;
     pragma synchronous = OFF;
 
     create table metadata (
