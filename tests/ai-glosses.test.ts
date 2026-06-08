@@ -265,6 +265,47 @@ test("reports AI gloss coverage", async () => {
   expect(result).toContain("nextMissingSamples: 2");
 });
 
+test("exports AI gloss review bundles with JMdict context", async () => {
+  const dbPath = tempPath("ai-review.sqlite");
+  const sourcePath = tempPath("ai-review-source.jsonl");
+  const outPath = tempPath("ai-review-bundle.jsonl");
+  await Bun.$`rm -f ${dbPath} ${sourcePath} ${outPath}`;
+  await Bun.write(
+    sourcePath,
+    JSON.stringify({
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "zh-tw",
+      glosses: ["吃", "食用"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    }) + "\n"
+  );
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${sourcePath}`;
+
+  const result = await Bun.$`bun run scripts/review-ai-glosses.ts --db ${dbPath} --source ${sourcePath} --out ${outPath} --limit 10 --common-only`.text();
+  const rows = await readJsonl(outPath);
+
+  expect(result).toContain("Wrote 1 zh-tw review row(s)");
+  expect(result).toContain("Claude review prompt:");
+  expect(rows).toEqual([
+    {
+      senseId: "yori:s_jmdict_1358280_1",
+      entryId: "yori:e_jmdict_1358280",
+      word: "食べる",
+      reading: "たべる",
+      common: true,
+      position: 1,
+      pos: ["v1", "vt"],
+      englishGlosses: ["to eat"],
+      aiGlosses: ["吃", "食用"],
+      ai: {
+        lang: "zh-tw",
+        model: "gemini-3-flash-preview"
+      }
+    }
+  ]);
+});
+
 test("exports AI seeds while skipping rejected senses by default", async () => {
   const dbPath = tempPath("ai-export-skip.sqlite");
   const rejectedDir = tempPath("ai-export-rejected");

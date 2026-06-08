@@ -8,6 +8,7 @@
     "ai:check-candidates": "bun run scripts/check-ai-candidates.ts",
     "ai:coverage": "bun run scripts/report-ai-coverage.ts",
     "ai:failed-seeds": "bun run scripts/export-failed-ai-seeds.ts",
+    "ai:review": "bun run scripts/review-ai-glosses.ts",
     "ai:validate-glosses": "bun run scripts/validate-ai-glosses.ts",
     "dev": "bun run src/index.ts",
     "download:jmdict": "bun run scripts/download-jmdict.ts --out-dir data/raw",
