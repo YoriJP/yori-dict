@@ -70,7 +70,7 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
     reading: "あしらう",
     targetLang: "zh-tw",
     sourceGlosses: ["to treat"],
-    candidateGlosses: ["處理！"],
+    candidateGlosses: ["處理！", "...吧"],
     model: "gemini-3-flash-preview",
     thinkingLevel: "low"
   };
@@ -107,6 +107,7 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
   expect(rejected).toHaveLength(3);
   expect(rejected[0].reasons).toContain("Chinese gloss has no Han text: school");
   expect(rejected[1].reasons).toContain("gloss contains sentence punctuation: 處理！");
+  expect(rejected[1].reasons).toContain("gloss contains sentence punctuation: ...吧");
   expect(rejected[2].reasons).toContain("Chinese gloss is too generic for this sense: 在");
 });
 

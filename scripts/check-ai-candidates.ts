@@ -182,7 +182,7 @@ function hasExistingGlosses(db: Database, senseId: string, lang: ApiLang): boole
 }
 
 function containsSentencePunctuation(gloss: string): boolean {
-  return /[。！？!?]/.test(gloss) || gloss.includes("\n");
+  return /[。！？!?…]/.test(gloss) || gloss.includes("...") || gloss.includes("\n");
 }
 
 function hasHanText(gloss: string): boolean {
