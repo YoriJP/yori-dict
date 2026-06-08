@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import { openLookupDb } from "../src/db";
-import type { Candidate } from "../scripts/ai-common";
+import { candidateFromResponse, type AiSeed, type Candidate } from "../scripts/ai-common";
 
 test("imports accepted AI glosses into lookup responses", async () => {
   const dbPath = tempPath("ai-gloss-import.sqlite");
@@ -246,6 +246,75 @@ test("exports failed batch seeds from a manifest", async () => {
   expect(await readJsonl(outPath)).toEqual([seedB]);
 });
 
+test("summarizes an AI batch run", async () => {
+  const runDir = tempPath("ai-summary-run");
+  const manifestPath = `${runDir}/manifest.json`;
+  const seedPath = `${runDir}/seeds.jsonl`;
+  const candidatePath = `${runDir}/zh-tw-candidates.jsonl`;
+  const rejectedPath = `${runDir}/zh-tw-rejected.jsonl`;
+  const failuresPath = `${runDir}/failures.jsonl`;
+  const sourcePath = `${runDir}/zh-tw-source.jsonl`;
+  await Bun.$`rm -rf ${runDir}`;
+  await Bun.$`mkdir -p ${runDir}`;
+
+  await Bun.write(seedPath, `${JSON.stringify(aiSeed())}\n${JSON.stringify({ ...aiSeed(), senseId: "yori:s_jmdict_1206730_1" })}\n`);
+  await Bun.write(candidatePath, `${JSON.stringify({ senseId: "yori:s_jmdict_1002400_4" })}\n`);
+  await Bun.write(rejectedPath, `${JSON.stringify({ senseId: "yori:s_jmdict_1206730_1", reasons: ["bad"] })}\n`);
+  await Bun.write(failuresPath, `${JSON.stringify({ key: "yori:s_jmdict_9999999_1", reason: "failed" })}\n`);
+  await Bun.write(
+    sourcePath,
+    `${JSON.stringify({
+      senseId: "yori:s_jmdict_1002400_4",
+      lang: "zh-tw",
+      glosses: ["您"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    })}\n`
+  );
+  await Bun.write(
+    manifestPath,
+    `${JSON.stringify({ seedPath, outPath: candidatePath, failuresPath })}\n`
+  );
+
+  const result = await Bun.$`bun run scripts/summarize-ai-batch.ts --manifest ${manifestPath} --source ${sourcePath} --rejected ${rejectedPath}`.text();
+
+  expect(result).toContain("submitted: 2");
+  expect(result).toContain("candidates: 1");
+  expect(result).toContain("accepted: 1");
+  expect(result).toContain("rejected: 1");
+  expect(result).toContain("failed: 1");
+  expect(result).toContain("sourceTotal: 1");
+});
+
+test("recovers gloss JSON from a response with trailing malformed text", () => {
+  const seed = aiSeed();
+  const candidate = candidateFromResponse(seed, "gemini-3-flash-preview", {
+    candidates: [
+      {
+        content: {
+          parts: [{ text: "{\"glosses\":[\"您\",\"閣下\"]}\n\"閣下\"]}" }]
+        }
+      }
+    ]
+  });
+
+  expect(candidate.candidateGlosses).toEqual(["您", "閣下"]);
+});
+
+test("rejects unrecoverable gloss JSON", () => {
+  expect(() =>
+    candidateFromResponse(aiSeed(), "gemini-3-flash-preview", {
+      candidates: [
+        {
+          content: {
+            parts: [{ text: "{\"glosses\":[\"未完成\"" }]
+          }
+        }
+      ]
+    })
+  ).toThrow("Unable to parse JSON string");
+});
+
 function tempPath(name: string): string {
   return `/tmp/yori-dict-api-${process.pid}-${name}`;
 }
@@ -257,4 +326,18 @@ async function readJsonl(path: string): Promise<unknown[]> {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => JSON.parse(line) as unknown);
+}
+
+function aiSeed(): AiSeed {
+  return {
+    entryId: "yori:e_jmdict_1002400",
+    senseId: "yori:s_jmdict_1002400_4",
+    word: "お宅",
+    reading: "おたく",
+    common: true,
+    position: 4,
+    targetLang: "zh-tw",
+    pos: ["pn"],
+    glosses: ["you"]
+  };
 }

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "ai:batch-summary": "bun run scripts/summarize-ai-batch.ts",
     "ai:check-candidates": "bun run scripts/check-ai-candidates.ts",
     "ai:failed-seeds": "bun run scripts/export-failed-ai-seeds.ts",
     "ai:validate-glosses": "bun run scripts/validate-ai-glosses.ts",

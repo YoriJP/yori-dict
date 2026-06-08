@@ -87,6 +87,7 @@ bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
 If a Batch result has failures, export only those failed seeds for a rerun:
 
 ```sh
+bun run ai:batch-summary -- --manifest data/ai-batches/<run>/manifest.json
 bun run ai:failed-seeds -- --manifest data/ai-batches/<run>/manifest.json --out data/ai-seeds/failed-seeds.jsonl
 bun run enrich:ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
 ```
