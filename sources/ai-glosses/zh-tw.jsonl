@@ -114,3 +114,4 @@
 {"senseId":"yori:s_jmdict_1002800_1","lang":"zh-tw","glosses":["是否","是不是","不知是否","會不會"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
 {"senseId":"yori:s_jmdict_1002800_2","lang":"zh-tw","glosses":["某種","某個階段","不知為何","某處"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
 {"senseId":"yori:s_jmdict_1002940_1","lang":"zh-tw","glosses":["吧","呢"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1002400_4","lang":"zh-tw","glosses":["您","你"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
