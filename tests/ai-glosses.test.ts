@@ -265,6 +265,38 @@ test("reports AI gloss coverage", async () => {
   expect(result).toContain("nextMissingSamples: 2");
 });
 
+test("exports AI seeds while skipping rejected senses by default", async () => {
+  const dbPath = tempPath("ai-export-skip.sqlite");
+  const rejectedDir = tempPath("ai-export-rejected");
+  const workDir = tempPath("ai-export-batches");
+  const firstOutPath = tempPath("ai-export-first.jsonl");
+  const skippedOutPath = tempPath("ai-export-skipped.jsonl");
+  await Bun.$`rm -rf ${dbPath} ${rejectedDir} ${workDir} ${firstOutPath} ${skippedOutPath}`;
+  await Bun.$`mkdir -p ${rejectedDir} ${workDir}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
+
+  await Bun.$`bun run scripts/export-ai-seeds.ts --db ${dbPath} --lang zh-tw --out ${firstOutPath} --limit 1 --rejected-dir ${rejectedDir} --work-dir ${workDir} --include-rejected`;
+  const [firstSeed] = (await readJsonl(firstOutPath)) as Array<{ senseId: string }>;
+  await Bun.write(
+    `${rejectedDir}/zh-tw-rejected.jsonl`,
+    `${JSON.stringify({
+      senseId: firstSeed.senseId,
+      candidate: { senseId: firstSeed.senseId, targetLang: "zh-tw" },
+      reasons: ["test rejection"]
+    })}\n`
+  );
+
+  const result = await Bun.$`bun run scripts/export-ai-seeds.ts --db ${dbPath} --lang zh-tw --out ${skippedOutPath} --limit 3 --rejected-dir ${rejectedDir} --work-dir ${workDir}`.text();
+  const skippedSeeds = (await readJsonl(skippedOutPath)) as Array<{ senseId: string }>;
+
+  expect(result).toContain("Skipped 1 previously rejected or failed sense(s)");
+  expect(skippedSeeds.map((seed) => seed.senseId)).not.toContain(firstSeed.senseId);
+
+  await Bun.$`bun run scripts/export-ai-seeds.ts --db ${dbPath} --lang zh-tw --out ${firstOutPath} --limit 1 --rejected-dir ${rejectedDir} --work-dir ${workDir} --include-rejected`;
+  const [includedSeed] = (await readJsonl(firstOutPath)) as Array<{ senseId: string }>;
+  expect(includedSeed.senseId).toBe(firstSeed.senseId);
+});
+
 test("exports failed batch seeds from a manifest", async () => {
   const runDir = tempPath("ai-failed-run");
   const manifestPath = `${runDir}/manifest.json`;

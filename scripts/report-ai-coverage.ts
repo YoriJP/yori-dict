@@ -2,6 +2,11 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { parseApiLang } from "../src/lang";
 import type { ApiLang } from "../src/types";
+import {
+  prepareBlockedSenseTable,
+  readBlockedSenseIds,
+  readMissingSeedRows
+} from "./ai-seed-selection";
 
 type Args = {
   dbPath: string;
@@ -9,6 +14,9 @@ type Args = {
   sourcePath: string | null;
   sampleLimit: number;
   skipKatakana: boolean;
+  includeRejected: boolean;
+  rejectedDir: string;
+  workDir: string;
 };
 
 type CountRow = {
@@ -28,19 +36,10 @@ type SourceRow = {
   glosses: number;
 };
 
-type MissingSampleRow = {
-  entry_id: string;
-  sense_id: string;
-  word: string;
-  reading: string | null;
-  common: 0 | 1;
-  position: number;
-  part_of_speech: string;
-  glosses_json: string;
-};
-
 const args = parseArgs(Bun.argv.slice(2));
-const db = new Database(args.dbPath, { readonly: true });
+const blockedSenseIds = readBlockedSenseIds(args);
+const db = new Database(args.dbPath);
+prepareBlockedSenseTable(db, blockedSenseIds);
 
 const totalSenses = count(db, "select count(*) as count from senses");
 const commonSenses = count(
@@ -70,6 +69,135 @@ const coveredCommonSenses = count(
    )`,
   args.targetLang
 );
+const exportableMissingSenses = count(
+  db,
+  `select count(distinct s.id) as count
+   from senses s
+   join glosses en on en.sense_id = s.id and en.lang = 'en'
+   where not exists (
+     select 1
+     from glosses target
+     where target.sense_id = s.id and target.lang = ?
+   )`,
+  args.targetLang
+);
+const exportableCommonMissingSenses = count(
+  db,
+  `select count(distinct s.id) as count
+   from senses s
+   join glosses en on en.sense_id = s.id and en.lang = 'en'
+   where not exists (
+     select 1
+     from glosses target
+     where target.sense_id = s.id and target.lang = ?
+   )
+   and exists (
+     select 1
+     from forms f
+     where f.entry_id = s.entry_id and f.common = 1
+   )`,
+  args.targetLang
+);
+const exportableUnblockedMissingSenses = count(
+  db,
+  `select count(distinct s.id) as count
+   from senses s
+   join glosses en on en.sense_id = s.id and en.lang = 'en'
+   where not exists (
+     select 1
+     from glosses target
+     where target.sense_id = s.id and target.lang = ?
+   )
+   and not exists (
+     select 1
+     from blocked_senses blocked
+     where blocked.id = s.id
+   )`,
+  args.targetLang
+);
+const exportableUnblockedCommonMissingSenses = count(
+  db,
+  `select count(distinct s.id) as count
+   from senses s
+   join glosses en on en.sense_id = s.id and en.lang = 'en'
+   where not exists (
+     select 1
+     from glosses target
+     where target.sense_id = s.id and target.lang = ?
+   )
+   and not exists (
+     select 1
+     from blocked_senses blocked
+     where blocked.id = s.id
+   )
+   and exists (
+     select 1
+     from forms f
+     where f.entry_id = s.entry_id and f.common = 1
+   )`,
+  args.targetLang
+);
+const seedableMissingSenses = count(
+  db,
+  `select count(distinct s.id) as count
+   from senses s
+   join glosses en on en.sense_id = s.id and en.lang = 'en'
+   where not exists (
+     select 1
+     from glosses target
+     where target.sense_id = s.id and target.lang = ?
+   )
+   and not exists (
+     select 1
+     from blocked_senses blocked
+     where blocked.id = s.id
+   )
+   and (
+     ? = 0
+     or not exists (
+       select 1
+       from forms only_forms
+       where only_forms.entry_id = s.entry_id
+         and only_forms.kind = 'kana'
+         and only_forms.text glob '[ァ-ヴー・]*'
+     )
+   )`,
+  args.targetLang,
+  args.skipKatakana ? 1 : 0
+);
+const seedableCommonMissingSenses = count(
+  db,
+  `select count(distinct s.id) as count
+   from senses s
+   join glosses en on en.sense_id = s.id and en.lang = 'en'
+   where not exists (
+     select 1
+     from glosses target
+     where target.sense_id = s.id and target.lang = ?
+   )
+   and not exists (
+     select 1
+     from blocked_senses blocked
+     where blocked.id = s.id
+   )
+   and exists (
+     select 1
+     from forms f
+     where f.entry_id = s.entry_id and f.common = 1
+   )
+   and (
+     ? = 0
+     or not exists (
+       select 1
+       from forms only_forms
+       where only_forms.entry_id = s.entry_id
+         and only_forms.kind = 'kana'
+         and only_forms.text glob '[ァ-ヴー・]*'
+     )
+   )`,
+  args.targetLang,
+  args.skipKatakana ? 1 : 0
+);
 const langRows = db
   .query<LangRow, []>(
     `select lang, count(distinct sense_id) as senses, count(*) as glosses
@@ -87,7 +215,11 @@ const sourceRows = db
      order by source, review_status`
   )
   .all(args.targetLang);
-const samples = readMissingSamples(db, args);
+const samples = readMissingSeedRows(db, {
+  targetLang: args.targetLang,
+  limit: args.sampleLimit,
+  skipKatakana: args.skipKatakana
+});
 
 db.close();
 
@@ -100,10 +232,19 @@ console.log(
   `coveredCommonSenses: ${coveredCommonSenses} (${percent(coveredCommonSenses, commonSenses)})`
 );
 console.log(`missingCommonSenses: ${commonSenses - coveredCommonSenses}`);
+console.log(`exportableMissingSenses: ${exportableMissingSenses}`);
+console.log(`exportableCommonMissingSenses: ${exportableCommonMissingSenses}`);
+console.log(`exportableUnblockedMissingSenses: ${exportableUnblockedMissingSenses}`);
+console.log(`exportableUnblockedCommonMissingSenses: ${exportableUnblockedCommonMissingSenses}`);
+console.log(`seedableMissingSenses: ${seedableMissingSenses}`);
+console.log(`seedableCommonMissingSenses: ${seedableCommonMissingSenses}`);
 
 if (args.sourcePath && existsSync(args.sourcePath)) {
   const sourceRowsCount = await countJsonlRows(args.sourcePath);
   console.log(`sourceRows: ${sourceRowsCount} (${args.sourcePath})`);
+}
+if (!args.includeRejected) {
+  console.log(`skippedRejectedOrFailedSenses: ${blockedSenseIds.size}`);
 }
 
 console.log("");
@@ -145,7 +286,10 @@ function parseArgs(argv: string[]): Args {
     targetLang,
     sourcePath: explicitSource ?? (existsSync(defaultSource) ? defaultSource : null),
     sampleLimit: parseNonNegativeInt(readFlag(argv, "--samples") ?? "20"),
-    skipKatakana: !argv.includes("--include-katakana")
+    skipKatakana: !argv.includes("--include-katakana"),
+    includeRejected: argv.includes("--include-rejected"),
+    rejectedDir: readFlag(argv, "--rejected-dir") ?? "data/ai-candidates",
+    workDir: readFlag(argv, "--work-dir") ?? "data/ai-batches"
   };
 }
 
@@ -163,11 +307,8 @@ function parseNonNegativeInt(value: string): number {
   return parsed;
 }
 
-function count(db: Database, sql: string, value?: string): number {
-  const row =
-    value === undefined
-      ? db.query<CountRow, []>(sql).get()
-      : db.query<CountRow, [string]>(sql).get(value);
+function count(db: Database, sql: string, ...values: Array<string | number>): number {
+  const row = db.query<CountRow, Array<string | number>>(sql).get(...values);
   return row?.count ?? 0;
 }
 
@@ -179,59 +320,4 @@ function percent(value: number, total: number): string {
 async function countJsonlRows(path: string): Promise<number> {
   const text = await Bun.file(path).text();
   return text.split("\n").filter((line) => line.trim().length > 0).length;
-}
-
-function readMissingSamples(db: Database, args: Args): MissingSampleRow[] {
-  if (args.sampleLimit === 0) return [];
-
-  return db
-    .query<MissingSampleRow, [ApiLang, number, number]>(
-      `select
-         e.id as entry_id,
-         s.id as sense_id,
-         (
-           select f.text
-           from forms f
-           where f.entry_id = e.id
-           order by f.common desc, case f.kind when 'kanji' then 0 else 1 end, f.text
-           limit 1
-         ) as word,
-         (
-           select f.reading
-           from forms f
-           where f.entry_id = e.id and f.reading is not null
-           order by f.common desc, f.text
-           limit 1
-         ) as reading,
-         (
-           select max(f.common)
-           from forms f
-           where f.entry_id = e.id
-         ) as common,
-         s.position,
-         s.part_of_speech,
-         json_group_array(g.text) as glosses_json
-       from entries e
-       join senses s on s.entry_id = e.id
-       join glosses g on g.sense_id = s.id and g.lang = 'en'
-       where not exists (
-         select 1
-         from glosses target
-         where target.sense_id = s.id and target.lang = ?
-       )
-       and (
-         ? = 0
-         or not exists (
-           select 1
-           from forms only_forms
-           where only_forms.entry_id = e.id
-             and only_forms.kind = 'kana'
-             and only_forms.text glob '[ァ-ヴー・]*'
-         )
-       )
-       group by e.id, s.id
-       order by common desc, e.source_id, s.position
-       limit ?`
-    )
-    .all(args.targetLang, args.skipKatakana ? 1 : 0, args.sampleLimit);
 }
