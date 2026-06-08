@@ -50,46 +50,52 @@ Both are local generated data and are not committed.
 Export a small local JSONL file of English JMdict senses that are missing a target language:
 
 ```sh
-bun run export:ai-seeds -- --lang zh-tw --limit 20
+bun run ai:seeds -- --lang zh-tw --limit 20
 ```
 
 Generate local AI candidates from those seeds:
 
 ```sh
-GEMINI_API_KEY=... bun run enrich:ai -- --limit 20
+GEMINI_API_KEY=... bun run ai:generate -- --limit 20
 ```
 
 Use the Batch API for larger offline runs:
 
 ```sh
-bun run enrich:ai:batch -- submit --limit 1000
+bun run ai:batch -- submit --limit 1000
 ```
 
 The submit command writes a manifest under `data/ai-batches/`. When the batch finishes, collect the results with the manifest path printed by submit:
 
 ```sh
-bun run enrich:ai:batch -- collect --manifest data/ai-batches/<run>/manifest.json
+bun run ai:batch -- collect --manifest data/ai-batches/<run>/manifest.json
 ```
 
 Check candidates into a committed source file:
 
 ```sh
-bun run ai:check-candidates -- --input data/ai-candidates/zh-tw-candidates.jsonl --out sources/ai-glosses/zh-tw.jsonl --append
+bun run ai:accept -- --input data/ai-candidates/zh-tw-candidates.jsonl --out sources/ai-glosses/zh-tw.jsonl --append
 ```
 
 Rejected rows are written under `data/ai-candidates/` by default. After editing or agent review, rebuild SQLite with accepted glosses:
 
 ```sh
-bun run ai:validate-glosses -- --input sources/ai-glosses/zh-tw.jsonl
+bun run ai:validate -- --input sources/ai-glosses/zh-tw.jsonl
 bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
+```
+
+Prepare a small bundle for CLI/agent review of AI-generated glosses:
+
+```sh
+bun run ai:review -- --lang zh-tw --limit 500 --common-only
 ```
 
 If a Batch result has failures, export only those failed seeds for a rerun:
 
 ```sh
-bun run ai:batch-summary -- --manifest data/ai-batches/<run>/manifest.json
-bun run ai:failed-seeds -- --manifest data/ai-batches/<run>/manifest.json --out data/ai-seeds/failed-seeds.jsonl
-bun run enrich:ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
+bun run ai:summary -- --manifest data/ai-batches/<run>/manifest.json
+bun run ai:retry-seeds -- --manifest data/ai-batches/<run>/manifest.json --out data/ai-seeds/failed-seeds.jsonl
+bun run ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
 ```
 
 Generated files under `data/` are ignored. Accepted gloss source files under `sources/` are committed.

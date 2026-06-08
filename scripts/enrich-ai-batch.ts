@@ -78,7 +78,7 @@ if (command === "submit") {
 } else if (command === "collect") {
   await collectBatch(parseCollectArgs(Bun.argv.slice(3)));
 } else {
-  throw new Error("Usage: bun run enrich:ai:batch -- submit|collect [options]");
+  throw new Error("Usage: bun run ai:batch -- submit|collect [options]");
 }
 
 async function submitBatch(args: SubmitArgs): Promise<void> {
@@ -125,7 +125,7 @@ async function submitBatch(args: SubmitArgs): Promise<void> {
   await Bun.write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`Submitted ${seeds.length} seed(s) as ${batchName}`);
   console.log(`Manifest: ${manifestPath}`);
-  console.log(`Collect later: bun run enrich:ai:batch -- collect --manifest ${manifestPath}`);
+  console.log(`Collect later: bun run ai:batch -- collect --manifest ${manifestPath}`);
 }
 
 async function collectBatch(args: CollectArgs): Promise<void> {
