@@ -40,6 +40,8 @@ type GlossRow = {
   sense_id: string;
   lang: ApiLang;
   text: string;
+  source: "jmdict" | "ai-assisted";
+  review_status: "source" | "checked";
 };
 
 type LookupCandidate = {
@@ -218,16 +220,33 @@ function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[]
 }
 
 function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {
-  return db
-    .query<GlossRow, [string, ApiLang]>(
-      "select sense_id, lang, text from glosses where sense_id = ? and lang = ? order by rowid"
-    )
-    .all(senseId, lang)
-    .map((row) => ({
-      text: row.text,
-      source: "jmdict" as const,
-      reviewStatus: "source" as const
-    }));
+  try {
+    return db
+      .query<GlossRow, [string, ApiLang]>(
+        "select sense_id, lang, text, source, review_status from glosses where sense_id = ? and lang = ? order by rowid"
+      )
+      .all(senseId, lang)
+      .map((row) => ({
+        text: row.text,
+        source: row.source,
+        reviewStatus: row.review_status
+      }));
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("no such column: source")) {
+      throw error;
+    }
+
+    return db
+      .query<{ text: string }, [string, ApiLang]>(
+        "select text from glosses where sense_id = ? and lang = ? order by rowid"
+      )
+      .all(senseId, lang)
+      .map((row) => ({
+        text: row.text,
+        source: "jmdict",
+        reviewStatus: "source"
+      }));
+  }
 }
 
 function readMetadata(db: Database, key: string): string | null {

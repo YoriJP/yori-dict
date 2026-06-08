@@ -71,7 +71,19 @@ The submit command writes a manifest under `data/ai-batches/`. When the batch fi
 bun run enrich:ai:batch -- collect --manifest data/ai-batches/<run>/manifest.json
 ```
 
-Both commands write to ignored files under `data/`.
+Check candidates into a committed source file:
+
+```sh
+bun run ai:check-candidates -- --input data/ai-candidates/zh-tw-candidates.jsonl --out sources/ai-glosses/zh-tw.jsonl
+```
+
+Rejected rows are written under `data/ai-candidates/` by default. After editing or agent review, rebuild SQLite with accepted glosses:
+
+```sh
+bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
+```
+
+Generated files under `data/` are ignored. Accepted gloss source files under `sources/` are committed.
 
 ## API
 

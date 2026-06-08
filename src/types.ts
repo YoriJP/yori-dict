@@ -96,6 +96,6 @@ export type PublicSense = {
 
 export type PublicGloss = {
   text: string;
-  source: "jmdict";
-  reviewStatus: "source";
+  source: "jmdict" | "ai-assisted";
+  reviewStatus: "source" | "checked";
 };

@@ -1,11 +1,20 @@
 import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import type { JmdictFile, JmdictWord } from "../src/types";
-import { toApiLang } from "../src/lang";
+import { parseApiLang, toApiLang } from "../src/lang";
 
 type Args = {
   input: string;
   out: string;
+  aiGlosses: string | null;
+};
+
+type AiGlossSource = {
+  senseId: string;
+  lang: string;
+  glosses: string[];
+  source?: "ai-assisted";
+  model?: string;
 };
 
 const args = parseArgs(Bun.argv.slice(2));
@@ -15,23 +24,30 @@ await Bun.$`rm -f ${args.out}-shm`;
 await Bun.$`rm -f ${args.out}-wal`;
 
 const source = (await Bun.file(args.input).json()) as JmdictFile;
+const aiGlosses = args.aiGlosses ? await readJsonl<AiGlossSource>(args.aiGlosses) : [];
 const db = new Database(args.out);
 
 createSchema(db);
 insertMetadata(db, source);
 insertWords(db, source.words);
+insertAiGlosses(db, aiGlosses);
 db.close();
 
 console.log(`Imported ${source.words.length} JMdict entries into ${args.out}`);
+if (aiGlosses.length > 0) {
+  console.log(`Imported ${aiGlosses.length} AI gloss source row(s)`);
+}
 
 function parseArgs(argv: string[]): Args {
   const input = readFlag(argv, "--input");
   const out = readFlag(argv, "--out");
   if (!input || !out) {
-    console.error("Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite");
+    console.error(
+      "Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite [--ai-glosses sources/ai-glosses/zh-tw.jsonl]"
+    );
     process.exit(1);
   }
-  return { input, out };
+  return { input, out, aiGlosses: readFlag(argv, "--ai-glosses") };
 }
 
 function readFlag(argv: string[], flag: string): string | null {
@@ -77,7 +93,9 @@ function createSchema(db: Database) {
     create table glosses (
       sense_id text not null references senses(id),
       lang text not null,
-      text text not null
+      text text not null,
+      source text not null check (source in ('jmdict', 'ai-assisted')),
+      review_status text not null check (review_status in ('source', 'checked'))
     );
 
     create table lookup_terms (
@@ -110,7 +128,9 @@ function insertWords(db: Database, words: JmdictWord[]) {
       (id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech)
      values (?, ?, ?, ?, ?, ?)`
   );
-  const insertGloss = db.prepare("insert into glosses (sense_id, lang, text) values (?, ?, ?)");
+  const insertGloss = db.prepare(
+    "insert into glosses (sense_id, lang, text, source, review_status) values (?, ?, ?, 'jmdict', 'source')"
+  );
   const insertLookup = db.prepare(
     "insert into lookup_terms (term, entry_id, match_kind) values (?, ?, ?)"
   );
@@ -158,6 +178,60 @@ function insertWords(db: Database, words: JmdictWord[]) {
   });
 
   transaction(words);
+}
+
+function insertAiGlosses(db: Database, rows: AiGlossSource[]) {
+  if (rows.length === 0) return;
+
+  const senseExists = db.prepare("select 1 from senses where id = ? limit 1");
+  const existingGlosses = db.prepare("select count(*) as count from glosses where sense_id = ? and lang = ?");
+  const insertGloss = db.prepare(
+    "insert into glosses (sense_id, lang, text, source, review_status) values (?, ?, ?, 'ai-assisted', 'checked')"
+  );
+
+  const seen = new Set<string>();
+  const transaction = db.transaction((items: AiGlossSource[]) => {
+    for (const row of items) {
+      const apiLang = parseApiLang(row.lang);
+      if (!apiLang) {
+        throw new Error(`Unsupported AI gloss lang: ${row.lang}`);
+      }
+      if (!Array.isArray(row.glosses) || row.glosses.length === 0) {
+        throw new Error(`AI gloss row has no glosses: ${row.senseId}`);
+      }
+      if (!senseExists.get(row.senseId)) {
+        throw new Error(`AI gloss references unknown senseId: ${row.senseId}`);
+      }
+
+      const key = `${row.senseId}:${apiLang}`;
+      if (seen.has(key)) {
+        throw new Error(`Duplicate AI gloss row for ${key}`);
+      }
+      seen.add(key);
+
+      const existing = existingGlosses.get(row.senseId, apiLang) as { count: number } | null;
+      if ((existing?.count ?? 0) > 0) {
+        throw new Error(`AI gloss row conflicts with existing ${apiLang} glosses: ${row.senseId}`);
+      }
+
+      for (const gloss of row.glosses) {
+        const text = gloss.trim();
+        if (text.length === 0) continue;
+        insertGloss.run(row.senseId, apiLang, text);
+      }
+    }
+  });
+
+  transaction(rows);
+}
+
+async function readJsonl<T>(path: string): Promise<T[]> {
+  const text = await Bun.file(path).text();
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as T);
 }
 
 function readingForKanji(word: JmdictWord, kanjiText: string): string | null {
