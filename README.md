@@ -74,7 +74,7 @@ bun run enrich:ai:batch -- collect --manifest data/ai-batches/<run>/manifest.jso
 Check candidates into a committed source file:
 
 ```sh
-bun run ai:check-candidates -- --input data/ai-candidates/zh-tw-candidates.jsonl --out sources/ai-glosses/zh-tw.jsonl
+bun run ai:check-candidates -- --input data/ai-candidates/zh-tw-candidates.jsonl --out sources/ai-glosses/zh-tw.jsonl --append
 ```
 
 Rejected rows are written under `data/ai-candidates/` by default. After editing or agent review, rebuild SQLite with accepted glosses:

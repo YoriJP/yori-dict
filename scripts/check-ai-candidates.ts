@@ -12,6 +12,7 @@ type Args = {
   lang: ApiLang;
   maxGlosses: number;
   maxGlossLength: number;
+  append: boolean;
 };
 
 type AiGlossSource = {
@@ -30,8 +31,9 @@ type RejectedCandidate = {
 
 const args = parseArgs(Bun.argv.slice(2));
 const candidates = await readJsonl<Candidate>(args.inputPath);
+const existingRows = args.append && (await Bun.file(args.outPath).exists()) ? await readJsonl<AiGlossSource>(args.outPath) : [];
 const db = new Database(args.dbPath, { readonly: true });
-const seen = new Set<string>();
+const seen = new Set(existingRows.map((row) => sourceKey(row)));
 const accepted: AiGlossSource[] = [];
 const rejected: RejectedCandidate[] = [];
 
@@ -64,14 +66,14 @@ await Bun.$`mkdir -p ${dirname(args.outPath)}`;
 await Bun.$`mkdir -p ${dirname(args.rejectedPath)}`;
 await Bun.write(
   args.outPath,
-  accepted.length > 0 ? accepted.map((row) => JSON.stringify(row)).join("\n") + "\n" : ""
+  formatJsonl([...existingRows, ...accepted])
 );
 await Bun.write(
   args.rejectedPath,
-  rejected.length > 0 ? rejected.map((row) => JSON.stringify(row)).join("\n") + "\n" : ""
+  formatJsonl(rejected)
 );
 
-console.log(`Accepted ${accepted.length} candidate(s) to ${args.outPath}`);
+console.log(`${args.append ? "Appended" : "Accepted"} ${accepted.length} candidate(s) to ${args.outPath}`);
 console.log(`Rejected ${rejected.length} candidate(s) to ${args.rejectedPath}`);
 
 function parseArgs(argv: string[]): Args {
@@ -87,7 +89,8 @@ function parseArgs(argv: string[]): Args {
     rejectedPath: readFlag(argv, "--rejected") ?? `data/ai-candidates/${lang}-rejected.jsonl`,
     lang,
     maxGlosses: parsePositiveInt(readFlag(argv, "--max-glosses") ?? "8", "--max-glosses"),
-    maxGlossLength: parsePositiveInt(readFlag(argv, "--max-gloss-length") ?? "24", "--max-gloss-length")
+    maxGlossLength: parsePositiveInt(readFlag(argv, "--max-gloss-length") ?? "24", "--max-gloss-length"),
+    append: argv.includes("--append")
   };
 }
 
@@ -118,7 +121,7 @@ function rejectionReasons(candidate: Candidate, args: Args, db: Database, seen: 
     reasons.push(`sense already has ${args.lang} glosses`);
   }
   if (seen.has(candidateKey(candidate))) {
-    reasons.push(`duplicate candidate for ${candidate.senseId}:${args.lang}`);
+    reasons.push(`duplicate candidate or existing source row for ${candidate.senseId}:${args.lang}`);
   }
 
   const glosses = normalizeGlosses(candidate.candidateGlosses);
@@ -136,8 +139,8 @@ function rejectionReasons(candidate: Candidate, args: Args, db: Database, seen: 
     if (gloss.length > args.maxGlossLength) {
       reasons.push(`gloss too long: ${gloss}`);
     }
-    if (looksLikeSentence(gloss)) {
-      reasons.push(`gloss looks like a sentence: ${gloss}`);
+    if (containsSentencePunctuation(gloss)) {
+      reasons.push(`gloss contains sentence punctuation: ${gloss}`);
     }
     if (args.lang === "zh-tw" || args.lang === "zh-cn") {
       if (!hasHanText(gloss)) {
@@ -145,6 +148,9 @@ function rejectionReasons(candidate: Candidate, args: Args, db: Database, seen: 
       }
       if (hasSuspiciousLatinText(gloss)) {
         reasons.push(`Chinese gloss contains suspicious Latin text: ${gloss}`);
+      }
+      if (isOverlyGenericChineseGloss(gloss, candidate.sourceGlosses)) {
+        reasons.push(`Chinese gloss is too generic for this sense: ${gloss}`);
       }
     }
   }
@@ -160,6 +166,10 @@ function candidateKey(candidate: Candidate): string {
   return `${candidate.senseId}:${candidate.targetLang}`;
 }
 
+function sourceKey(row: AiGlossSource): string {
+  return `${row.senseId}:${row.lang}`;
+}
+
 function senseExists(db: Database, senseId: string): boolean {
   return db.query("select 1 from senses where id = ? limit 1").get(senseId) !== null;
 }
@@ -171,8 +181,8 @@ function hasExistingGlosses(db: Database, senseId: string, lang: ApiLang): boole
   return (row?.count ?? 0) > 0;
 }
 
-function looksLikeSentence(gloss: string): boolean {
-  return /[。！？!?]$/.test(gloss) || gloss.includes("\n");
+function containsSentencePunctuation(gloss: string): boolean {
+  return /[。！？!?]/.test(gloss) || gloss.includes("\n");
 }
 
 function hasHanText(gloss: string): boolean {
@@ -181,4 +191,15 @@ function hasHanText(gloss: string): boolean {
 
 function hasSuspiciousLatinText(gloss: string): boolean {
   return /[A-Za-z]{2,}/.test(gloss);
+}
+
+function formatJsonl(rows: unknown[]): string {
+  return rows.length > 0 ? rows.map((row) => JSON.stringify(row)).join("\n") + "\n" : "";
+}
+
+function isOverlyGenericChineseGloss(gloss: string, sourceGlosses: string[]): boolean {
+  const genericGlosses = new Set(["在", "來", "去", "做", "有", "是"]);
+  if (!genericGlosses.has(gloss)) return false;
+
+  return sourceGlosses.some((sourceGloss) => sourceGloss.includes("(") || sourceGloss.split(/\s+/).length >= 3);
 }

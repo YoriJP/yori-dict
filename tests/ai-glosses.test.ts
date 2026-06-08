@@ -63,8 +63,33 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
     model: "gemini-3-flash-preview",
     thinkingLevel: "low"
   };
+  const sentencePunctuation: Candidate = {
+    entryId: "yori:e_jmdict_1000300",
+    senseId: "yori:s_jmdict_1000300_1",
+    word: "遇う",
+    reading: "あしらう",
+    targetLang: "zh-tw",
+    sourceGlosses: ["to treat"],
+    candidateGlosses: ["處理！"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
+  const generic: Candidate = {
+    entryId: "yori:e_jmdict_1358280",
+    senseId: "yori:s_jmdict_1358280_1",
+    word: "食べる",
+    reading: "たべる",
+    targetLang: "zh-tw",
+    sourceGlosses: ["to be (somewhere)"],
+    candidateGlosses: ["在"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
 
-  await Bun.write(inputPath, `${JSON.stringify(good)}\n${JSON.stringify(bad)}\n`);
+  await Bun.write(
+    inputPath,
+    [good, bad, sentencePunctuation, generic].map((candidate) => JSON.stringify(candidate)).join("\n") + "\n"
+  );
   await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath}`;
 
   const accepted = await readJsonl(acceptedPath);
@@ -79,8 +104,79 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
       model: "gemini-3-flash-preview"
     }
   ]);
-  expect(rejected).toHaveLength(1);
+  expect(rejected).toHaveLength(3);
   expect(rejected[0].reasons).toContain("Chinese gloss has no Han text: school");
+  expect(rejected[1].reasons).toContain("gloss contains sentence punctuation: 處理！");
+  expect(rejected[2].reasons).toContain("Chinese gloss is too generic for this sense: 在");
+});
+
+test("appends accepted AI candidates without duplicating existing source rows", async () => {
+  const dbPath = tempPath("ai-check-append.sqlite");
+  const inputPath = tempPath("ai-candidates-append.jsonl");
+  const acceptedPath = tempPath("ai-accepted-append.jsonl");
+  const rejectedPath = tempPath("ai-rejected-append.jsonl");
+  await Bun.$`rm -f ${dbPath} ${inputPath} ${acceptedPath} ${rejectedPath}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
+
+  await Bun.write(
+    acceptedPath,
+    JSON.stringify({
+      senseId: "yori:s_jmdict_1206730_1",
+      lang: "zh-tw",
+      glosses: ["學校"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    }) + "\n"
+  );
+
+  const duplicateExisting: Candidate = {
+    entryId: "yori:e_jmdict_1206730",
+    senseId: "yori:s_jmdict_1206730_1",
+    word: "学校",
+    reading: "がっこう",
+    targetLang: "zh-tw",
+    sourceGlosses: ["school"],
+    candidateGlosses: ["學校"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
+  const newCandidate: Candidate = {
+    entryId: "yori:e_jmdict_1358280",
+    senseId: "yori:s_jmdict_1358280_1",
+    word: "食べる",
+    reading: "たべる",
+    targetLang: "zh-tw",
+    sourceGlosses: ["to eat"],
+    candidateGlosses: ["吃"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
+
+  await Bun.write(inputPath, `${JSON.stringify(duplicateExisting)}\n${JSON.stringify(newCandidate)}\n`);
+  await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath} --append`;
+
+  const accepted = await readJsonl(acceptedPath);
+  const rejected = (await readJsonl(rejectedPath)) as Array<{ reasons: string[] }>;
+
+  expect(accepted).toHaveLength(2);
+  expect(accepted).toContainEqual({
+    senseId: "yori:s_jmdict_1206730_1",
+    lang: "zh-tw",
+    glosses: ["學校"],
+    source: "ai-assisted",
+    model: "gemini-3-flash-preview"
+  });
+  expect(accepted).toContainEqual({
+    senseId: "yori:s_jmdict_1358280_1",
+    lang: "zh-tw",
+    glosses: ["吃"],
+    source: "ai-assisted",
+    model: "gemini-3-flash-preview"
+  });
+  expect(rejected).toHaveLength(1);
+  expect(rejected[0].reasons).toContain(
+    "duplicate candidate or existing source row for yori:s_jmdict_1206730_1:zh-tw"
+  );
 });
 
 function tempPath(name: string): string {
