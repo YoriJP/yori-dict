@@ -11,6 +11,7 @@ type Args = {
   outPath: string;
   lang: ApiLang;
   limit: number;
+  offset: number;
   commonOnly: boolean;
 };
 
@@ -47,6 +48,7 @@ const reviewRows: ReviewRow[] = [];
 let skippedMissingContext = 0;
 let skippedLang = 0;
 let skippedCommon = 0;
+let skippedOffset = 0;
 
 for (const row of sourceRows) {
   if (row.lang !== args.lang) {
@@ -63,6 +65,10 @@ for (const row of sourceRows) {
     skippedCommon += 1;
     continue;
   }
+  if (skippedOffset < args.offset) {
+    skippedOffset += 1;
+    continue;
+  }
 
   reviewRows.push(toReviewRow(row, context));
   if (reviewRows.length >= args.limit) break;
@@ -75,6 +81,7 @@ await Bun.write(args.outPath, formatJsonl(reviewRows));
 
 console.log(`Wrote ${reviewRows.length} ${args.lang} review row(s) to ${args.outPath}`);
 if (args.commonOnly) console.log(`Skipped ${skippedCommon} non-common AI row(s)`);
+if (skippedOffset > 0) console.log(`Skipped ${skippedOffset} eligible AI row(s) by offset`);
 if (skippedLang > 0) console.log(`Skipped ${skippedLang} row(s) for another language`);
 if (skippedMissingContext > 0) console.log(`Skipped ${skippedMissingContext} row(s) missing DB context`);
 console.log("");
@@ -102,7 +109,8 @@ function parseArgs(argv: string[]): Args {
     sourcePath: readFlag(argv, "--source") ?? `sources/ai-glosses/${lang}.jsonl`,
     outPath: readFlag(argv, "--out") ?? `data/ai-review/${lang}/review-bundle.jsonl`,
     lang,
-    limit: parsePositiveInt(readFlag(argv, "--limit") ?? "200"),
+    limit: parsePositiveInt(readFlag(argv, "--limit") ?? "200", "--limit"),
+    offset: parseNonNegativeInt(readFlag(argv, "--offset") ?? "0", "--offset"),
     commonOnly: argv.includes("--common-only")
   };
 }
@@ -113,10 +121,18 @@ function readFlag(argv: string[], flag: string): string | null {
   return argv[index + 1] ?? null;
 }
 
-function parsePositiveInt(value: string): number {
+function parsePositiveInt(value: string, flag: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error("--limit must be a positive integer");
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInt(value: string, flag: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${flag} must be a non-negative integer`);
   }
   return parsed;
 }

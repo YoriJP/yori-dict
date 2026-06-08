@@ -88,6 +88,7 @@ Prepare a small bundle for CLI/agent review of AI-generated glosses:
 
 ```sh
 bun run ai:review -- --lang zh-tw --limit 500 --common-only
+bun run ai:review -- --lang zh-tw --limit 500 --offset 500 --common-only
 ```
 
 If a Batch result has failures, export only those failed seeds for a rerun:
