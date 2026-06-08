@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "ai:check-candidates": "bun run scripts/check-ai-candidates.ts",
+    "ai:failed-seeds": "bun run scripts/export-failed-ai-seeds.ts",
+    "ai:validate-glosses": "bun run scripts/validate-ai-glosses.ts",
     "dev": "bun run src/index.ts",
     "download:jmdict": "bun run scripts/download-jmdict.ts --out-dir data/raw",
     "enrich:ai": "bun run scripts/enrich-ai.ts",

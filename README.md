@@ -80,7 +80,15 @@ bun run ai:check-candidates -- --input data/ai-candidates/zh-tw-candidates.jsonl
 Rejected rows are written under `data/ai-candidates/` by default. After editing or agent review, rebuild SQLite with accepted glosses:
 
 ```sh
+bun run ai:validate-glosses -- --input sources/ai-glosses/zh-tw.jsonl
 bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
+```
+
+If a Batch result has failures, export only those failed seeds for a rerun:
+
+```sh
+bun run ai:failed-seeds -- --manifest data/ai-batches/<run>/manifest.json --out data/ai-seeds/failed-seeds.jsonl
+bun run enrich:ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
 ```
 
 Generated files under `data/` are ignored. Accepted gloss source files under `sources/` are committed.

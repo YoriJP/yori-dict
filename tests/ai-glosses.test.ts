@@ -180,6 +180,72 @@ test("appends accepted AI candidates without duplicating existing source rows", 
   );
 });
 
+test("validates accepted AI gloss source files", async () => {
+  const dbPath = tempPath("ai-validate.sqlite");
+  const validPath = tempPath("ai-valid-source.jsonl");
+  const invalidPath = tempPath("ai-invalid-source.jsonl");
+  await Bun.$`rm -f ${dbPath} ${validPath} ${invalidPath}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
+
+  const validRow = {
+    senseId: "yori:s_jmdict_1358280_1",
+    lang: "zh-tw",
+    glosses: ["吃"],
+    source: "ai-assisted",
+    model: "gemini-3-flash-preview"
+  };
+  await Bun.write(validPath, `${JSON.stringify(validRow)}\n`);
+  await Bun.$`bun run scripts/validate-ai-glosses.ts --db ${dbPath} --input ${validPath}`;
+
+  await Bun.write(invalidPath, `${JSON.stringify(validRow)}\n${JSON.stringify({ ...validRow, glosses: ["eat"] })}\n`);
+  const result = await Bun.$`bun run scripts/validate-ai-glosses.ts --db ${dbPath} --input ${invalidPath}`.nothrow();
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("duplicate source row for yori:s_jmdict_1358280_1:zh-tw");
+  expect(result.stderr.toString()).toContain("Chinese gloss has no Han text: eat");
+});
+
+test("exports failed batch seeds from a manifest", async () => {
+  const runDir = tempPath("ai-failed-run");
+  const manifestPath = `${runDir}/manifest.json`;
+  const seedPath = `${runDir}/seeds.jsonl`;
+  const failuresPath = `${runDir}/failures.jsonl`;
+  const outPath = `${runDir}/failed-seeds.jsonl`;
+  await Bun.$`rm -rf ${runDir}`;
+  await Bun.$`mkdir -p ${runDir}`;
+
+  const seedA = {
+    entryId: "yori:e_jmdict_1358280",
+    senseId: "yori:s_jmdict_1358280_1",
+    word: "食べる",
+    reading: "たべる",
+    common: true,
+    position: 1,
+    targetLang: "zh-tw",
+    pos: ["v1", "vt"],
+    glosses: ["to eat"]
+  };
+  const seedB = {
+    ...seedA,
+    entryId: "yori:e_jmdict_1206730",
+    senseId: "yori:s_jmdict_1206730_1",
+    word: "学校",
+    reading: "がっこう",
+    pos: ["n"],
+    glosses: ["school"]
+  };
+
+  await Bun.write(seedPath, `${JSON.stringify(seedA)}\n${JSON.stringify(seedB)}\n`);
+  await Bun.write(
+    failuresPath,
+    `${JSON.stringify({ key: seedB.senseId, reason: "JSON Parse error" })}\n${JSON.stringify({ key: seedB.senseId, reason: "duplicate" })}\n`
+  );
+  await Bun.write(manifestPath, `${JSON.stringify({ seedPath, failuresPath })}\n`);
+
+  await Bun.$`bun run scripts/export-failed-ai-seeds.ts --manifest ${manifestPath} --out ${outPath}`;
+
+  expect(await readJsonl(outPath)).toEqual([seedB]);
+});
+
 function tempPath(name: string): string {
   return `/tmp/yori-dict-api-${process.pid}-${name}`;
 }

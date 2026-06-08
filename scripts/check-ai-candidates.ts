@@ -3,6 +3,13 @@ import { dirname } from "node:path";
 import { parseApiLang } from "../src/lang";
 import type { ApiLang } from "../src/types";
 import { readJsonl, type Candidate } from "./ai-common";
+import {
+  formatJsonl,
+  normalizeGlosses,
+  sourceKey,
+  validateGlosses,
+  type AiGlossSource
+} from "./ai-gloss-validation";
 
 type Args = {
   dbPath: string;
@@ -13,14 +20,6 @@ type Args = {
   maxGlosses: number;
   maxGlossLength: number;
   append: boolean;
-};
-
-type AiGlossSource = {
-  senseId: string;
-  lang: ApiLang;
-  glosses: string[];
-  source: "ai-assisted";
-  model: string;
 };
 
 type RejectedCandidate = {
@@ -124,50 +123,21 @@ function rejectionReasons(candidate: Candidate, args: Args, db: Database, seen: 
     reasons.push(`duplicate candidate or existing source row for ${candidate.senseId}:${args.lang}`);
   }
 
-  const glosses = normalizeGlosses(candidate.candidateGlosses);
-  if (glosses.length === 0) {
-    reasons.push("no candidate glosses");
-  }
-  if (glosses.length > args.maxGlosses) {
-    reasons.push(`too many glosses: ${glosses.length}`);
-  }
-  if (new Set(glosses).size !== glosses.length) {
-    reasons.push("duplicate gloss text");
-  }
-
-  for (const gloss of glosses) {
-    if (gloss.length > args.maxGlossLength) {
-      reasons.push(`gloss too long: ${gloss}`);
-    }
-    if (containsSentencePunctuation(gloss)) {
-      reasons.push(`gloss contains sentence punctuation: ${gloss}`);
-    }
-    if (args.lang === "zh-tw" || args.lang === "zh-cn") {
-      if (!hasHanText(gloss)) {
-        reasons.push(`Chinese gloss has no Han text: ${gloss}`);
-      }
-      if (hasSuspiciousLatinText(gloss)) {
-        reasons.push(`Chinese gloss contains suspicious Latin text: ${gloss}`);
-      }
-      if (isOverlyGenericChineseGloss(gloss, candidate.sourceGlosses)) {
-        reasons.push(`Chinese gloss is too generic for this sense: ${gloss}`);
-      }
-    }
-  }
+  reasons.push(
+    ...validateGlosses({
+      glosses: candidate.candidateGlosses,
+      lang: args.lang,
+      sourceGlosses: candidate.sourceGlosses,
+      maxGlosses: args.maxGlosses,
+      maxGlossLength: args.maxGlossLength
+    }).map((reason) => (reason === "no glosses" ? "no candidate glosses" : reason))
+  );
 
   return Array.from(new Set(reasons));
 }
 
-function normalizeGlosses(glosses: string[]): string[] {
-  return glosses.map((gloss) => gloss.trim()).filter(Boolean);
-}
-
 function candidateKey(candidate: Candidate): string {
   return `${candidate.senseId}:${candidate.targetLang}`;
-}
-
-function sourceKey(row: AiGlossSource): string {
-  return `${row.senseId}:${row.lang}`;
 }
 
 function senseExists(db: Database, senseId: string): boolean {
@@ -179,27 +149,4 @@ function hasExistingGlosses(db: Database, senseId: string, lang: ApiLang): boole
     .query<{ count: number }, [string, ApiLang]>("select count(*) as count from glosses where sense_id = ? and lang = ?")
     .get(senseId, lang);
   return (row?.count ?? 0) > 0;
-}
-
-function containsSentencePunctuation(gloss: string): boolean {
-  return /[。！？!?…]/.test(gloss) || gloss.includes("...") || gloss.includes("\n");
-}
-
-function hasHanText(gloss: string): boolean {
-  return /\p{Script=Han}/u.test(gloss);
-}
-
-function hasSuspiciousLatinText(gloss: string): boolean {
-  return /[A-Za-z]{2,}/.test(gloss);
-}
-
-function formatJsonl(rows: unknown[]): string {
-  return rows.length > 0 ? rows.map((row) => JSON.stringify(row)).join("\n") + "\n" : "";
-}
-
-function isOverlyGenericChineseGloss(gloss: string, sourceGlosses: string[]): boolean {
-  const genericGlosses = new Set(["在", "來", "去", "做", "有", "是"]);
-  if (!genericGlosses.has(gloss)) return false;
-
-  return sourceGlosses.some((sourceGloss) => sourceGloss.includes("(") || sourceGloss.split(/\s+/).length >= 3);
 }
