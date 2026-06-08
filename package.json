@@ -7,6 +7,7 @@
     "dev": "bun run src/index.ts",
     "download:jmdict": "bun run scripts/download-jmdict.ts --out-dir data/raw",
     "enrich:ai": "bun run scripts/enrich-ai.ts",
+    "enrich:ai:batch": "bun run scripts/enrich-ai-batch.ts",
     "export:ai-seeds": "bun run scripts/export-ai-seeds.ts",
     "import:jmdict": "bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out data/yori.sqlite",
     "import:jmdict:full": "bun run scripts/import-jmdict.ts --input data/raw/jmdict-all.json --out data/yori.sqlite",

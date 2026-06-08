@@ -59,6 +59,18 @@ Generate local AI candidates from those seeds:
 GEMINI_API_KEY=... bun run enrich:ai -- --limit 20
 ```
 
+Use the Batch API for larger offline runs:
+
+```sh
+bun run enrich:ai:batch -- submit --limit 1000
+```
+
+The submit command writes a manifest under `data/ai-batches/`. When the batch finishes, collect the results with the manifest path printed by submit:
+
+```sh
+bun run enrich:ai:batch -- collect --manifest data/ai-batches/<run>/manifest.json
+```
+
 Both commands write to ignored files under `data/`.
 
 ## API

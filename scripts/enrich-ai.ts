@@ -1,5 +1,14 @@
 import { dirname } from "node:path";
-import type { ApiLang } from "../src/types";
+import {
+  candidateFromGlosses,
+  candidateFromResponse,
+  defaultGeminiModel,
+  makeGenerateContentRequest,
+  readJsonl,
+  type AiSeed,
+  type Candidate,
+  type GeminiResponse
+} from "./ai-common";
 
 type Args = {
   inputPath: string;
@@ -7,39 +16,6 @@ type Args = {
   model: string;
   limit: number | null;
   dryRun: boolean;
-};
-
-type AiSeed = {
-  entryId: string;
-  senseId: string;
-  word: string;
-  reading: string | null;
-  common: boolean;
-  position: number;
-  targetLang: ApiLang;
-  pos: string[];
-  glosses: string[];
-};
-
-type Candidate = {
-  entryId: string;
-  senseId: string;
-  word: string;
-  reading: string | null;
-  targetLang: ApiLang;
-  sourceGlosses: string[];
-  candidateGlosses: string[];
-  model: string;
-};
-
-type GeminiResponse = {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string;
-      }>;
-    };
-  }>;
 };
 
 const args = parseArgs(Bun.argv.slice(2));
@@ -78,7 +54,7 @@ function parseArgs(argv: string[]): Args {
   return {
     inputPath: readFlag(argv, "--input") ?? "data/ai-seeds/zh-tw-seeds.jsonl",
     outPath: readFlag(argv, "--out") ?? "data/ai-candidates/zh-tw-candidates.jsonl",
-    model: readFlag(argv, "--model") ?? process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite",
+    model: readFlag(argv, "--model") ?? process.env.GEMINI_MODEL ?? defaultGeminiModel,
     limit: readFlag(argv, "--limit") ? parsePositiveInt(readFlag(argv, "--limit") as string) : null,
     dryRun: argv.includes("--dry-run")
   };
@@ -98,15 +74,6 @@ function parsePositiveInt(value: string): number {
   return parsed;
 }
 
-async function readJsonl<T>(path: string): Promise<T[]> {
-  const text = await Bun.file(path).text();
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as T);
-}
-
 async function generateCandidate(seed: AiSeed, model: string, apiKey: string): Promise<Candidate> {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -116,18 +83,7 @@ async function generateCandidate(seed: AiSeed, model: string, apiKey: string): P
         "content-type": "application/json",
         "x-goog-api-key": apiKey
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: promptFor(seed) }]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json"
-        }
-      })
+      body: JSON.stringify(makeGenerateContentRequest(seed))
     }
   );
 
@@ -136,59 +92,9 @@ async function generateCandidate(seed: AiSeed, model: string, apiKey: string): P
   }
 
   const body = (await response.json()) as GeminiResponse;
-  const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
-  const parsed = parseGlossResponse(text);
-
-  return {
-    entryId: seed.entryId,
-    senseId: seed.senseId,
-    word: seed.word,
-    reading: seed.reading,
-    targetLang: seed.targetLang,
-    sourceGlosses: seed.glosses,
-    candidateGlosses: parsed.glosses,
-    model
-  };
-}
-
-function promptFor(seed: AiSeed): string {
-  return [
-    "Translate one JMdict Japanese sense into Traditional Chinese dictionary glosses.",
-    "Return JSON only with this shape: {\"glosses\":[\"...\"]}.",
-    "Rules:",
-    "- Use Traditional Chinese used in Taiwan.",
-    "- Return short dictionary glosses, not explanations.",
-    "- Do not add examples.",
-    "- Do not add a new sense.",
-    "- Preserve the meaning of the English source glosses.",
-    "",
-    `Japanese word: ${seed.word}`,
-    `Reading: ${seed.reading ?? ""}`,
-    `Part of speech: ${seed.pos.join(", ")}`,
-    `English source glosses: ${seed.glosses.join("; ")}`
-  ].join("\n");
-}
-
-function parseGlossResponse(text: string): { glosses: string[] } {
-  const parsed = JSON.parse(text) as { glosses?: unknown };
-  if (!Array.isArray(parsed.glosses) || !parsed.glosses.every((item) => typeof item === "string")) {
-    throw new Error(`Gemini returned invalid gloss JSON: ${text}`);
-  }
-
-  return {
-    glosses: parsed.glosses.map((item) => item.trim()).filter(Boolean)
-  };
+  return candidateFromResponse(seed, model, body);
 }
 
 function toDryRunCandidate(seed: AiSeed, model: string): Candidate {
-  return {
-    entryId: seed.entryId,
-    senseId: seed.senseId,
-    word: seed.word,
-    reading: seed.reading,
-    targetLang: seed.targetLang,
-    sourceGlosses: seed.glosses,
-    candidateGlosses: [],
-    model
-  };
+  return candidateFromGlosses(seed, model, []);
 }
