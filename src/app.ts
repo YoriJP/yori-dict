@@ -29,18 +29,14 @@ export function createApp(db: LookupDb) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Yori Dict API Docs</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
   </head>
   <body>
-    <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
     <script>
-      window.onload = () => {
-        window.ui = SwaggerUIBundle({
-          url: "/openapi.yaml",
-          dom_id: "#swagger-ui"
-        });
-      };
+      Scalar.createApiReference("#app", {
+        url: "/openapi.yaml"
+      });
     </script>
   </body>
 </html>`)

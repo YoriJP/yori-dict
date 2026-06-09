@@ -32,12 +32,13 @@ test("returns API index links from the root route", async () => {
   expect(body.dataRelease).toBe("https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01");
 });
 
-test("serves Swagger UI from the doc route", async () => {
+test("serves Scalar API reference from the doc route", async () => {
   const res = await app.request("/doc");
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("text/html");
   const body = await res.text();
-  expect(body).toContain("SwaggerUIBundle");
+  expect(body).toContain("@scalar/api-reference");
+  expect(body).toContain("Scalar.createApiReference");
   expect(body).toContain("/openapi.yaml");
 });
 

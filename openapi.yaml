@@ -12,7 +12,6 @@ servers:
     variables:
       host:
         default: yori-dict-production.up.railway.app
-        description: Replace with the Railway public domain.
   - url: http://localhost:3000
     description: Local development server
 paths:
@@ -43,7 +42,7 @@ paths:
       operationId: getApiDocs
       responses:
         "200":
-          description: Swagger UI HTML page for this API.
+          description: Scalar API reference HTML page for this API.
           content:
             text/html:
               schema:
