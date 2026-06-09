@@ -16,8 +16,14 @@ export function createApp(db: LookupDb) {
       meta: "/v1/meta",
       lookup: "/v1/lookup?q=食べました&lang=zh-tw",
       batchLookup: "/v1/lookup/batch",
-      openapi: "https://raw.githubusercontent.com/anilahsu/yori-dict/main/openapi.yaml",
+      openapi: "/doc",
       dataRelease: "https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01"
+    })
+  );
+
+  app.get("/doc", async (c) =>
+    c.body(await Bun.file("openapi.yaml").text(), 200, {
+      "content-type": "application/yaml; charset=utf-8"
     })
   );
 

@@ -27,8 +27,15 @@ test("returns API index links from the root route", async () => {
   expect(body.description).toBe("Open Japanese dictionary API and SQLite database with multilingual lookup support.");
   expect(body.health).toBe("/health");
   expect(body.meta).toBe("/v1/meta");
-  expect(body.openapi).toBe("https://raw.githubusercontent.com/anilahsu/yori-dict/main/openapi.yaml");
+  expect(body.openapi).toBe("/doc");
   expect(body.dataRelease).toBe("https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01");
+});
+
+test("serves OpenAPI YAML from the doc route", async () => {
+  const res = await app.request("/doc");
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("application/yaml");
+  expect(await res.text()).toStartWith("openapi: 3.1.0");
 });
 
 test("returns metadata", async () => {
