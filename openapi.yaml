@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Yori Dict API
+  title: Yori Dict
   version: 1.0.0
   description: Japanese dictionary lookup API built from JMdict-simplified with reviewed AI-assisted zh-TW glosses.
   license:

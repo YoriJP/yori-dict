@@ -1,4 +1,4 @@
-# Yori Dict API
+# Yori Dict
 
 Small Japanese dictionary API built from JMdict-simplified.
 

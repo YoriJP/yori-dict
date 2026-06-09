@@ -68,5 +68,5 @@ If the AI-assisted zh-TW glosses are used, also acknowledge this project:
 
 ```txt
 Traditional Chinese glosses include AI-assisted, project-reviewed additions
-from Yori Dict API, distributed under CC BY-SA 4.0.
+from Yori Dict, distributed under CC BY-SA 4.0.
 ```
