@@ -9,14 +9,14 @@ Small Japanese dictionary API built from JMdict-simplified.
 - Support exact lookup by writing or reading.
 - Support basic word-level deinflection.
 - Support single and batch lookup.
-
-AI enrichment is intentionally out of scope for v0.
+- Import reviewed AI-assisted Traditional Chinese glosses.
 
 ## Commands
 
 ```sh
 bun install
-bun run import:jmdict
+bun run download:jmdict
+bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
 bun run dev
 ```
 
@@ -32,7 +32,7 @@ The repo keeps the small fixture in git for tests. Full JMdict-simplified data i
 
 ```sh
 bun run download:jmdict
-bun run import:jmdict:full
+bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
 bun run lookup:check
 ```
 
@@ -44,6 +44,12 @@ data/yori.sqlite
 ```
 
 Both are local generated data and are not committed.
+
+The reviewed zh-TW AI gloss source is committed at:
+
+```txt
+sources/ai-glosses/zh-tw.jsonl
+```
 
 ## AI Seeds
 
@@ -99,7 +105,7 @@ bun run ai:retry-seeds -- --manifest data/ai-batches/<run>/manifest.json --out d
 bun run ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
 ```
 
-Generated files under `data/` are ignored. Accepted gloss source files under `sources/` are committed.
+Generated files under `data/` are ignored. Accepted and reviewed gloss source files under `sources/` are committed.
 
 ## API
 
@@ -129,4 +135,4 @@ The importer currently uses a small fixture:
 bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out data/yori.sqlite
 ```
 
-Full JMdict-simplified import can use the same command with a downloaded full JSON file.
+Full JMdict-simplified import can use the same command with a downloaded full JSON file. Add `--ai-glosses sources/ai-glosses/zh-tw.jsonl` to include reviewed zh-TW glosses in the local SQLite database.

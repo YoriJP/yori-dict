@@ -77,6 +77,11 @@ export function openLookupDb(path: string): LookupDb {
             name: "JMdict",
             license: "CC-BY-SA-4.0",
             url: "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
+          },
+          {
+            name: "Yori AI-assisted zh-TW glosses",
+            license: "TBD",
+            url: "sources/ai-glosses/zh-tw.jsonl"
           }
         ]
       };
