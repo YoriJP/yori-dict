@@ -143,6 +143,69 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
   expect(rejected[2].reasons).toContain("Chinese gloss is too generic for this sense: 在");
 });
 
+test("filters Korean AI candidates with Korean-specific validation", async () => {
+  const dbPath = tempPath("ai-check-ko.sqlite");
+  const inputPath = tempPath("ai-candidates-ko.jsonl");
+  const acceptedPath = tempPath("ai-accepted-ko.jsonl");
+  const rejectedPath = tempPath("ai-rejected-ko.jsonl");
+  await Bun.$`rm -f ${dbPath} ${inputPath} ${acceptedPath} ${rejectedPath}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
+
+  const good: Candidate = {
+    entryId: "yori:e_jmdict_1358280",
+    senseId: "yori:s_jmdict_1358280_1",
+    word: "食べる",
+    reading: "たべる",
+    targetLang: "ko",
+    sourceGlosses: ["to eat"],
+    candidateGlosses: ["먹다"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
+  const english: Candidate = {
+    entryId: "yori:e_jmdict_1206730",
+    senseId: "yori:s_jmdict_1206730_1",
+    word: "学校",
+    reading: "がっこう",
+    targetLang: "ko",
+    sourceGlosses: ["school"],
+    candidateGlosses: ["school"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
+  const japanese: Candidate = {
+    entryId: "yori:e_jmdict_1456360",
+    senseId: "yori:s_jmdict_1456360_1",
+    word: "読む",
+    reading: "よむ",
+    targetLang: "ko",
+    sourceGlosses: ["to read"],
+    candidateGlosses: ["よむ"],
+    model: "gemini-3-flash-preview",
+    thinkingLevel: "low"
+  };
+
+  await Bun.write(inputPath, [good, english, japanese].map((candidate) => JSON.stringify(candidate)).join("\n") + "\n");
+  await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath} --lang ko`;
+
+  expect(await readJsonl(acceptedPath)).toEqual([
+    {
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "ko",
+      glosses: ["먹다"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    }
+  ]);
+
+  const rejected = (await readJsonl(rejectedPath)) as Array<{ reasons: string[] }>;
+  expect(rejected).toHaveLength(2);
+  expect(rejected[0].reasons).toContain("Korean gloss has no Hangul text: school");
+  expect(rejected[0].reasons).toContain("Korean gloss contains suspicious Latin text: school");
+  expect(rejected[1].reasons).toContain("Korean gloss has no Hangul text: よむ");
+  expect(rejected[1].reasons).toContain("Korean gloss contains Japanese kana: よむ");
+}, 15000);
+
 test("normalizes ellipsis placeholders in accepted AI candidates", async () => {
   const dbPath = tempPath("ai-check-ellipsis.sqlite");
   const inputPath = tempPath("ai-candidates-ellipsis.jsonl");

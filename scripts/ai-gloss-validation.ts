@@ -52,6 +52,17 @@ export function validateGlosses(input: GlossValidationInput): string[] {
         reasons.push(`Chinese gloss is too generic for this sense: ${gloss}`);
       }
     }
+    if (input.lang === "ko") {
+      if (!hasHangulText(gloss)) {
+        reasons.push(`Korean gloss has no Hangul text: ${gloss}`);
+      }
+      if (hasJapaneseKana(gloss)) {
+        reasons.push(`Korean gloss contains Japanese kana: ${gloss}`);
+      }
+      if (hasSuspiciousLatinText(gloss)) {
+        reasons.push(`Korean gloss contains suspicious Latin text: ${gloss}`);
+      }
+    }
   }
 
   return Array.from(new Set(reasons));
@@ -71,6 +82,14 @@ function containsSentencePunctuation(gloss: string): boolean {
 
 function hasHanText(gloss: string): boolean {
   return /\p{Script=Han}/u.test(gloss);
+}
+
+function hasHangulText(gloss: string): boolean {
+  return /\p{Script=Hangul}/u.test(gloss);
+}
+
+function hasJapaneseKana(gloss: string): boolean {
+  return /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(gloss);
 }
 
 function hasSuspiciousLatinText(gloss: string): boolean {
