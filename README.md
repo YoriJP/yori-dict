@@ -5,6 +5,35 @@ Small Japanese dictionary API built from JMdict-simplified.
 Code is licensed under MIT. Dictionary data and release SQLite artifacts are
 licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 
+## Public Use
+
+Use your Railway service URL as the API base URL. The API contract is documented
+in [openapi.yaml](openapi.yaml).
+
+```sh
+curl '<api-url>/health'
+curl '<api-url>/v1/meta'
+curl '<api-url>/v1/lookup?q=食べました&lang=zh-tw'
+curl -X POST '<api-url>/v1/lookup/batch' \
+  -H 'content-type: application/json' \
+  --data '{"queries":["食べました","学校","孑々"],"lang":"zh-tw"}'
+```
+
+SQLite data release:
+
+```txt
+https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01
+```
+
+Download and verify the SQLite database:
+
+```sh
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-01/yori-dict-2026-06-01.sqlite.gz
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-01/yori-dict-2026-06-01.sqlite.gz.sha256
+shasum -a 256 -c yori-dict-2026-06-01.sqlite.gz.sha256
+gunzip yori-dict-2026-06-01.sqlite.gz
+```
+
 ## v0 scope
 
 - Import a JMdict-simplified JSON file into SQLite.
@@ -153,6 +182,8 @@ bun run ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
 Generated files under `data/` are ignored. Accepted and reviewed gloss source files under `sources/` are committed.
 
 ## API
+
+See [openapi.yaml](openapi.yaml) for the full OpenAPI description.
 
 ```txt
 GET /health
