@@ -2,6 +2,9 @@
 
 Small Japanese dictionary API built from JMdict-simplified.
 
+Code is licensed under MIT. Dictionary data and release SQLite artifacts are
+licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
+
 ## v0 scope
 
 - Import a JMdict-simplified JSON file into SQLite.

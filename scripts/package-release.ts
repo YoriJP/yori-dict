@@ -64,7 +64,7 @@ await writeFile(
         },
         {
           name: "Yori AI-assisted zh-TW glosses",
-          license: "TBD",
+          license: "CC-BY-SA-4.0",
           path: "sources/ai-glosses/zh-tw.jsonl"
         }
       ]

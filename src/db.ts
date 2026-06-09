@@ -80,7 +80,7 @@ export function openLookupDb(path: string): LookupDb {
           },
           {
             name: "Yori AI-assisted zh-TW glosses",
-            license: "TBD",
+            license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/zh-tw.jsonl"
           }
         ]
