@@ -5,6 +5,12 @@ Open Japanese dictionary API and SQLite database with multilingual lookup suppor
 Code is licensed under MIT. Dictionary data and release SQLite artifacts are
 licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 
+Current data coverage:
+
+- English and German glosses from JMdict-simplified where upstream data exists.
+- Reviewed Traditional Chinese (`zh-tw`) gloss additions for common JMdict senses.
+- API language codes also include `zh-cn` and `ko`; those are planned data targets and may return no glosses until reviewed source files are added.
+
 ## Public Use
 
 Public API:
@@ -36,6 +42,14 @@ curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
   -H 'content-type: application/json' \
   --data '{"queries":["食べました","学校","孑々"],"lang":"zh-tw"}'
 ```
+
+Run a public smoke check:
+
+```sh
+bun run public:check
+```
+
+Set `YORI_PUBLIC_API_URL` to check another deployment.
 
 SQLite data release:
 
@@ -198,6 +212,21 @@ bun run ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
 ```
 
 Generated files under `data/` are ignored. Accepted and reviewed gloss source files under `sources/` are committed.
+
+## Next Data Target
+
+The next language target is Simplified Chinese (`zh-cn`). Start by exporting
+seeds for JMdict senses that have English glosses but no `zh-cn` glosses:
+
+```sh
+bun run data:zh-cn:seeds
+```
+
+This writes ignored local seed data to `data/ai-seeds/zh-cn-seeds.jsonl`.
+Do not publish generated glosses directly. The same flow still applies:
+generate candidates, run validation, review suspicious rows, commit only
+accepted source rows under `sources/ai-glosses/`, rebuild SQLite, and package a
+new release.
 
 ## API
 

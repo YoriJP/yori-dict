@@ -22,17 +22,18 @@ Source:
 - https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project
 - https://www.edrdg.org/edrdg/licence.html
 
-## AI-Assisted zh-TW Glosses
+## AI-Assisted Glosses
 
-The reviewed Traditional Chinese gloss source is committed at:
+The current reviewed Traditional Chinese gloss source is committed at:
 
 ```txt
 sources/ai-glosses/zh-tw.jsonl
 ```
 
-These glosses were generated from JMdict sense data and reviewed inside this
-project. They are distributed under CC BY-SA 4.0 for compatibility with the
-JMdict-derived data they extend.
+AI-assisted glosses are generated from JMdict sense data and reviewed inside
+this project before they are committed under `sources/ai-glosses/`. They are
+distributed under CC BY-SA 4.0 for compatibility with the JMdict-derived data
+they extend.
 
 ## Release SQLite Database
 

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Yori Dict API
   version: 1.0.0
-  description: Japanese dictionary lookup API built from JMdict-simplified with reviewed AI-assisted zh-TW glosses.
+  description: Japanese dictionary lookup API built from JMdict-simplified with multilingual lookup support.
   license:
     name: MIT for code; CC BY-SA 4.0 for dictionary data
     url: https://github.com/anilahsu/yori-dict/blob/main/DATA_SOURCES.md

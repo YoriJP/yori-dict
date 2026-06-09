@@ -8,5 +8,5 @@ data/raw/
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
-releases/
+/releases/
 .DS_Store

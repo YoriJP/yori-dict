@@ -98,11 +98,13 @@ export function candidateFromGlosses(seed: AiSeed, model: string, candidateGloss
 }
 
 function promptFor(seed: AiSeed): string {
+  const targetLanguage = targetLanguageInstruction(seed.targetLang);
+
   return [
-    "Translate one JMdict Japanese sense into Traditional Chinese dictionary glosses.",
+    `Translate one JMdict Japanese sense into ${targetLanguage.name} dictionary glosses.`,
     "Return JSON only with this shape: {\"glosses\":[\"...\"]}.",
     "Rules:",
-    "- Use Traditional Chinese used in Taiwan.",
+    `- Use ${targetLanguage.usage}.`,
     "- Return short dictionary glosses, not explanations.",
     "- Do not add examples.",
     "- Do not add a new sense.",
@@ -113,6 +115,21 @@ function promptFor(seed: AiSeed): string {
     `Part of speech: ${seed.pos.join(", ")}`,
     `English source glosses: ${seed.glosses.join("; ")}`
   ].join("\n");
+}
+
+function targetLanguageInstruction(lang: ApiLang): { name: string; usage: string } {
+  switch (lang) {
+    case "zh-tw":
+      return { name: "Traditional Chinese", usage: "Traditional Chinese used in Taiwan" };
+    case "zh-cn":
+      return { name: "Simplified Chinese", usage: "Simplified Chinese used in Mainland China" };
+    case "ko":
+      return { name: "Korean", usage: "natural Korean dictionary wording" };
+    case "de":
+      return { name: "German", usage: "natural German dictionary wording" };
+    case "en":
+      return { name: "English", usage: "natural English dictionary wording" };
+  }
 }
 
 function parseGlossResponse(text: string): { glosses: string[] } {
