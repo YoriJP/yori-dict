@@ -1,0 +1,56 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+      RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        run: |
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "Missing GitHub secret: RAILWAY_TOKEN"
+            exit 1
+          fi
+
+          args=(--ci)
+          if [ -n "${RAILWAY_SERVICE:-}" ]; then
+            args+=(--service "$RAILWAY_SERVICE")
+          fi
+          if [ -n "${RAILWAY_ENVIRONMENT:-}" ]; then
+            args+=(--environment "$RAILWAY_ENVIRONMENT")
+          fi
+
+          railway up "${args[@]}"

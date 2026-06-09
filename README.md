@@ -83,10 +83,28 @@ bun run build:db
 Set the start command to:
 
 ```sh
-bun run dev
+bun run start
 ```
 
 The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`.
+
+GitHub Actions deploys to Railway on pushes to `main` and by manual workflow
+dispatch. Add this GitHub repository secret:
+
+```txt
+RAILWAY_TOKEN
+```
+
+Use a Railway Project Token for `RAILWAY_TOKEN`. If the Railway project has
+multiple services or environments, also add these optional GitHub repository
+variables:
+
+```txt
+RAILWAY_SERVICE
+RAILWAY_ENVIRONMENT
+```
+
+Railway build and deploy settings are defined in [railway.json](railway.json).
 
 ## AI Seeds
 

@@ -21,6 +21,7 @@
     "lookup:check": "bun run scripts/check-lookup.ts",
     "release:check": "bun run build:db && bun run ai:validate -- --input sources/ai-glosses/zh-tw.jsonl && bun run lookup:check && bun run typecheck && bun test",
     "release:package": "bun run release:check && bun run scripts/package-release.ts",
+    "start": "bun run src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
