@@ -3594,3 +3594,502 @@
 {"senseId":"yori:s_jmdict_1214170_1","lang":"ko","glosses":["관제탑"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
 {"senseId":"yori:s_jmdict_1214190_1","lang":"ko","glosses":["관내","관할 구역 안"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
 {"senseId":"yori:s_jmdict_1214190_2","lang":"ko","glosses":["관내","관 안"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224140_1","lang":"ko","glosses":["기수","말 타는 사람"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224160_1","lang":"ko","glosses":["말을 탐","말을 탄 사람"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224180_1","lang":"ko","glosses":["기병","말을 타고 싸우는 병사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224190_1","lang":"ko","glosses":["도깨비","귀신"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224190_2","lang":"ko","glosses":["망령","죽은 이의 영혼"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224190_3","lang":"ko","glosses":["무섭고 잔인한 사람","모질고 독한 사람"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224190_4","lang":"ko","glosses":["술래"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224190_5","lang":"ko","glosses":["귀수","귀성","이십팔수의 하나"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224200_1","lang":"ko","glosses":["술래잡기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224220_1","lang":"ko","glosses":["귀재","천재","비범한 재능"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224320_1","lang":"ko","glosses":["균열","갈라진 틈","금"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224390_1","lang":"ko","glosses":["속이다","거짓말하다","가장하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224390_2","lang":"ko","glosses":["속이다","기만하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224510_1","lang":"ko","glosses":["위증","허위 증언","거짓 증언"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224580_1","lang":"ko","glosses":["위조","날조","변조"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224690_1","lang":"ko","glosses":["의식","의례"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224690_2","lang":"ko","glosses":["일","건","사항"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224700_1","lang":"ko","glosses":["의식","예식"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224820_1","lang":"ko","glosses":["의례","예의","격식"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224820_2","lang":"ko","glosses":["의례","의식","전례"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224880_1","lang":"ko","glosses":["좋다","괜찮다","알맞다","허락되다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224890_1","lang":"ko","glosses":["잘","적절히","좋게","알맞게"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224890_2","lang":"ko","glosses":["잘 부탁함","아무쪼록","좋게"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224890_3","lang":"ko","glosses":["~처럼","~과 같이","~인 양","~인 듯이"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224890_4","lang":"ko","glosses":["아무쪼록","부디","마땅히"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224960_1","lang":"ko","glosses":["놀이","장난","농담","희롱","변덕"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224970_1","lang":"ko","glosses":["장난치다","뛰놀다","노닐다","농담하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224970_2","lang":"ko","glosses":["희롱하다","추파를 던지다","시시덕거리다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224970_3","lang":"ko","glosses":["운치가 있다","우아하다","고상하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224990_1","lang":"ko","glosses":["희화","만화","풍자화"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225010_1","lang":"ko","glosses":["희곡"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225010_2","lang":"ko","glosses":["희곡","중국 전통극"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225090_1","lang":"ko","glosses":["기술","기예","솜씨","재주"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225100_1","lang":"ko","glosses":["기교","기술","솜씨"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225110_1","lang":"ko","glosses":["기사","기술자"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225130_1","lang":"ko","glosses":["기술","공학"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225130_2","lang":"ko","glosses":["기술","기능","기량"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225130_3","lang":"ko","glosses":["기술","기예"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225170_1","lang":"ko","glosses":["기술자","엔지니어","기능공"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225200_1","lang":"ko","glosses":["기술적"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225200_2","lang":"ko","glosses":["기술적"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225220_1","lang":"ko","glosses":["기술력"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225220_2","lang":"ko","glosses":["기술력","기술 능력"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225230_1","lang":"ko","glosses":["기능","기술","기량"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225240_1","lang":"ko","glosses":["기법","기술"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225420_1","lang":"ko","glosses":["속이다","기만하다","현혹하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225420_2","lang":"ko","glosses":["무색하게 하다","못지않다","뺨치다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225450_1","lang":"ko","glosses":["희생"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225450_2","lang":"ko","glosses":["희생자","사망자"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225450_3","lang":"ko","glosses":["희생","제물"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225460_1","lang":"ko","glosses":["희생자"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225470_1","lang":"ko","glosses":["희생타"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225490_1","lang":"ko","glosses":["의심","의문","회의","혐의"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225510_1","lang":"ko","glosses":["의심하다","불신하다","수상히 여기다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225530_1","lang":"ko","glosses":["의심스럽다","의심쩍다","불확실하다","수상하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225550_1","lang":"ko","glosses":["의문","의심","의혹"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225560_1","lang":"ko","glosses":["의옥","부패 사건","뇌물 사건"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225590_1","lang":"ko","glosses":["의심","의혹","의구심"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225620_1","lang":"ko","glosses":["의구심","의심","의혹"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225630_1","lang":"ko","glosses":["의문","의심","질문"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225660_1","lang":"ko","glosses":["의문부","물음표"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225680_1","lang":"ko","glosses":["의혹","의심"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225730_1","lang":"ko","glosses":["의연금","성금","기부금"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225790_1","lang":"ko","glosses":["의형","형부","매형","손위 시아주버니","손위 처남"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225790_2","lang":"ko","glosses":["의붓형","의형"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225800_1","lang":"ko","glosses":["형수","처형","손위 시누이"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225800_2","lang":"ko","glosses":["의붓언니","의붓누나","의누이"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225810_1","lang":"ko","glosses":["의치","인공 치아","틀니"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225850_1","lang":"ko","glosses":["의제","시동생","처남","매제","제부"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225850_2","lang":"ko","glosses":["의제","의붓남동생"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225860_1","lang":"ko","glosses":["시아버지","장인","의부"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225860_2","lang":"ko","glosses":["양부","수양아버지"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225860_3","lang":"ko","glosses":["계부"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225880_1","lang":"ko","glosses":["시어머니","장모","의모"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225880_2","lang":"ko","glosses":["양어머니","양모"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225880_3","lang":"ko","glosses":["계모","의붓어머니","새어머니"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225890_1","lang":"ko","glosses":["시누이","처제","제수","계수","올케"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225890_2","lang":"ko","glosses":["의붓여동생","수양여동생","의동생"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225900_1","lang":"ko","glosses":["의무","책무","본분"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225910_1","lang":"ko","glosses":["의무 교육"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225920_1","lang":"ko","glosses":["의리","도리","체면","예의"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1225920_2","lang":"ko","glosses":["사돈의","인척 관계의","혼인으로 맺어진"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226010_1","lang":"ko","glosses":["의안","법안"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226010_2","lang":"ko","glosses":["의안","안건"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226020_1","lang":"ko","glosses":["의원"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226030_1","lang":"ko","glosses":["의회","국회"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226030_2","lang":"ko","glosses":["의원"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226040_1","lang":"ko","glosses":["의회","국회"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226050_1","lang":"ko","glosses":["의결","결정"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226080_1","lang":"ko","glosses":["의사","회의 진행"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226090_1","lang":"ko","glosses":["의사당"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226100_1","lang":"ko","glosses":["회의록","의사록"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226110_1","lang":"ko","glosses":["의장","회의장","본회의장"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226120_1","lang":"ko","glosses":["의석"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226130_1","lang":"ko","glosses":["의제","안건","논의 주제"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226140_1","lang":"ko","glosses":["의장"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226160_1","lang":"ko","glosses":["논의","토론","논쟁","의론"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226200_1","lang":"ko","glosses":["뜨다","푸다","떠내다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226200_2","lang":"ko","glosses":["발을 걸어 넘어뜨리다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226310_1","lang":"ko","glosses":["길조","좋은 징조","상서로운 징조"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_1","lang":"ko","glosses":["가까이 대다","다가오게 하다","곁으로 오게 하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_2","lang":"ko","glosses":["가까이 대다","가까이 하다","모으다","합치다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_3","lang":"ko","glosses":["보내다","전하다","기고하다","기부하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_4","lang":"ko","glosses":["들르게 하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_5","lang":"ko","glosses":["더하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_6","lang":"ko","glosses":["(애정·신뢰 등을) 품다","마음을 두다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_7","lang":"ko","glosses":["의탁하다","의지하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_8","lang":"ko","glosses":["구실로 삼다","핑계로 삼다","빙자하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_9","lang":"ko","glosses":["한쪽으로 치워 놓다","비껴 놓다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_10","lang":"ko","glosses":["밀어붙이다","바짝 대다","밀다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219560_11","lang":"ko","glosses":["끼워 주다","포함시키다","참여시키다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219580_1","lang":"ko","glosses":["긁어모음","잡동사니","뒤범벅"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219630_1","lang":"ko","glosses":["한데 모이다","몰려들다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219650_1","lang":"ko","glosses":["가는 길에 딴 데를 들름","중도에 들름"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219650_2","lang":"ko","glosses":["딴 데를 들름","길을 돌아감"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_1","lang":"ko","glosses":["다가가다","가까이 가다","접근하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_2","lang":"ko","glosses":["모이다","한데 모이다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_3","lang":"ko","glosses":["들르다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_4","lang":"ko","glosses":["나이가 들다","늙다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_5","lang":"ko","glosses":["주름이 잡히다","주름이 지다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_6","lang":"ko","glosses":["기대다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_7","lang":"ko","glosses":["샅바를 잡고 밀어붙이다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_8","lang":"ko","glosses":["값이 결정되다","매매가 성립되다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219680_9","lang":"ko","glosses":["(마음이) 쏠리다","기울다","넘어가다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219690_1","lang":"ko","glosses":["기부금","성금"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219700_1","lang":"ko","glosses":["기항","항구에 들름"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219700_2","lang":"ko","glosses":["기항"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219740_1","lang":"ko","glosses":["기숙사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219750_1","lang":"ko","glosses":["기생"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219770_1","lang":"ko","glosses":["기생충"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219790_1","lang":"ko","glosses":["요세","대중 연예장"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219810_1","lang":"ko","glosses":["기여","이바지","공헌"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219840_1","lang":"ko","glosses":["갈림길","기로"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219910_1","lang":"ko","glosses":["희망","소망","바람"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219910_2","lang":"ko","glosses":["전망","기대"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219960_1","lang":"ko","glosses":["몇","얼마나"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219960_2","lang":"ko","glosses":["몇 살","몇 세"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219970_1","lang":"ko","glosses":["몇몇","몇 가지","약간"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219980_1","lang":"ko","glosses":["얼마","얼마나"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1219980_3","lang":"ko","glosses":["아무리"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220010_1","lang":"ko","glosses":["기하","기하학"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220020_1","lang":"ko","glosses":["기하학"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220050_1","lang":"ko","glosses":["며칠"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220050_2","lang":"ko","glosses":["며칠"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220060_1","lang":"ko","glosses":["다소","얼마간","어느 정도","약간"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220060_2","lang":"ko","glosses":["일부","부분","얼마간"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220070_1","lang":"ko","glosses":["불길하다","혐오스럽다","가증스럽다","끔찍하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220070_2","lang":"ko","glosses":["불길하다","재수 없다","꺼림칙하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220120_1","lang":"ko","glosses":["기피","회피"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220120_2","lang":"ko","glosses":["기피"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220160_1","lang":"ko","glosses":["휘발"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220210_1","lang":"ko","glosses":["책상"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220220_1","lang":"ko","glosses":["책상 위"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220220_2","lang":"ko","glosses":["탁상","책상 위","이론상의"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220240_1","lang":"ko","glosses":["깃발","기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220240_2","lang":"ko","glosses":["깃발","기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220240_3","lang":"ko","glosses":["기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220260_1","lang":"ko","glosses":["기수"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220270_1","lang":"ko","glosses":["형세","상황","전망"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220270_2","lang":"ko","glosses":["입장","태도","소속"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220290_1","lang":"ko","glosses":["거병","군사를 일으킴","기치를 올림"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220290_2","lang":"ko","glosses":["기치를 올림","창업","창당","단체 결성"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220310_1","lang":"ko","glosses":["이미","벌써"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220310_2","lang":"ko","glosses":["이미","벌써","이전에"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220310_3","lang":"ko","glosses":["명백히","틀림없이","애당초"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220340_1","lang":"ko","glosses":["기왕증","과거 병력","병력"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220350_1","lang":"ko","glosses":["기혼"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220390_1","lang":"ko","glosses":["기성","이미 이루어짐"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220410_1","lang":"ko","glosses":["기성 사실"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220420_1","lang":"ko","glosses":["기성","이미 만들어져 있음"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220430_1","lang":"ko","glosses":["기성복"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220450_1","lang":"ko","glosses":["기존","이미 존재함"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220470_1","lang":"ko","glosses":["기정","이미 정해짐"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220500_1","lang":"ko","glosses":["기득권"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220550_1","lang":"ko","glosses":["기간"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220560_1","lang":"ko","glosses":["기한","기간"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220560_2","lang":"ko","glosses":["기한","마감","기일"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220570_1","lang":"ko","glosses":["기대"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220570_2","lang":"ko","glosses":["유망한","촉망받는","기대되는"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220610_1","lang":"ko","glosses":["기일","정해진 날짜"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220610_2","lang":"ko","glosses":["기일","마감일"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220620_1","lang":"ko","glosses":["기말"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220640_1","lang":"ko","glosses":["기사","프로 바둑 기사","프로 쇼기 기사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220650_1","lang":"ko","glosses":["기보"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220660_1","lang":"ko","glosses":["기각","내버림","거절","포기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220670_1","lang":"ko","glosses":["기권","권리 포기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220770_1","lang":"ko","glosses":["기운","기회","시기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220770_2","lang":"ko","glosses":["기운","추세","기세"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220800_1","lang":"ko","glosses":["기회","계기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220810_1","lang":"ko","glosses":["기계","기구","장치"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220810_2","lang":"ko","glosses":["기구","기계","장치"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220820_1","lang":"ko","glosses":["기계화"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220870_1","lang":"ko","glosses":["엔진","기관"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220870_2","lang":"ko","glosses":["기관","기구","단체"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220870_3","lang":"ko","glosses":["시설","설비","체계"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220880_1","lang":"ko","glosses":["기관차"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220890_1","lang":"ko","glosses":["기관총"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220900_1","lang":"ko","glosses":["기기","장치","기계","설비"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220930_1","lang":"ko","glosses":["기분","심기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222730_1","lang":"ko","glosses":["증기선","기선"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222740_1","lang":"ko","glosses":["기적"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222760_1","lang":"ko","glosses":["기도","기원","간구"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222770_1","lang":"ko","glosses":["빌다","기도하다","기원하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222770_2","lang":"ko","glosses":["바라다","기원하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222780_1","lang":"ko","glosses":["기원","빎","간구"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222800_1","lang":"ko","glosses":["기도","기원"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222810_1","lang":"ko","glosses":["계간","계간지"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222820_1","lang":"ko","glosses":["계어","계절어"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222840_1","lang":"ko","glosses":["계절","철"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222870_1","lang":"ko","glosses":["계절풍"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222880_1","lang":"ko","glosses":["희소하다","드물다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222910_1","lang":"ko","glosses":["기원"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222910_2","lang":"ko","glosses":["서기","서력기원"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222930_1","lang":"ko","glosses":["기원전","서기전"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222940_1","lang":"ko","glosses":["기행","기행문"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222970_1","lang":"ko","glosses":["규격","표준"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223010_1","lang":"ko","glosses":["규제","단속","통제","제한"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223021_1","lang":"ko","glosses":["규칙","규정"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223060_1","lang":"ko","glosses":["규정"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223060_2","lang":"ko","glosses":["규정","노르말"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223060_3","lang":"ko","glosses":["규정","규정 종목","규정 연기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223080_1","lang":"ko","glosses":["규정","내규"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223090_1","lang":"ko","glosses":["규모","범위","짜임새"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223110_1","lang":"ko","glosses":["규약","규칙","협정"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223120_1","lang":"ko","glosses":["규율","질서"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223120_2","lang":"ko","glosses":["규율","규칙","법규"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223140_1","lang":"ko","glosses":["적다","기록하다","쓰다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223140_2","lang":"ko","glosses":["기록하다","기술하다","서술하다","적다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223140_3","lang":"ko","glosses":["새기다","기록하다","표시하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223140_4","lang":"ko","glosses":["기억하다","새기다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223150_1","lang":"ko","glosses":["기억","추억","회상"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223150_2","lang":"ko","glosses":["기억","저장"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223210_1","lang":"ko","glosses":["기호","부호","표시"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223230_1","lang":"ko","glosses":["기재","수록","기입"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223240_1","lang":"ko","glosses":["기사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223250_1","lang":"ko","glosses":["기자","언론인"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223260_1","lang":"ko","glosses":["기자 회견"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223280_1","lang":"ko","glosses":["기술","서술"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223300_1","lang":"ko","glosses":["기장","휘장","배지"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223320_1","lang":"ko","glosses":["기입","장부 기록","부기","서명"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223330_1","lang":"ko","glosses":["기입","기재"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223340_1","lang":"ko","glosses":["기념"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223340_2","lang":"ko","glosses":["기념물","기념품"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223380_1","lang":"ko","glosses":["기념일"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223390_1","lang":"ko","glosses":["기념비"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223440_1","lang":"ko","glosses":["기록","문서","회의록","일지","기재"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223440_2","lang":"ko","glosses":["기록","기록 수립"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223490_1","lang":"ko","glosses":["귀금속"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223510_1","lang":"ko","glosses":["귀사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223510_2","lang":"ko","glosses":["귀사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223520_1","lang":"ko","glosses":["귀중함","귀중하다","소중하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223530_1","lang":"ko","glosses":["귀중품"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223550_1","lang":"ko","glosses":["귀족"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223590_1","lang":"ko","glosses":["귀빈"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223640_1","lang":"ko","glosses":["일어나다","일다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223640_2","lang":"ko","glosses":["잠에서 깨다","깨어 있다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223640_3","lang":"ko","glosses":["일어나다","발생하다","생기다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223650_1","lang":"ko","glosses":["일어나다","일어서다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_1","lang":"ko","glosses":["일으키다","일으켜 세우다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_2","lang":"ko","glosses":["깨우다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_3","lang":"ko","glosses":["일으키다","야기하다","초래하다","발생시키다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_4","lang":"ko","glosses":["일으키다","시작하다","설립하다","세우다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_5","lang":"ko","glosses":["갈다","일구다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_6","lang":"ko","glosses":["(병을) 일으키다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_7","lang":"ko","glosses":["받아 적다","채록하다","글로 옮기다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223660_8","lang":"ko","glosses":["(카드를) 뒤집다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223680_1","lang":"ko","glosses":["일어나다","발생하다","생기다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223720_1","lang":"ko","glosses":["기인하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223720_2","lang":"ko","glosses":["원인","기원","기인"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223760_1","lang":"ko","glosses":["기공","공사를 시작함"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223780_1","lang":"ko","glosses":["기채","채권 발행"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223800_1","lang":"ko","glosses":["기사회생","죽을 고비에서 살아남","소생","회생"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223820_1","lang":"ko","glosses":["기상","잠자리에서 일어남"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223840_1","lang":"ko","glosses":["기소"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223850_1","lang":"ko","glosses":["기초","초안 작성"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223860_1","lang":"ko","glosses":["기점","시발점"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223880_1","lang":"ko","glosses":["기동","시동","부팅","실행"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223910_1","lang":"ko","glosses":["기폭","폭발을 일으킴"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223930_1","lang":"ko","glosses":["기복","굴곡"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223930_2","lang":"ko","glosses":["기복","굴곡","오르내림"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223940_1","lang":"ko","glosses":["기용","발탁"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223950_1","lang":"ko","glosses":["기립","일어섬"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223970_1","lang":"ko","glosses":["바퀴 자국","궤적"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223970_2","lang":"ko","glosses":["궤적","자취","발자취"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223970_3","lang":"ko","glosses":["궤적","자취"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223980_1","lang":"ko","glosses":["궤도"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223980_2","lang":"ko","glosses":["궤도","철로","선로"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223980_3","lang":"ko","glosses":["궤도","바른 길"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1223990_1","lang":"ko","glosses":["눈부시다","빛나다","찬란하다","영광스럽다","훌륭하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224010_1","lang":"ko","glosses":["빛남","반짝임","광채","광휘"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224020_1","lang":"ko","glosses":["빛나다","반짝이다","광채가 나다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224020_2","lang":"ko","glosses":["빛나다","반짝이다","환해지다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224050_1","lang":"ko","glosses":["휘도","밝기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224070_1","lang":"ko","glosses":["굶주림","배고픔","기아"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224080_1","lang":"ko","glosses":["굶주리다","배고프다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224080_2","lang":"ko","glosses":["굶주리다","목마르다","갈구하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224090_1","lang":"ko","glosses":["기아","굶주림"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224110_1","lang":"ko","glosses":["기사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1224110_2","lang":"ko","glosses":["기마 무사","말을 탄 무사"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220930_2","lang":"ko","glosses":["안부","건강","형편"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220930_3","lang":"ko","glosses":["기분이 좋은","명랑한","유쾌한","활기찬"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220940_1","lang":"ko","glosses":["기구","메커니즘","기계 장치"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220940_2","lang":"ko","glosses":["기구","구조","조직","체계"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220960_1","lang":"ko","glosses":["기재","장비","기계와 자재"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220960_2","lang":"ko","glosses":["기재","기계와 재료"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220980_1","lang":"ko","glosses":["기종"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220980_2","lang":"ko","glosses":["기종","항공기 종류"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1220990_1","lang":"ko","glosses":["기수"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221020_1","lang":"ko","glosses":["기체","동체"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221040_1","lang":"ko","glosses":["기장"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221060_1","lang":"ko","glosses":["기동"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221100_1","lang":"ko","glosses":["기동대"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221120_1","lang":"ko","glosses":["기내","비행기 안"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221130_1","lang":"ko","glosses":["기능","작용"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221170_1","lang":"ko","glosses":["기민함","재빠름","민첩함","영리함"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221180_1","lang":"ko","glosses":["기밀","비밀"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221210_1","lang":"ko","glosses":["기뢰"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221240_1","lang":"ko","glosses":["돌려보내다","귀가시키다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221250_1","lang":"ko","glosses":["돌아옴","귀가","돌아오는 길"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221260_1","lang":"ko","glosses":["귀갓길","돌아오는 길","귀로"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221270_1","lang":"ko","glosses":["돌아가다","돌아오다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221270_2","lang":"ko","glosses":["돌아가다","물러가다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221270_3","lang":"ko","glosses":["집에 돌아오다","홈인하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221280_1","lang":"ko","glosses":["귀의"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221290_1","lang":"ko","glosses":["귀화"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221300_1","lang":"ko","glosses":["귀환","돌아옴"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221300_2","lang":"ko","glosses":["귀환","되먹임","피드백"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221310_1","lang":"ko","glosses":["귀경","도쿄로 돌아감"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221330_1","lang":"ko","glosses":["귀국"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221330_2","lang":"ko","glosses":["귀향","고향으로 돌아감"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221390_1","lang":"ko","glosses":["귀성","고향에 돌아감"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221420_1","lang":"ko","glosses":["귀속","소속"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221420_2","lang":"ko","glosses":["귀속","반환","복귀"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221430_1","lang":"ko","glosses":["귀가","집에 돌아옴"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221450_1","lang":"ko","glosses":["귀로","돌아오는 길"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221500_1","lang":"ko","glosses":["귀로","귀갓길","돌아오는 길"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_1","lang":"ko","glosses":["마음","정신","기분"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_2","lang":"ko","glosses":["기질","성질","성미"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_3","lang":"ko","glosses":["마음","정신","의지","의욕"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_4","lang":"ko","glosses":["기분","마음"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_5","lang":"ko","glosses":["의식","정신"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_6","lang":"ko","glosses":["신경","배려","주의","걱정"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_7","lang":"ko","glosses":["흥미","관심"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_8","lang":"ko","glosses":["공기","대기","분위기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_9","lang":"ko","glosses":["분위기","기운","기분"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_10","lang":"ko","glosses":["향기","냄새","맛","풍미"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221520_11","lang":"ko","glosses":["기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221740_1","lang":"ko","glosses":["마음에 들다","흡족하다","좋아하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221750_1","lang":"ko","glosses":["기분 탓","착각"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221770_1","lang":"ko","glosses":["불쌍함","가엾음","딱함","안타까움"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221770_2","lang":"ko","glosses":["유감스러움","미안함","안타까움"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221810_1","lang":"ko","glosses":["제멋대로임","마음대로 함","이기적임","자기중심적임"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221810_2","lang":"ko","glosses":["제멋대로임","마음 내키는 대로 함","자유분방함"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221880_1","lang":"ko","glosses":["기압"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221880_2","lang":"ko","glosses":["기압"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221950_1","lang":"ko","glosses":["기온"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1221990_1","lang":"ko","glosses":["기개","기상","굳은 의지","배짱"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222010_1","lang":"ko","glosses":["마음 편함","속편함","홀가분함"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222010_2","lang":"ko","glosses":["마음 편함","속편함","낙천적임"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222020_1","lang":"ko","glosses":["걱정","근심","염려"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222030_1","lang":"ko","glosses":["기관","숨관"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222040_1","lang":"ko","glosses":["기관지"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222080_1","lang":"ko","glosses":["기구"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222110_1","lang":"ko","glosses":["마음이 가벼운","홀가분한","부담 없는","쾌활한"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222110_2","lang":"ko","glosses":["가벼운 마음","부담 없음","편안함"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222120_1","lang":"ko","glosses":["거리낌","어려워함","꺼림","삼감"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222140_1","lang":"ko","glosses":["배려","마음을 씀","걱정","근심","우려"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222170_1","lang":"ko","glosses":["기후"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222250_1","lang":"ko","glosses":["기질","성품","성질","마음씨"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222260_1","lang":"ko","glosses":["젠체하다","거드름을 피우다","재다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222260_2","lang":"ko","glosses":["~인 체하다","점잔을 빼다","거드름을 피우다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222270_1","lang":"ko","glosses":["기상"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222270_2","lang":"ko","glosses":["기질","성미","성질"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222280_1","lang":"ko","glosses":["기상학"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222290_1","lang":"ko","glosses":["기상대"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222300_1","lang":"ko","glosses":["일본 기상청"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222320_1","lang":"ko","glosses":["꿋꿋함","강인함","마음이 굳셈"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222360_1","lang":"ko","glosses":["속마음","성미","기질"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222370_1","lang":"ko","glosses":["기세","기운","열기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222380_1","lang":"ko","glosses":["기질","성질","성미","천성"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222390_1","lang":"ko","glosses":["기분 전환","기분 풀이","심심풀이"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222400_1","lang":"ko","glosses":["기절","혼절","정신을 잃음"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222410_1","lang":"ko","glosses":["통","인심"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222460_1","lang":"ko","glosses":["기체"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222490_1","lang":"ko","glosses":["기통","실린더"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222510_1","lang":"ko","glosses":["기미","낌새","기색"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222510_2","lang":"ko","glosses":["기세","동향"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222520_1","lang":"ko","glosses":["기백","기세","패기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222530_1","lang":"ko","glosses":["정신적 피로","마음고생","따분함"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222570_1","lang":"ko","glosses":["의욕","기세","열의","투지"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222590_1","lang":"ko","glosses":["기분"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222610_1","lang":"ko","glosses":["기분 전환"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222620_1","lang":"ko","glosses":["기포","거품","공기 방울"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222640_1","lang":"ko","glosses":["기분","느낌"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222640_2","lang":"ko","glosses":["경향","성향"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222690_1","lang":"ko","glosses":["기력","정신력","활력"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222700_1","lang":"ko","glosses":["증기 기관차","기차"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222700_2","lang":"ko","glosses":["기차"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1222700_3","lang":"ko","glosses":["기차","증기 열차","디젤 열차"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226320_1","lang":"ko","glosses":["희소식","길보"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226340_1","lang":"ko","glosses":["말을 더듬다","더듬거리다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226380_1","lang":"ko","glosses":["먹다","마시다","피우다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226380_2","lang":"ko","glosses":["입다","당하다","맛보다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226390_1","lang":"ko","glosses":["흡연"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226430_1","lang":"ko","glosses":["차를 마심","끽다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226430_2","lang":"ko","glosses":["찻집","다방","카페"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226440_1","lang":"ko","glosses":["찻집","카페","다방"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226440_2","lang":"ko","glosses":["다방","찻집"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226470_1","lang":"ko","glosses":["막히게 하다","막다","메우다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226480_1","lang":"ko","glosses":["가득 차다","메워지다","빽빽하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226480_2","lang":"ko","glosses":["막히다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226480_3","lang":"ko","glosses":["짧아지다","줄어들다","좁아지다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226480_4","lang":"ko","glosses":["막히다","궁하다","쪼들리다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226480_5","lang":"ko","glosses":["결말이 나다","매듭지어지다","결정되다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226480_6","lang":"ko","glosses":["촉음이 되다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226480_7","lang":"ko","glosses":["(타구가) 배트 안쪽에 맞다","먹히다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226490_1","lang":"ko","glosses":["(천의) 올이 조밀해지다","올이 배다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226490_2","lang":"ko","glosses":["외통수가 되다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226490_3","lang":"ko","glosses":["궁지에 몰리다","어찌할 바를 모르다","한계에 다다르다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_1","lang":"ko","glosses":["채우다","메우다","박아 넣다","막다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_2","lang":"ko","glosses":["좁히다","줄이다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_3","lang":"ko","glosses":["(비용 등을) 줄이다","절약하다","아끼다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_4","lang":"ko","glosses":["몰두하다","전념하다","애쓰다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_5","lang":"ko","glosses":["마무리하다","매듭짓다","결말을 내다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_6","lang":"ko","glosses":["근무하다","상주하다","대기하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_7","lang":"ko","glosses":["막다른 곳에 몰아넣다","외통을 부르다","궁지에 몰다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_8","lang":"ko","glosses":["(손가락 등을) 자르다","(문 등에 손가락을) 끼우다","찧다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_9","lang":"ko","glosses":["계속해서 …하다","쉬지 않고 …하다","줄곧 …하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_10","lang":"ko","glosses":["철저히 하다","끝까지 하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226510_11","lang":"ko","glosses":["다그치다","몰아세우다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226550_1","lang":"ko","glosses":["쑤셔 넣다","가득 채우다","밀어넣다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226570_1","lang":"ko","glosses":["힐문","추궁","따져 물음"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226610_1","lang":"ko","glosses":["오히려","도리어"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226620_1","lang":"ko","glosses":["각하","기각","거절"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226630_1","lang":"ko","glosses":["손님","방문객"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226630_2","lang":"ko","glosses":["손님","고객","관객","관광객","승객"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226650_1","lang":"ko","glosses":["객원","객원 멤버","명예 회원","준회원"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226690_1","lang":"ko","glosses":["객관","객체"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226700_1","lang":"ko","glosses":["객관적"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226710_1","lang":"ko","glosses":["응접실","객실","손님방"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226730_1","lang":"ko","glosses":["객실","손님방"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226730_2","lang":"ko","glosses":["객실","응접실"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226740_1","lang":"ko","glosses":["객차"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226760_1","lang":"ko","glosses":["객석","관객석","좌석"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226760_2","lang":"ko","glosses":["객석","관객석"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226770_1","lang":"ko","glosses":["여객선"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226830_1","lang":"ko","glosses":["각색"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226830_2","lang":"ko","glosses":["각색","윤색","과장"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226880_1","lang":"ko","glosses":["각본","시나리오","대본"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226910_1","lang":"ko","glosses":["억압하다","학대하다","박해하다","압제하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226930_1","lang":"ko","glosses":["학살"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226950_1","lang":"ko","glosses":["학대"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226960_1","lang":"ko","glosses":["반대","거꾸로","역"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226960_2","lang":"ko","glosses":["역"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226970_1","lang":"ko","glosses":["거꾸로","반대로","거꾸로 됨","뒤집힘"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1226990_1","lang":"ko","glosses":["거스르다","거역하다","반항하다","어기다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227010_1","lang":"ko","glosses":["역경","불우한 처지","불행한 상황"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227020_1","lang":"ko","glosses":["역효과","반대 효과"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227090_1","lang":"ko","glosses":["역습","반격"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227110_1","lang":"ko","glosses":["상기되다","어지럽다","현기증이 나다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227110_2","lang":"ko","glosses":["흥분하다","이성을 잃다","머리에 피가 오르다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227110_3","lang":"ko","glosses":["정신이 나가다","사로잡히다","열중하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227110_4","lang":"ko","glosses":["우쭐해지다","자만하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227140_1","lang":"ko","glosses":["역설"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227170_1","lang":"ko","glosses":["역전","뒤집힘","반전"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227170_2","lang":"ko","glosses":["역회전","반전"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227190_1","lang":"ko","glosses":["역풍","맞바람"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227220_1","lang":"ko","glosses":["되돌아감","역행","재발","되돌아오기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227230_1","lang":"ko","glosses":["역수입"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227230_2","lang":"ko","glosses":["역수입"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227250_1","lang":"ko","glosses":["물구나무서기"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227250_2","lang":"ko","glosses":["물구나무서기","거꾸로 섬"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227320_1","lang":"ko","glosses":["구릉","언덕"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227320_2","lang":"ko","glosses":["구릉","언덕"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227340_1","lang":"ko","glosses":["오래다","오래되다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227370_1","lang":"ko","glosses":["오랜만","오래간만"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227470_1","lang":"ko","glosses":["끝나다","멎다","그치다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227470_2","lang":"ko","glosses":["쉬다","휴식하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227490_1","lang":"ko","glosses":["편안해지다","안식하다","마음이 놓이다","쉬어지다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227500_1","lang":"ko","glosses":["휴식","쉼","쉬는 시간","중단"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227500_2","lang":"ko","glosses":["휴가","휴일","결석","결근","쉼","중단"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227500_3","lang":"ko","glosses":["잠"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227560_1","lang":"ko","glosses":["쉬다","결석하다","결근하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227560_2","lang":"ko","glosses":["쉬다","휴식하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227560_3","lang":"ko","glosses":["자다","잠자리에 들다","취침하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227560_4","lang":"ko","glosses":["(하던 일을) 쉬다","(영업 등을) 휴업하다","중단하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227570_1","lang":"ko","glosses":["쉬게 하다","쉬다","중단하다"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227610_1","lang":"ko","glosses":["휴가","휴무"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227660_1","lang":"ko","glosses":["휴학"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227670_1","lang":"ko","glosses":["휴간"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227700_1","lang":"ko","glosses":["휴업","폐점","영업 정지","휴교"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227720_1","lang":"ko","glosses":["휴식","쉼","휴게"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227730_1","lang":"ko","glosses":["휴게 시간","휴식 시간","쉬는 시간"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227750_1","lang":"ko","glosses":["휴게소","쉼터"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227760_1","lang":"ko","glosses":["휴교"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227780_1","lang":"ko","glosses":["휴강"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227800_1","lang":"ko","glosses":["휴지","중지","일시 중단","정지"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227830_1","lang":"ko","glosses":["휴장","휴관"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
+{"senseId":"yori:s_jmdict_1227830_2","lang":"ko","glosses":["결장"],"source":"ai-assisted","model":"gemini-3-flash-preview"}
