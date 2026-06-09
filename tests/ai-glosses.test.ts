@@ -5,10 +5,11 @@ import { candidateFromResponse, type AiSeed, type Candidate } from "../scripts/a
 
 test("imports AI gloss source rows into lookup responses", async () => {
   const dbPath = tempPath("ai-gloss-import.sqlite");
-  const glossPath = tempPath("ai-gloss-source.jsonl");
-  await Bun.$`rm -f ${dbPath} ${glossPath}`;
+  const zhGlossPath = tempPath("ai-gloss-source-zh-tw.jsonl");
+  const koGlossPath = tempPath("ai-gloss-source-ko.jsonl");
+  await Bun.$`rm -f ${dbPath} ${zhGlossPath} ${koGlossPath}`;
   await Bun.write(
-    glossPath,
+    zhGlossPath,
     JSON.stringify({
       senseId: "yori:s_jmdict_1358280_1",
       lang: "zh-tw",
@@ -17,17 +18,32 @@ test("imports AI gloss source rows into lookup responses", async () => {
       model: "gemini-3-flash-preview"
     }) + "\n"
   );
+  await Bun.write(
+    koGlossPath,
+    JSON.stringify({
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "ko",
+      glosses: ["먹다"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    }) + "\n"
+  );
 
-  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${glossPath}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${zhGlossPath} --ai-glosses ${koGlossPath}`;
 
   const lookupDb = openLookupDb(dbPath);
   const app = createApp(lookupDb);
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-tw");
-  const body = await res.json();
+  const zhRes = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-tw");
+  const zhBody = await zhRes.json();
+  const koRes = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=ko");
+  const koBody = await koRes.json();
 
-  expect(body.item.senses[0].glosses).toEqual([
+  expect(zhBody.item.senses[0].glosses).toEqual([
     { text: "吃", source: "ai-assisted", reviewStatus: "checked" },
     { text: "食用", source: "ai-assisted", reviewStatus: "checked" }
+  ]);
+  expect(koBody.item.senses[0].glosses).toEqual([
+    { text: "먹다", source: "ai-assisted", reviewStatus: "checked" }
   ]);
 
   lookupDb.close();

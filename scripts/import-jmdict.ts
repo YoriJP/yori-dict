@@ -6,7 +6,7 @@ import { parseApiLang, toApiLang } from "../src/lang";
 type Args = {
   input: string;
   out: string;
-  aiGlosses: string | null;
+  aiGlosses: string[];
 };
 
 type AiGlossSource = {
@@ -24,7 +24,7 @@ await Bun.$`rm -f ${args.out}-shm`;
 await Bun.$`rm -f ${args.out}-wal`;
 
 const source = (await Bun.file(args.input).json()) as JmdictFile;
-const aiGlosses = args.aiGlosses ? await readJsonl<AiGlossSource>(args.aiGlosses) : [];
+const aiGlosses = (await Promise.all(args.aiGlosses.map((path) => readJsonl<AiGlossSource>(path)))).flat();
 const db = new Database(args.out);
 
 createSchema(db);
@@ -43,17 +43,27 @@ function parseArgs(argv: string[]): Args {
   const out = readFlag(argv, "--out");
   if (!input || !out) {
     console.error(
-      "Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite [--ai-glosses sources/ai-glosses/zh-tw.jsonl]"
+      "Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite [--ai-glosses sources/ai-glosses/zh-tw.jsonl]..."
     );
     process.exit(1);
   }
-  return { input, out, aiGlosses: readFlag(argv, "--ai-glosses") };
+  return { input, out, aiGlosses: readFlags(argv, "--ai-glosses") };
 }
 
 function readFlag(argv: string[], flag: string): string | null {
   const index = argv.indexOf(flag);
   if (index === -1) return null;
   return argv[index + 1] ?? null;
+}
+
+function readFlags(argv: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === flag && argv[index + 1]) {
+      values.push(argv[index + 1]);
+    }
+  }
+  return values;
 }
 
 function createSchema(db: Database) {

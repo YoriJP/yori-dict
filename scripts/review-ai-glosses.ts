@@ -98,9 +98,11 @@ console.log(
     `Review ${args.outPath}.`,
     "Only flag suspicious AI-generated dictionary gloss rows.",
     "Compare aiGlosses against word, reading, pos, and englishGlosses.",
-    "Output JSONL only. One line per issue.",
+    "Output raw JSONL only. One line per issue.",
     "Shape: {\"senseId\":\"...\",\"severity\":\"low|medium|high\",\"reason\":\"...\",\"suggestedGlosses\":[\"...\"]}",
     "If a row looks fine, output nothing for that row.",
+    "If there are no issues, output an empty response.",
+    "Do not include Markdown, code fences, summaries, or prose.",
     "Do not edit source files."
   ].join("\n")
 );
