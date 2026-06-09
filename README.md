@@ -55,10 +55,19 @@ To prepare a release SQLite artifact:
 
 ```sh
 bun run download:jmdict
-bun run release:check
+bun run release:package
 ```
 
-Upload `data/yori.sqlite` as the release artifact. It is the direct-use SQLite database for the API and other consumers.
+This writes ignored release files under `releases/`:
+
+```txt
+releases/yori-dict-<dictDate>.sqlite
+releases/yori-dict-<dictDate>.sqlite.gz
+releases/yori-dict-<dictDate>.sqlite.gz.sha256
+releases/yori-dict-<dictDate>.json
+```
+
+Upload the `.sqlite.gz`, `.sha256`, and `.json` files as release artifacts. Users can decompress the SQLite file and use it directly.
 
 For Railway, use a build command that creates the DB before the server starts:
 

@@ -20,6 +20,7 @@
     "import:jmdict:full": "bun run scripts/import-jmdict.ts --input data/raw/jmdict-all.json --out data/yori.sqlite",
     "lookup:check": "bun run scripts/check-lookup.ts",
     "release:check": "bun run build:db && bun run ai:validate -- --input sources/ai-glosses/zh-tw.jsonl && bun run lookup:check && bun run typecheck && bun test",
+    "release:package": "bun run release:check && bun run scripts/package-release.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
