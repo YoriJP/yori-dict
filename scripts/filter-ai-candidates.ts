@@ -33,7 +33,7 @@ const candidates = await readJsonl<Candidate>(args.inputPath);
 const existingRows = args.append && (await Bun.file(args.outPath).exists()) ? await readJsonl<AiGlossSource>(args.outPath) : [];
 const db = new Database(args.dbPath, { readonly: true });
 const seen = new Set(existingRows.map((row) => sourceKey(row)));
-const accepted: AiGlossSource[] = [];
+const filtered: AiGlossSource[] = [];
 const rejected: RejectedCandidate[] = [];
 
 for (const candidate of candidates) {
@@ -50,7 +50,7 @@ for (const candidate of candidates) {
 
   const key = candidateKey(candidate);
   seen.add(key);
-  accepted.push({
+  filtered.push({
     senseId: candidate.senseId,
     lang: args.lang,
     glosses: normalizeGlosses(candidate.candidateGlosses),
@@ -65,14 +65,14 @@ await Bun.$`mkdir -p ${dirname(args.outPath)}`;
 await Bun.$`mkdir -p ${dirname(args.rejectedPath)}`;
 await Bun.write(
   args.outPath,
-  formatJsonl([...existingRows, ...accepted])
+  formatJsonl([...existingRows, ...filtered])
 );
 await Bun.write(
   args.rejectedPath,
   formatJsonl(rejected)
 );
 
-console.log(`${args.append ? "Appended" : "Accepted"} ${accepted.length} candidate(s) to ${args.outPath}`);
+console.log(`${args.append ? "Appended" : "Filtered"} ${filtered.length} candidate(s) to ${args.outPath}`);
 console.log(`Rejected ${rejected.length} candidate(s) to ${args.rejectedPath}`);
 
 function parseArgs(argv: string[]): Args {

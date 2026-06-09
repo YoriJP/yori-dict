@@ -68,7 +68,7 @@ export async function run(args: Args): Promise<void> {
     skippedExistingKo: 0,
     skippedDuplicateSense: 0,
     skippedUncommon: 0,
-    accepted: 0
+    matched: 0
   };
 
   for (const line of (await readKaikkiJsonl(args)).split("\n")) {
@@ -131,7 +131,7 @@ export async function run(args: Args): Promise<void> {
       sourcePos: pos,
       common: match.common === 1
     });
-    stats.accepted += 1;
+    stats.matched += 1;
   }
 
   db.close();

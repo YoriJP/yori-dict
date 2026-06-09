@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "ai:accept": "bun run scripts/check-ai-candidates.ts",
     "ai:batch": "bun run scripts/enrich-ai-batch.ts",
     "ai:coverage": "bun run scripts/report-ai-coverage.ts",
+    "ai:filter": "bun run scripts/filter-ai-candidates.ts",
     "ai:generate": "bun run scripts/enrich-ai.ts",
     "ai:review": "bun run scripts/review-ai-glosses.ts",
     "ai:retry-seeds": "bun run scripts/export-failed-ai-seeds.ts",

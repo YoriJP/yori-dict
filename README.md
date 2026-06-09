@@ -167,13 +167,13 @@ The submit command writes a manifest under `data/ai-batches/`. When the batch fi
 bun run ai:batch -- collect --manifest data/ai-batches/<run>/manifest.json
 ```
 
-Check candidates into a committed source file:
+Filter generated candidates into a committed source file:
 
 ```sh
-bun run ai:accept -- --input data/ai-candidates/zh-tw-candidates.jsonl --out sources/ai-glosses/zh-tw.jsonl --append
+bun run ai:filter -- --input data/ai-candidates/zh-tw-candidates.jsonl --out sources/ai-glosses/zh-tw.jsonl --append
 ```
 
-Rejected rows are written under `data/ai-candidates/` by default. After editing or agent review, rebuild SQLite with accepted glosses:
+Rejected rows are written under `data/ai-candidates/` by default. After editing or agent review, rebuild SQLite with filtered glosses:
 
 ```sh
 bun run ai:validate -- --input sources/ai-glosses/zh-tw.jsonl
@@ -195,7 +195,7 @@ bun run ai:retry-seeds -- --manifest data/ai-batches/<run>/manifest.json --out d
 bun run ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
 ```
 
-Generated files under `data/` are ignored. Accepted and reviewed gloss source files under `sources/` are committed.
+Generated files under `data/` are ignored. Filtered and reviewed gloss source files under `sources/` are committed.
 
 ## API
 

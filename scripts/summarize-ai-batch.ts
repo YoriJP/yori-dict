@@ -31,13 +31,13 @@ const sourceRows = await safeReadJsonl<AiGlossSource>(args.sourcePath);
 const candidateKeys = new Set(candidates.map((row) => row.senseId).filter((key): key is string => typeof key === "string"));
 const failureCount = failures.length;
 const rejectedCount = rejected.length;
-const acceptedThisRun = sourceRows.filter((row) => candidateKeys.has(row.senseId)).length;
-const unaccounted = Math.max(candidates.length - acceptedThisRun - rejectedCount, 0);
+const filteredThisRun = sourceRows.filter((row) => candidateKeys.has(row.senseId)).length;
+const unaccounted = Math.max(candidates.length - filteredThisRun - rejectedCount, 0);
 
 console.log(`manifest: ${args.manifestPath}`);
 console.log(`submitted: ${submitted}`);
 console.log(`candidates: ${candidates.length}`);
-console.log(`accepted: ${acceptedThisRun}`);
+console.log(`filtered: ${filteredThisRun}`);
 console.log(`rejected: ${rejectedCount}`);
 console.log(`failed: ${failureCount}`);
 if (unaccounted > 0) console.log(`unaccountedCandidates: ${unaccounted}`);

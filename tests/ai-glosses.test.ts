@@ -3,7 +3,7 @@ import { createApp } from "../src/app";
 import { openLookupDb } from "../src/db";
 import { candidateFromResponse, type AiSeed, type Candidate } from "../scripts/ai-common";
 
-test("imports accepted AI glosses into lookup responses", async () => {
+test("imports AI gloss source rows into lookup responses", async () => {
   const dbPath = tempPath("ai-gloss-import.sqlite");
   const glossPath = tempPath("ai-gloss-source.jsonl");
   await Bun.$`rm -f ${dbPath} ${glossPath}`;
@@ -65,12 +65,12 @@ test("hides senses without glosses for the requested language", async () => {
   lookupDb.close();
 });
 
-test("filters AI candidates into accepted and rejected JSONL", async () => {
+test("filters AI candidates into source and rejected JSONL", async () => {
   const dbPath = tempPath("ai-check.sqlite");
   const inputPath = tempPath("ai-candidates.jsonl");
-  const acceptedPath = tempPath("ai-accepted.jsonl");
+  const filteredPath = tempPath("ai-filtered.jsonl");
   const rejectedPath = tempPath("ai-rejected.jsonl");
-  await Bun.$`rm -f ${dbPath} ${inputPath} ${acceptedPath} ${rejectedPath}`;
+  await Bun.$`rm -f ${dbPath} ${inputPath} ${filteredPath} ${rejectedPath}`;
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
 
   const good: Candidate = {
@@ -122,12 +122,12 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
     inputPath,
     [good, bad, sentencePunctuation, generic].map((candidate) => JSON.stringify(candidate)).join("\n") + "\n"
   );
-  await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath}`;
+  await Bun.$`bun run scripts/filter-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${filteredPath} --rejected ${rejectedPath}`;
 
-  const accepted = await readJsonl(acceptedPath);
+  const filtered = await readJsonl(filteredPath);
   const rejected = (await readJsonl(rejectedPath)) as Array<{ reasons: string[] }>;
 
-  expect(accepted).toEqual([
+  expect(filtered).toEqual([
     {
       senseId: "yori:s_jmdict_1358280_1",
       lang: "zh-tw",
@@ -146,9 +146,9 @@ test("filters AI candidates into accepted and rejected JSONL", async () => {
 test("filters Korean AI candidates with Korean-specific validation", async () => {
   const dbPath = tempPath("ai-check-ko.sqlite");
   const inputPath = tempPath("ai-candidates-ko.jsonl");
-  const acceptedPath = tempPath("ai-accepted-ko.jsonl");
+  const filteredPath = tempPath("ai-filtered-ko.jsonl");
   const rejectedPath = tempPath("ai-rejected-ko.jsonl");
-  await Bun.$`rm -f ${dbPath} ${inputPath} ${acceptedPath} ${rejectedPath}`;
+  await Bun.$`rm -f ${dbPath} ${inputPath} ${filteredPath} ${rejectedPath}`;
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
 
   const good: Candidate = {
@@ -186,9 +186,9 @@ test("filters Korean AI candidates with Korean-specific validation", async () =>
   };
 
   await Bun.write(inputPath, [good, english, japanese].map((candidate) => JSON.stringify(candidate)).join("\n") + "\n");
-  await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath} --lang ko`;
+  await Bun.$`bun run scripts/filter-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${filteredPath} --rejected ${rejectedPath} --lang ko`;
 
-  expect(await readJsonl(acceptedPath)).toEqual([
+  expect(await readJsonl(filteredPath)).toEqual([
     {
       senseId: "yori:s_jmdict_1358280_1",
       lang: "ko",
@@ -206,12 +206,12 @@ test("filters Korean AI candidates with Korean-specific validation", async () =>
   expect(rejected[1].reasons).toContain("Korean gloss contains Japanese kana: よむ");
 }, 15000);
 
-test("normalizes ellipsis placeholders in accepted AI candidates", async () => {
+test("normalizes ellipsis placeholders in filtered AI candidates", async () => {
   const dbPath = tempPath("ai-check-ellipsis.sqlite");
   const inputPath = tempPath("ai-candidates-ellipsis.jsonl");
-  const acceptedPath = tempPath("ai-accepted-ellipsis.jsonl");
+  const filteredPath = tempPath("ai-filtered-ellipsis.jsonl");
   const rejectedPath = tempPath("ai-rejected-ellipsis.jsonl");
-  await Bun.$`rm -f ${dbPath} ${inputPath} ${acceptedPath} ${rejectedPath}`;
+  await Bun.$`rm -f ${dbPath} ${inputPath} ${filteredPath} ${rejectedPath}`;
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
 
   const candidate: Candidate = {
@@ -227,9 +227,9 @@ test("normalizes ellipsis placeholders in accepted AI candidates", async () => {
   };
 
   await Bun.write(inputPath, `${JSON.stringify(candidate)}\n`);
-  await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath}`;
+  await Bun.$`bun run scripts/filter-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${filteredPath} --rejected ${rejectedPath}`;
 
-  expect(await readJsonl(acceptedPath)).toEqual([
+  expect(await readJsonl(filteredPath)).toEqual([
     {
       senseId: "yori:s_jmdict_1358280_1",
       lang: "zh-tw",
@@ -241,16 +241,16 @@ test("normalizes ellipsis placeholders in accepted AI candidates", async () => {
   expect(await readJsonl(rejectedPath)).toEqual([]);
 });
 
-test("appends accepted AI candidates without duplicating existing source rows", async () => {
+test("appends filtered AI candidates without duplicating existing source rows", async () => {
   const dbPath = tempPath("ai-check-append.sqlite");
   const inputPath = tempPath("ai-candidates-append.jsonl");
-  const acceptedPath = tempPath("ai-accepted-append.jsonl");
+  const filteredPath = tempPath("ai-filtered-append.jsonl");
   const rejectedPath = tempPath("ai-rejected-append.jsonl");
-  await Bun.$`rm -f ${dbPath} ${inputPath} ${acceptedPath} ${rejectedPath}`;
+  await Bun.$`rm -f ${dbPath} ${inputPath} ${filteredPath} ${rejectedPath}`;
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`;
 
   await Bun.write(
-    acceptedPath,
+    filteredPath,
     JSON.stringify({
       senseId: "yori:s_jmdict_1206730_1",
       lang: "zh-tw",
@@ -284,20 +284,20 @@ test("appends accepted AI candidates without duplicating existing source rows", 
   };
 
   await Bun.write(inputPath, `${JSON.stringify(duplicateExisting)}\n${JSON.stringify(newCandidate)}\n`);
-  await Bun.$`bun run scripts/check-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${acceptedPath} --rejected ${rejectedPath} --append`;
+  await Bun.$`bun run scripts/filter-ai-candidates.ts --db ${dbPath} --input ${inputPath} --out ${filteredPath} --rejected ${rejectedPath} --append`;
 
-  const accepted = await readJsonl(acceptedPath);
+  const filtered = await readJsonl(filteredPath);
   const rejected = (await readJsonl(rejectedPath)) as Array<{ reasons: string[] }>;
 
-  expect(accepted).toHaveLength(2);
-  expect(accepted).toContainEqual({
+  expect(filtered).toHaveLength(2);
+  expect(filtered).toContainEqual({
     senseId: "yori:s_jmdict_1206730_1",
     lang: "zh-tw",
     glosses: ["學校"],
     source: "ai-assisted",
     model: "gemini-3-flash-preview"
   });
-  expect(accepted).toContainEqual({
+  expect(filtered).toContainEqual({
     senseId: "yori:s_jmdict_1358280_1",
     lang: "zh-tw",
     glosses: ["吃"],
@@ -310,7 +310,7 @@ test("appends accepted AI candidates without duplicating existing source rows", 
   );
 });
 
-test("validates accepted AI gloss source files", async () => {
+test("validates filtered AI gloss source files", async () => {
   const dbPath = tempPath("ai-validate.sqlite");
   const validPath = tempPath("ai-valid-source.jsonl");
   const invalidPath = tempPath("ai-invalid-source.jsonl");
@@ -575,7 +575,7 @@ test("summarizes an AI batch run", async () => {
 
   expect(result).toContain("submitted: 2");
   expect(result).toContain("candidates: 1");
-  expect(result).toContain("accepted: 1");
+  expect(result).toContain("filtered: 1");
   expect(result).toContain("rejected: 1");
   expect(result).toContain("failed: 1");
   expect(result).toContain("sourceTotal: 1");
