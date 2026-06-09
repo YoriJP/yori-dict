@@ -16,12 +16,37 @@ export function createApp(db: LookupDb) {
       meta: "/v1/meta",
       lookup: "/v1/lookup?q=食べました&lang=zh-tw",
       batchLookup: "/v1/lookup/batch",
-      openapi: "/doc",
+      docs: "/doc",
+      openapi: "/openapi.yaml",
       dataRelease: "https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01"
     })
   );
 
-  app.get("/doc", async (c) =>
+  app.get("/doc", (c) =>
+    c.html(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yori Dict API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+    <script>
+      window.onload = () => {
+        window.ui = SwaggerUIBundle({
+          url: "/openapi.yaml",
+          dom_id: "#swagger-ui"
+        });
+      };
+    </script>
+  </body>
+</html>`)
+  );
+
+  app.get("/openapi.yaml", async (c) =>
     c.body(await Bun.file("openapi.yaml").text(), 200, {
       "content-type": "application/yaml; charset=utf-8"
     })

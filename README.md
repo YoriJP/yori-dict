@@ -13,15 +13,22 @@ Public API:
 https://yori-dict-production.up.railway.app
 ```
 
-The API contract is documented in [openapi.yaml](openapi.yaml) and hosted at:
+API docs are hosted at:
 
 ```txt
 https://yori-dict-production.up.railway.app/doc
 ```
 
+The raw OpenAPI file is available at:
+
+```txt
+https://yori-dict-production.up.railway.app/openapi.yaml
+```
+
 ```sh
 curl 'https://yori-dict-production.up.railway.app/'
 curl 'https://yori-dict-production.up.railway.app/doc'
+curl 'https://yori-dict-production.up.railway.app/openapi.yaml'
 curl 'https://yori-dict-production.up.railway.app/health'
 curl 'https://yori-dict-production.up.railway.app/v1/meta'
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-tw'

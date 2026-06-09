@@ -34,15 +34,27 @@ paths:
                 meta: /v1/meta
                 lookup: "/v1/lookup?q=食べました&lang=zh-tw"
                 batchLookup: /v1/lookup/batch
-                openapi: /doc
+                docs: /doc
+                openapi: /openapi.yaml
                 dataRelease: https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01
   /doc:
     get:
-      summary: OpenAPI document
-      operationId: getOpenApiDocument
+      summary: API documentation
+      operationId: getApiDocs
       responses:
         "200":
-          description: OpenAPI YAML document for this API.
+          description: Swagger UI HTML page for this API.
+          content:
+            text/html:
+              schema:
+                type: string
+  /openapi.yaml:
+    get:
+      summary: OpenAPI YAML document
+      operationId: getOpenApiYaml
+      responses:
+        "200":
+          description: Raw OpenAPI YAML document for this API.
           content:
             application/yaml:
               schema:
@@ -162,7 +174,7 @@ components:
   schemas:
     IndexResponse:
       type: object
-      required: [name, description, health, meta, lookup, batchLookup, openapi, dataRelease]
+      required: [name, description, health, meta, lookup, batchLookup, docs, openapi, dataRelease]
       properties:
         name:
           type: string
@@ -176,6 +188,8 @@ components:
         lookup:
           type: string
         batchLookup:
+          type: string
+        docs:
           type: string
         openapi:
           type: string

@@ -27,12 +27,22 @@ test("returns API index links from the root route", async () => {
   expect(body.description).toBe("Open Japanese dictionary API and SQLite database with multilingual lookup support.");
   expect(body.health).toBe("/health");
   expect(body.meta).toBe("/v1/meta");
-  expect(body.openapi).toBe("/doc");
+  expect(body.docs).toBe("/doc");
+  expect(body.openapi).toBe("/openapi.yaml");
   expect(body.dataRelease).toBe("https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01");
 });
 
-test("serves OpenAPI YAML from the doc route", async () => {
+test("serves Swagger UI from the doc route", async () => {
   const res = await app.request("/doc");
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("text/html");
+  const body = await res.text();
+  expect(body).toContain("SwaggerUIBundle");
+  expect(body).toContain("/openapi.yaml");
+});
+
+test("serves OpenAPI YAML from the OpenAPI route", async () => {
+  const res = await app.request("/openapi.yaml");
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("application/yaml");
   expect(await res.text()).toStartWith("openapi: 3.1.0");
