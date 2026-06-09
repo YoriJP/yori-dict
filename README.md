@@ -7,14 +7,19 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 
 ## Public Use
 
-Use your Railway service URL as the API base URL. The API contract is documented
-in [openapi.yaml](openapi.yaml).
+Public API:
+
+```txt
+https://yori-dict-production.up.railway.app
+```
+
+The API contract is documented in [openapi.yaml](openapi.yaml).
 
 ```sh
-curl '<api-url>/health'
-curl '<api-url>/v1/meta'
-curl '<api-url>/v1/lookup?q=食べました&lang=zh-tw'
-curl -X POST '<api-url>/v1/lookup/batch' \
+curl 'https://yori-dict-production.up.railway.app/health'
+curl 'https://yori-dict-production.up.railway.app/v1/meta'
+curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-tw'
+curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
   -H 'content-type: application/json' \
   --data '{"queries":["食べました","学校","孑々"],"lang":"zh-tw"}'
 ```

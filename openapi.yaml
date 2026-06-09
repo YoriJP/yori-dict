@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Yori Dict
+  title: Yori Dict API
   version: 1.0.0
   description: Japanese dictionary lookup API built from JMdict-simplified with reviewed AI-assisted zh-TW glosses.
   license:
@@ -11,7 +11,7 @@ servers:
     description: Railway deployment
     variables:
       host:
-        default: your-service.up.railway.app
+        default: yori-dict-production.up.railway.app
         description: Replace with the Railway public domain.
   - url: http://localhost:3000
     description: Local development server
