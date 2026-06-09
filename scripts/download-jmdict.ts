@@ -11,12 +11,14 @@ type Release = {
 
 type Args = {
   outDir: string;
+  tag: string;
 };
 
+const defaultReleaseTag = "3.6.2+20260601171836";
 const args = parseArgs(Bun.argv.slice(2));
 await Bun.$`mkdir -p ${args.outDir}`;
 
-const release = await latestRelease();
+const release = await releaseByTag(args.tag);
 const asset = release.assets.find((item) => /^jmdict-all-.+\.json\.tgz$/.test(item.name));
 
 if (!asset) {
@@ -43,7 +45,8 @@ console.log(`Wrote ${jsonPath}`);
 
 function parseArgs(argv: string[]): Args {
   const outDir = readFlag(argv, "--out-dir") ?? "data/raw";
-  return { outDir };
+  const tag = readFlag(argv, "--tag") ?? process.env.JMDICT_SIMPLIFIED_TAG ?? defaultReleaseTag;
+  return { outDir, tag };
 }
 
 function readFlag(argv: string[], flag: string): string | null {
@@ -52,8 +55,8 @@ function readFlag(argv: string[], flag: string): string | null {
   return argv[index + 1] ?? null;
 }
 
-async function latestRelease(): Promise<Release> {
-  const response = await fetch("https://api.github.com/repos/scriptin/jmdict-simplified/releases/latest", {
+async function releaseByTag(tag: string): Promise<Release> {
+  const response = await fetch(`https://api.github.com/repos/scriptin/jmdict-simplified/releases/tags/${tag}`, {
     headers: {
       accept: "application/vnd.github+json",
       "user-agent": "yori-dict-api"

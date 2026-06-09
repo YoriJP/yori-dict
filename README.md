@@ -39,6 +39,11 @@ bun run build:db
 bun run lookup:check
 ```
 
+`download:jmdict` defaults to the JMdict-simplified release that the reviewed
+AI gloss source was built against: `3.6.2+20260601171836`. To intentionally
+refresh to a different upstream release, pass `--tag` or set
+`JMDICT_SIMPLIFIED_TAG`, then revalidate/review affected AI gloss rows.
+
 This creates:
 
 ```txt
