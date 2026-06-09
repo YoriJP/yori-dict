@@ -16,6 +16,26 @@ servers:
   - url: http://localhost:3000
     description: Local development server
 paths:
+  /:
+    get:
+      summary: API index
+      operationId: getIndex
+      responses:
+        "200":
+          description: Basic service links and public artifacts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexResponse"
+              example:
+                name: Yori Dict
+                description: Open Japanese dictionary API and SQLite database with multilingual lookup support.
+                health: /health
+                meta: /v1/meta
+                lookup: "/v1/lookup?q=食べました&lang=zh-tw"
+                batchLookup: /v1/lookup/batch
+                openapi: https://raw.githubusercontent.com/anilahsu/yori-dict/main/openapi.yaml
+                dataRelease: https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01
   /health:
     get:
       summary: Health check
@@ -128,6 +148,29 @@ paths:
                     error: Batch size must be 100 or less
 components:
   schemas:
+    IndexResponse:
+      type: object
+      required: [name, description, health, meta, lookup, batchLookup, openapi, dataRelease]
+      properties:
+        name:
+          type: string
+          const: Yori Dict
+        description:
+          type: string
+        health:
+          type: string
+        meta:
+          type: string
+        lookup:
+          type: string
+        batchLookup:
+          type: string
+        openapi:
+          type: string
+          format: uri
+        dataRelease:
+          type: string
+          format: uri
     ApiLang:
       type: string
       enum: [en, de, zh-tw, zh-cn, ko]

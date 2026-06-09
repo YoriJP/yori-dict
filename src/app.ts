@@ -8,6 +8,19 @@ const maxBatchSize = 100;
 export function createApp(db: LookupDb) {
   const app = new Hono();
 
+  app.get("/", (c) =>
+    c.json({
+      name: "Yori Dict",
+      description: "Open Japanese dictionary API and SQLite database with multilingual lookup support.",
+      health: "/health",
+      meta: "/v1/meta",
+      lookup: "/v1/lookup?q=食べました&lang=zh-tw",
+      batchLookup: "/v1/lookup/batch",
+      openapi: "https://raw.githubusercontent.com/anilahsu/yori-dict/main/openapi.yaml",
+      dataRelease: "https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01"
+    })
+  );
+
   app.get("/health", (c) => c.json({ ok: true }));
 
   app.get("/v1/meta", (c) => c.json(db.meta()));

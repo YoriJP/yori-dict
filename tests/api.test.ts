@@ -19,6 +19,18 @@ afterAll(() => {
   new Database(testDbPath).close();
 });
 
+test("returns API index links from the root route", async () => {
+  const res = await app.request("/");
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.name).toBe("Yori Dict");
+  expect(body.description).toBe("Open Japanese dictionary API and SQLite database with multilingual lookup support.");
+  expect(body.health).toBe("/health");
+  expect(body.meta).toBe("/v1/meta");
+  expect(body.openapi).toBe("https://raw.githubusercontent.com/anilahsu/yori-dict/main/openapi.yaml");
+  expect(body.dataRelease).toBe("https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01");
+});
+
 test("returns metadata", async () => {
   const res = await app.request("/v1/meta");
   expect(res.status).toBe(200);

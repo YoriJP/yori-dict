@@ -1,6 +1,6 @@
 # Yori Dict
 
-Small Japanese dictionary API built from JMdict-simplified.
+Open Japanese dictionary API and SQLite database with multilingual lookup support.
 
 Code is licensed under MIT. Dictionary data and release SQLite artifacts are
 licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
@@ -13,9 +13,15 @@ Public API:
 https://yori-dict-production.up.railway.app
 ```
 
-The API contract is documented in [openapi.yaml](openapi.yaml).
+The API contract is documented in [openapi.yaml](openapi.yaml). You can view the
+raw OpenAPI file at:
+
+```txt
+https://raw.githubusercontent.com/anilahsu/yori-dict/main/openapi.yaml
+```
 
 ```sh
+curl 'https://yori-dict-production.up.railway.app/'
 curl 'https://yori-dict-production.up.railway.app/health'
 curl 'https://yori-dict-production.up.railway.app/v1/meta'
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-tw'
