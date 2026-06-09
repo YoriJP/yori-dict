@@ -37,8 +37,8 @@ test("serves Scalar API reference from the doc route", async () => {
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("text/html");
   const body = await res.text();
-  expect(body).toContain("@scalar/api-reference");
-  expect(body).toContain("Scalar.createApiReference");
+  expect(body).toContain("Yori Dict API Docs");
+  expect(body).toContain("scalar");
   expect(body).toContain("/openapi.yaml");
 });
 

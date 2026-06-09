@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { Scalar } from "@scalar/hono-api-reference";
 import { parseApiLang } from "./lang";
 import type { LookupDb } from "./db";
 import type { BatchLookupResponse } from "./types";
@@ -22,25 +23,7 @@ export function createApp(db: LookupDb) {
     })
   );
 
-  app.get("/doc", (c) =>
-    c.html(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yori Dict API Docs</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
-    <script>
-      Scalar.createApiReference("#app", {
-        url: "/openapi.yaml"
-      });
-    </script>
-  </body>
-</html>`)
-  );
+  app.get("/doc", Scalar({ url: "/openapi.yaml", pageTitle: "Yori Dict API Docs" }));
 
   app.get("/openapi.yaml", async (c) =>
     c.body(await Bun.file("openapi.yaml").text(), 200, {
