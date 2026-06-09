@@ -34,7 +34,7 @@ test("looks up an exact Japanese headword", async () => {
   expect(body.item.id).toBe("yori:e_jmdict_1358280");
   expect(body.item.word).toBe("食べる");
   expect(body.item.reading).toBe("たべる");
-  expect(body.item.senses[0].glosses).toEqual([]);
+  expect(body.item.senses).toEqual([]);
 });
 
 test("defaults lookup glosses to English", async () => {

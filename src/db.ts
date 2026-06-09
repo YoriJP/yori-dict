@@ -221,16 +221,23 @@ function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[]
        order by position`
     )
     .all(entryId)
-    .map((row) => ({
-      id: row.id,
-      position: row.position,
-      appliesTo: {
-        kanji: JSON.parse(row.applies_to_kanji) as string[],
-        kana: JSON.parse(row.applies_to_kana) as string[]
-      },
-      partOfSpeech: JSON.parse(row.part_of_speech) as string[],
-      glosses: readGlosses(db, row.id, lang)
-    }));
+    .flatMap((row) => {
+      const glosses = readGlosses(db, row.id, lang);
+      if (glosses.length === 0) return [];
+
+      return [
+        {
+          id: row.id,
+          position: row.position,
+          appliesTo: {
+            kanji: JSON.parse(row.applies_to_kanji) as string[],
+            kana: JSON.parse(row.applies_to_kana) as string[]
+          },
+          partOfSpeech: JSON.parse(row.part_of_speech) as string[],
+          glosses
+        }
+      ];
+    });
 }
 
 function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {

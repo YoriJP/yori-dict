@@ -33,6 +33,38 @@ test("imports accepted AI glosses into lookup responses", async () => {
   lookupDb.close();
 });
 
+test("hides senses without glosses for the requested language", async () => {
+  const dbPath = tempPath("ai-gloss-filter.sqlite");
+  const glossPath = tempPath("ai-gloss-filter-source.jsonl");
+  await Bun.$`rm -f ${dbPath} ${glossPath}`;
+  await Bun.write(
+    glossPath,
+    JSON.stringify({
+      senseId: "yori:s_jmdict_1000300_1",
+      lang: "zh-tw",
+      glosses: ["對待", "處理"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    }) + "\n"
+  );
+
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${glossPath}`;
+
+  const lookupDb = openLookupDb(dbPath);
+  const app = createApp(lookupDb);
+  const res = await app.request("/v1/lookup?q=%E9%81%87%E3%81%86&lang=zh-tw");
+  const body = await res.json();
+
+  expect(body.item.senses).toHaveLength(1);
+  expect(body.item.senses[0].id).toBe("yori:s_jmdict_1000300_1");
+  expect(body.item.senses[0].glosses).toEqual([
+    { text: "對待", source: "ai-assisted", reviewStatus: "checked" },
+    { text: "處理", source: "ai-assisted", reviewStatus: "checked" }
+  ]);
+
+  lookupDb.close();
+});
+
 test("filters AI candidates into accepted and rejected JSONL", async () => {
   const dbPath = tempPath("ai-check.sqlite");
   const inputPath = tempPath("ai-candidates.jsonl");

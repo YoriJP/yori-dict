@@ -16,7 +16,7 @@ Small Japanese dictionary API built from JMdict-simplified.
 ```sh
 bun install
 bun run download:jmdict
-bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
+bun run build:db
 bun run dev
 ```
 
@@ -32,7 +32,7 @@ The repo keeps the small fixture in git for tests. Full JMdict-simplified data i
 
 ```sh
 bun run download:jmdict
-bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl
+bun run build:db
 bun run lookup:check
 ```
 
@@ -50,6 +50,31 @@ The reviewed zh-TW AI gloss source is committed at:
 ```txt
 sources/ai-glosses/zh-tw.jsonl
 ```
+
+To prepare a release SQLite artifact:
+
+```sh
+bun run download:jmdict
+bun run release:check
+```
+
+Upload `data/yori.sqlite` as the release artifact. It is the direct-use SQLite database for the API and other consumers.
+
+For Railway, use a build command that creates the DB before the server starts:
+
+```sh
+bun install
+bun run download:jmdict
+bun run build:db
+```
+
+Set the start command to:
+
+```sh
+bun run dev
+```
+
+The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`.
 
 ## AI Seeds
 
@@ -117,6 +142,7 @@ POST /v1/lookup/batch
 ```
 
 `lang` defaults to `en`. Lookup returns glosses only for the requested language; it does not fall back to English when that language has no glosses.
+Senses with no glosses in the requested language are omitted from the response.
 
 Batch request:
 
