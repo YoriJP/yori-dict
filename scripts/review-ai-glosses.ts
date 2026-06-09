@@ -9,6 +9,7 @@ type Args = {
   dbPath: string;
   sourcePath: string;
   outPath: string;
+  issuesPath: string;
   lang: ApiLang;
   limit: number;
   offset: number;
@@ -91,21 +92,26 @@ if (args.nonCommonOnly) console.log(`Skipped ${skippedCommon} common AI row(s)`)
 if (skippedOffset > 0) console.log(`Skipped ${skippedOffset} eligible AI row(s) by offset`);
 if (skippedLang > 0) console.log(`Skipped ${skippedLang} row(s) for another language`);
 if (skippedMissingContext > 0) console.log(`Skipped ${skippedMissingContext} row(s) missing DB context`);
+
+const prompt = [
+  `Review ${args.outPath}.`,
+  "Only flag suspicious AI-generated dictionary gloss rows.",
+  "Compare aiGlosses against word, reading, pos, and englishGlosses.",
+  "Output raw JSONL only. One line per issue.",
+  "Shape: {\"senseId\":\"...\",\"severity\":\"low|medium|high\",\"reason\":\"...\",\"suggestedGlosses\":[\"...\"]}",
+  "If a row looks fine, output nothing for that row.",
+  "If there are no issues, output an empty response.",
+  "If the response is not empty, its first non-whitespace character must be {.",
+  "Do not include Markdown, code fences, summaries, or prose.",
+  "Do not edit source files."
+].join("\n");
+
 console.log("");
 console.log("Claude review prompt:");
-console.log(
-  [
-    `Review ${args.outPath}.`,
-    "Only flag suspicious AI-generated dictionary gloss rows.",
-    "Compare aiGlosses against word, reading, pos, and englishGlosses.",
-    "Output raw JSONL only. One line per issue.",
-    "Shape: {\"senseId\":\"...\",\"severity\":\"low|medium|high\",\"reason\":\"...\",\"suggestedGlosses\":[\"...\"]}",
-    "If a row looks fine, output nothing for that row.",
-    "If there are no issues, output an empty response.",
-    "Do not include Markdown, code fences, summaries, or prose.",
-    "Do not edit source files."
-  ].join("\n")
-);
+console.log(prompt);
+console.log("");
+console.log("Claude CLI command:");
+console.log(`claude -p "$(cat <<'EOF'\n${prompt}\nEOF\n)" --output-format text --allowedTools Read > ${args.issuesPath}`);
 
 function parseArgs(argv: string[]): Args {
   const lang = parseApiLang(readFlag(argv, "--lang") ?? "zh-tw");
@@ -122,6 +128,7 @@ function parseArgs(argv: string[]): Args {
     dbPath: readFlag(argv, "--db") ?? "data/yori.sqlite",
     sourcePath: readFlag(argv, "--source") ?? `sources/ai-glosses/${lang}.jsonl`,
     outPath: readFlag(argv, "--out") ?? `data/ai-review/${lang}/review-bundle.jsonl`,
+    issuesPath: readFlag(argv, "--issues") ?? `data/ai-review/${lang}/issues.jsonl`,
     lang,
     limit: parsePositiveInt(readFlag(argv, "--limit") ?? "200", "--limit"),
     offset: parseNonNegativeInt(readFlag(argv, "--offset") ?? "0", "--offset"),
