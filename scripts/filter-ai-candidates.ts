@@ -31,6 +31,8 @@ type RejectedCandidate = {
 const args = parseArgs(Bun.argv.slice(2));
 const candidates = await readJsonl<Candidate>(args.inputPath);
 const existingRows = args.append && (await Bun.file(args.outPath).exists()) ? await readJsonl<AiGlossSource>(args.outPath) : [];
+const existingRejected =
+  args.append && (await Bun.file(args.rejectedPath).exists()) ? await readJsonl<RejectedCandidate>(args.rejectedPath) : [];
 const db = new Database(args.dbPath, { readonly: true });
 const seen = new Set(existingRows.map((row) => sourceKey(row)));
 const filtered: AiGlossSource[] = [];
@@ -69,7 +71,7 @@ await Bun.write(
 );
 await Bun.write(
   args.rejectedPath,
-  formatJsonl(rejected)
+  formatJsonl([...existingRejected, ...rejected])
 );
 
 console.log(`${args.append ? "Appended" : "Filtered"} ${filtered.length} candidate(s) to ${args.outPath}`);

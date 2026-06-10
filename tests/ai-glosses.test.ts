@@ -275,6 +275,24 @@ test("appends filtered AI candidates without duplicating existing source rows", 
       model: "gemini-3-flash-preview"
     }) + "\n"
   );
+  await Bun.write(
+    rejectedPath,
+    JSON.stringify({
+      senseId: "yori:s_jmdict_1456360_1",
+      reasons: ["Korean gloss contains Japanese kana: よむ"],
+      candidate: {
+        entryId: "yori:e_jmdict_1456360",
+        senseId: "yori:s_jmdict_1456360_1",
+        word: "読む",
+        reading: "よむ",
+        targetLang: "ko",
+        sourceGlosses: ["to read"],
+        candidateGlosses: ["よむ"],
+        model: "gemini-3-flash-preview",
+        thinkingLevel: "low"
+      }
+    }) + "\n"
+  );
 
   const duplicateExisting: Candidate = {
     entryId: "yori:e_jmdict_1206730",
@@ -320,8 +338,9 @@ test("appends filtered AI candidates without duplicating existing source rows", 
     source: "ai-assisted",
     model: "gemini-3-flash-preview"
   });
-  expect(rejected).toHaveLength(1);
-  expect(rejected[0].reasons).toContain(
+  expect(rejected).toHaveLength(2);
+  expect(rejected[0].reasons).toContain("Korean gloss contains Japanese kana: よむ");
+  expect(rejected[1].reasons).toContain(
     "duplicate candidate or existing source row for yori:s_jmdict_1206730_1:zh-tw"
   );
 });
