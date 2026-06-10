@@ -14,7 +14,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 
 - Public API: <https://yori-dict-production.up.railway.app>
 - API docs: <https://yori-dict-production.up.railway.app/doc>
-- OpenAPI YAML: <https://yori-dict-production.up.railway.app/openapi.yaml>
+- Raw OpenAPI spec: <https://yori-dict-production.up.railway.app/openapi.yaml>
 - SQLite data release: <https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-10>
 
 ## What Yori Dict Supports
@@ -26,12 +26,17 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Reviewed AI-assisted Traditional Chinese and Korean glosses.
 - Requested-language responses: no automatic English fallback.
 
-Current limitations:
+Current coverage and limitations:
 
-- Korean coverage is partial. The `data-2026-06-10` release covers 4,595 Korean
-  senses, or 2.45% of common JMdict senses.
-- Senses without glosses in the requested language are omitted from lookup
-  responses.
+- Traditional Chinese coverage is partial but broad for common lookup. The
+  `data-2026-06-10` release covers 77,863 zh-TW senses, including 19.60% of
+  common JMdict senses.
+- Korean coverage is earlier. The same release covers 4,595 Korean senses,
+  including 2.45% of common JMdict senses.
+- Lookup responses omit senses that have no glosses in the requested language.
+  For example, if an entry has four JMdict senses but only two Korean senses
+  have Korean glosses, `lang=ko` returns those two senses instead of returning
+  empty gloss lists for the other two.
 - Deinflection is word-level lookup help, not full sentence parsing.
 
 ## Quick API Use
@@ -85,6 +90,8 @@ The `data-2026-06-10` release contains:
 | Senses | 675,094 |
 | Glosses | 969,503 |
 | AI-assisted glosses | 195,497 |
+| Traditional Chinese senses | 77,863 |
+| Traditional Chinese glosses | 184,738 |
 | Korean senses | 4,595 |
 | Korean glosses | 10,759 |
 
