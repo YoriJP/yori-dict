@@ -9,6 +9,7 @@ import { pipeline } from "node:stream/promises";
 type Args = {
   dbPath: string;
   outDir: string;
+  version: string | null;
 };
 
 type CountRow = {
@@ -25,7 +26,8 @@ if (!(await dbFile.exists())) {
 await mkdir(args.outDir, { recursive: true });
 
 const metadata = readDbMetadata(args.dbPath);
-const baseName = `yori-dict-${metadata.dictionaryVersion ?? "unknown"}`;
+const artifactVersion = args.version ?? metadata.dictionaryVersion ?? "unknown";
+const baseName = `yori-dict-${artifactVersion}`;
 const sqliteArtifact = join(args.outDir, `${baseName}.sqlite`);
 const gzipArtifact = `${sqliteArtifact}.gz`;
 const checksumPath = `${gzipArtifact}.sha256`;
@@ -53,6 +55,7 @@ await writeFile(
       sha256,
       sqliteBytes: sqliteStats.size,
       gzipBytes: gzipStats.size,
+      artifactVersion,
       dictionaryVersion: metadata.dictionaryVersion,
       jmdictSimplifiedVersion: metadata.jmdictSimplifiedVersion,
       counts: metadata.counts,
@@ -66,6 +69,11 @@ await writeFile(
           name: "Yori AI-assisted zh-TW glosses",
           license: "CC-BY-SA-4.0",
           path: "sources/ai-glosses/zh-tw.jsonl"
+        },
+        {
+          name: "Yori AI-assisted Korean glosses",
+          license: "CC-BY-SA-4.0",
+          path: "sources/ai-glosses/ko.jsonl"
         }
       ]
     },
@@ -82,7 +90,8 @@ console.log(`Wrote ${manifestPath}`);
 function parseArgs(argv: string[]): Args {
   return {
     dbPath: readFlag(argv, "--db") ?? "data/yori.sqlite",
-    outDir: readFlag(argv, "--out-dir") ?? "releases"
+    outDir: readFlag(argv, "--out-dir") ?? "releases",
+    version: readFlag(argv, "--version")
   };
 }
 

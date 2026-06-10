@@ -38,16 +38,16 @@ curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
 SQLite data release:
 
 ```txt
-https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01
+https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-10
 ```
 
 Download and verify the SQLite database:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-01/yori-dict-2026-06-01.sqlite.gz
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-01/yori-dict-2026-06-01.sqlite.gz.sha256
-shasum -a 256 -c yori-dict-2026-06-01.sqlite.gz.sha256
-gunzip yori-dict-2026-06-01.sqlite.gz
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-10/yori-dict-2026-06-10.sqlite.gz
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-10/yori-dict-2026-06-10.sqlite.gz.sha256
+shasum -a 256 -c yori-dict-2026-06-10.sqlite.gz.sha256
+gunzip yori-dict-2026-06-10.sqlite.gz
 ```
 
 ## v0 scope
@@ -109,7 +109,8 @@ To prepare a release SQLite artifact:
 
 ```sh
 bun run download:jmdict
-bun run release:package
+bun run release:check
+bun run scripts/package-release.ts --version 2026-06-10
 ```
 
 This writes ignored release files under `releases/`:
