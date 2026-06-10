@@ -82,6 +82,11 @@ export function openLookupDb(path: string): LookupDb {
             name: "Yori AI-assisted zh-TW glosses",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/zh-tw.jsonl"
+          },
+          {
+            name: "Yori AI-assisted Korean glosses",
+            license: "CC-BY-SA-4.0",
+            url: "sources/ai-glosses/ko.jsonl"
           }
         ]
       };

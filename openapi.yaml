@@ -35,7 +35,7 @@ paths:
                 batchLookup: /v1/lookup/batch
                 docs: /doc
                 openapi: /openapi.yaml
-                dataRelease: https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-01
+                dataRelease: https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-10
   /doc:
     get:
       summary: API documentation
@@ -99,6 +99,9 @@ paths:
                   - name: Yori AI-assisted zh-TW glosses
                     license: CC-BY-SA-4.0
                     url: sources/ai-glosses/zh-tw.jsonl
+                  - name: Yori AI-assisted Korean glosses
+                    license: CC-BY-SA-4.0
+                    url: sources/ai-glosses/ko.jsonl
   /v1/lookup:
     get:
       summary: Look up one Japanese term
