@@ -23,7 +23,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Single lookup and batch lookup API endpoints.
 - SQLite data release for direct local use.
 - English and German glosses from JMdict.
-- Reviewed AI-assisted Traditional Chinese and Korean glosses.
+- Reviewed AI-assisted Traditional Chinese, Simplified Chinese, and Korean glosses.
 - Requested-language responses: no automatic English fallback.
 
 Current coverage and limitations:
@@ -31,6 +31,9 @@ Current coverage and limitations:
 - Traditional Chinese coverage is partial but broad for common lookup. The
   `data-2026-06-11` release covers 77,863 zh-TW senses, including 19.60% of
   common JMdict senses.
+- Simplified Chinese is derived from the reviewed Traditional Chinese source
+  with OpenCC phrase conversion. The current source build covers 77,863 zh-CN
+  senses, including 19.60% of common JMdict senses.
 - Korean coverage is expanding. The same release covers 19,072 Korean senses,
   including 10.18% of common JMdict senses.
 - Lookup responses omit senses that have no glosses in the requested language.
@@ -46,6 +49,7 @@ curl 'https://yori-dict-production.up.railway.app/'
 curl 'https://yori-dict-production.up.railway.app/health'
 curl 'https://yori-dict-production.up.railway.app/v1/meta'
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-tw'
+curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-cn'
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=教室&lang=ko'
 ```
 
@@ -146,6 +150,7 @@ Reviewed AI gloss sources are committed under:
 
 ```txt
 sources/ai-glosses/zh-tw.jsonl
+sources/ai-glosses/zh-cn.jsonl
 sources/ai-glosses/ko.jsonl
 ```
 
@@ -245,6 +250,16 @@ The raw AI result is not imported directly. It goes through this pipeline:
 ```txt
 JMdict sense -> AI candidate -> mechanical filter -> CLI/agent review -> committed source -> SQLite build
 ```
+
+Simplified Chinese is different: it is generated from the reviewed
+Traditional Chinese source with OpenCC phrase conversion:
+
+```sh
+bun run zh-cn:convert
+```
+
+The generated `sources/ai-glosses/zh-cn.jsonl` file is validated and committed
+as its own source file.
 
 `ai:filter` performs deterministic checks before a row can enter `sources/`:
 

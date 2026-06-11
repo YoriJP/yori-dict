@@ -24,16 +24,22 @@ Source:
 
 ## AI-Assisted Glosses
 
-The current reviewed Traditional Chinese gloss source is committed at:
+The current reviewed AI-assisted gloss sources are committed at:
 
 ```txt
 sources/ai-glosses/zh-tw.jsonl
+sources/ai-glosses/zh-cn.jsonl
+sources/ai-glosses/ko.jsonl
 ```
 
 AI-assisted glosses are generated from JMdict sense data and reviewed inside
 this project before they are committed under `sources/ai-glosses/`. They are
 distributed under CC BY-SA 4.0 for compatibility with the JMdict-derived data
 they extend.
+
+Simplified Chinese glosses are derived from the reviewed Traditional Chinese
+source with OpenCC phrase conversion, then validated as a separate `zh-cn`
+source file.
 
 ## Release SQLite Database
 
@@ -44,8 +50,8 @@ bun run release:package
 ```
 
 The release SQLite database contains JMdict-derived dictionary data and
-project-reviewed AI-assisted zh-TW glosses. The database artifact is
-distributed under CC BY-SA 4.0.
+project-reviewed AI-assisted glosses. The database artifact is distributed
+under CC BY-SA 4.0.
 
 The release package includes:
 
@@ -65,9 +71,9 @@ This product uses JMdict dictionary data from the Electronic Dictionary
 Research and Development Group, distributed under CC BY-SA 4.0.
 ```
 
-If the AI-assisted zh-TW glosses are used, also acknowledge this project:
+If the AI-assisted glosses are used, also acknowledge this project:
 
 ```txt
-Traditional Chinese glosses include AI-assisted, project-reviewed additions
-from Yori Dict, distributed under CC BY-SA 4.0.
+Some glosses include AI-assisted, project-reviewed additions from Yori Dict,
+distributed under CC BY-SA 4.0.
 ```
