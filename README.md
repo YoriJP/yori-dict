@@ -15,7 +15,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Public API: <https://yori-dict-production.up.railway.app>
 - API docs: <https://yori-dict-production.up.railway.app/doc>
 - Raw OpenAPI spec: <https://yori-dict-production.up.railway.app/openapi.yaml>
-- SQLite data release: <https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-10>
+- SQLite data release: <https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-11>
 
 ## What Yori Dict Supports
 
@@ -29,10 +29,10 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 Current coverage and limitations:
 
 - Traditional Chinese coverage is partial but broad for common lookup. The
-  `data-2026-06-10` release covers 77,863 zh-TW senses, including 19.60% of
+  `data-2026-06-11` release covers 77,863 zh-TW senses, including 19.60% of
   common JMdict senses.
-- Korean coverage is earlier. The same release covers 4,595 Korean senses,
-  including 2.45% of common JMdict senses.
+- Korean coverage is expanding. The same release covers 19,072 Korean senses,
+  including 10.18% of common JMdict senses.
 - Lookup responses omit senses that have no glosses in the requested language.
   For example, if an entry has four JMdict senses but only two Korean senses
   have Korean glosses, `lang=ko` returns those two senses instead of returning
@@ -70,30 +70,30 @@ en, de, zh-tw, zh-cn, ko
 Download and verify the current SQLite database:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-10/yori-dict-2026-06-10.sqlite.gz
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-10/yori-dict-2026-06-10.sqlite.gz.sha256
-shasum -a 256 -c yori-dict-2026-06-10.sqlite.gz.sha256
-gunzip yori-dict-2026-06-10.sqlite.gz
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-11/yori-dict-2026-06-11.sqlite.gz
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-11/yori-dict-2026-06-11.sqlite.gz.sha256
+shasum -a 256 -c yori-dict-2026-06-11.sqlite.gz.sha256
+gunzip yori-dict-2026-06-11.sqlite.gz
 ```
 
 Release manifest:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-10/yori-dict-2026-06-10.json
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-11/yori-dict-2026-06-11.json
 ```
 
-The `data-2026-06-10` release contains:
+The `data-2026-06-11` release contains:
 
 | Item | Count |
 | --- | ---: |
 | Entries | 217,294 |
 | Senses | 675,094 |
-| Glosses | 969,503 |
-| AI-assisted glosses | 195,497 |
+| Glosses | 1,002,984 |
+| AI-assisted glosses | 228,978 |
 | Traditional Chinese senses | 77,863 |
 | Traditional Chinese glosses | 184,738 |
-| Korean senses | 4,595 |
-| Korean glosses | 10,759 |
+| Korean senses | 19,072 |
+| Korean glosses | 44,240 |
 
 ## Local Development
 
@@ -156,7 +156,7 @@ Prepare a release SQLite artifact:
 ```sh
 bun run download:jmdict
 bun run release:check
-bun run scripts/package-release.ts --version 2026-06-10
+bun run scripts/package-release.ts --version 2026-06-11
 ```
 
 This writes ignored release files under `releases/`:
