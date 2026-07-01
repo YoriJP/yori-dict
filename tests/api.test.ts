@@ -29,7 +29,7 @@ test("returns API index links from the root route", async () => {
   expect(body.meta).toBe("/v1/meta");
   expect(body.docs).toBe("/doc");
   expect(body.openapi).toBe("/openapi.yaml");
-  expect(body.dataRelease).toBe("https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-11");
+  expect(body.dataRelease).toBe("https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01");
 });
 
 test("serves Scalar API reference from the doc route", async () => {
@@ -55,6 +55,11 @@ test("returns metadata", async () => {
   const body = await res.json();
   expect(body.apiVersion).toBe("v1");
   expect(body.dictionaryVersion).toBe("2026-06-08");
+  expect(body.sources).toContainEqual({
+    name: "Yori AI-assisted zh-CN glosses",
+    license: "CC-BY-SA-4.0",
+    url: "sources/ai-glosses/zh-cn.jsonl"
+  });
   expect(body.sources).toContainEqual({
     name: "Yori AI-assisted Korean glosses",
     license: "CC-BY-SA-4.0",

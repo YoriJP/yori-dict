@@ -15,7 +15,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Public API: <https://yori-dict-production.up.railway.app>
 - API docs: <https://yori-dict-production.up.railway.app/doc>
 - Raw OpenAPI spec: <https://yori-dict-production.up.railway.app/openapi.yaml>
-- SQLite data release: <https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-11>
+- SQLite data release: <https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01>
 
 ## What Yori Dict Supports
 
@@ -23,14 +23,17 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Single lookup and batch lookup API endpoints.
 - SQLite data release for direct local use.
 - English and German glosses from JMdict.
-- Reviewed AI-assisted Traditional Chinese and Korean glosses.
+- Reviewed AI-assisted Traditional Chinese, Simplified Chinese, and Korean glosses.
 - Requested-language responses: no automatic English fallback.
 
 Current coverage and limitations:
 
 - Traditional Chinese coverage is partial but broad for common lookup. The
-  `data-2026-06-11` release covers 77,863 zh-TW senses, including 19.60% of
+  `data-2026-07-01` release covers 77,863 zh-TW senses, including 19.60% of
   common JMdict senses.
+- Simplified Chinese is derived from the reviewed Traditional Chinese source
+  with OpenCC phrase conversion. The same release covers 77,863 zh-CN
+  senses, including 19.60% of common JMdict senses.
 - Korean coverage is expanding. The same release covers 19,072 Korean senses,
   including 10.18% of common JMdict senses.
 - Lookup responses omit senses that have no glosses in the requested language.
@@ -46,6 +49,7 @@ curl 'https://yori-dict-production.up.railway.app/'
 curl 'https://yori-dict-production.up.railway.app/health'
 curl 'https://yori-dict-production.up.railway.app/v1/meta'
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-tw'
+curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-cn'
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=教室&lang=ko'
 ```
 
@@ -70,28 +74,30 @@ en, de, zh-tw, zh-cn, ko
 Download and verify the current SQLite database:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-11/yori-dict-2026-06-11.sqlite.gz
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-11/yori-dict-2026-06-11.sqlite.gz.sha256
-shasum -a 256 -c yori-dict-2026-06-11.sqlite.gz.sha256
-gunzip yori-dict-2026-06-11.sqlite.gz
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz.sha256
+shasum -a 256 -c yori-dict-2026-07-01.sqlite.gz.sha256
+gunzip yori-dict-2026-07-01.sqlite.gz
 ```
 
 Release manifest:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-06-11/yori-dict-2026-06-11.json
+curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.json
 ```
 
-The `data-2026-06-11` release contains:
+The `data-2026-07-01` release contains:
 
 | Item | Count |
 | --- | ---: |
 | Entries | 217,294 |
 | Senses | 675,094 |
-| Glosses | 1,002,984 |
-| AI-assisted glosses | 228,978 |
+| Glosses | 1,187,499 |
+| AI-assisted glosses | 413,493 |
 | Traditional Chinese senses | 77,863 |
 | Traditional Chinese glosses | 184,738 |
+| Simplified Chinese senses | 77,863 |
+| Simplified Chinese glosses | 184,515 |
 | Korean senses | 19,072 |
 | Korean glosses | 44,240 |
 
@@ -146,6 +152,7 @@ Reviewed AI gloss sources are committed under:
 
 ```txt
 sources/ai-glosses/zh-tw.jsonl
+sources/ai-glosses/zh-cn.jsonl
 sources/ai-glosses/ko.jsonl
 ```
 
@@ -156,7 +163,7 @@ Prepare a release SQLite artifact:
 ```sh
 bun run download:jmdict
 bun run release:check
-bun run scripts/package-release.ts --version 2026-06-11
+bun run scripts/package-release.ts --version 2026-07-01
 ```
 
 This writes ignored release files under `releases/`:
@@ -245,6 +252,16 @@ The raw AI result is not imported directly. It goes through this pipeline:
 ```txt
 JMdict sense -> AI candidate -> mechanical filter -> CLI/agent review -> committed source -> SQLite build
 ```
+
+Simplified Chinese is different: it is generated from the reviewed
+Traditional Chinese source with OpenCC phrase conversion:
+
+```sh
+bun run zh-cn:convert
+```
+
+The generated `sources/ai-glosses/zh-cn.jsonl` file is validated and committed
+as its own source file.
 
 `ai:filter` performs deterministic checks before a row can enter `sources/`:
 

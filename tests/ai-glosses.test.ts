@@ -6,8 +6,9 @@ import { candidateFromResponse, type AiSeed, type Candidate } from "../scripts/a
 test("imports AI gloss source rows into lookup responses", async () => {
   const dbPath = tempPath("ai-gloss-import.sqlite");
   const zhGlossPath = tempPath("ai-gloss-source-zh-tw.jsonl");
+  const zhCnGlossPath = tempPath("ai-gloss-source-zh-cn.jsonl");
   const koGlossPath = tempPath("ai-gloss-source-ko.jsonl");
-  await Bun.$`rm -f ${dbPath} ${zhGlossPath} ${koGlossPath}`;
+  await Bun.$`rm -f ${dbPath} ${zhGlossPath} ${zhCnGlossPath} ${koGlossPath}`;
   await Bun.write(
     zhGlossPath,
     JSON.stringify({
@@ -16,6 +17,16 @@ test("imports AI gloss source rows into lookup responses", async () => {
       glosses: ["吃", "食用"],
       source: "ai-assisted",
       model: "gemini-3-flash-preview"
+    }) + "\n"
+  );
+  await Bun.write(
+    zhCnGlossPath,
+    JSON.stringify({
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "zh-cn",
+      glosses: ["吃", "食用"],
+      source: "ai-assisted",
+      model: "opencc-js-1.3.1:twp-cn"
     }) + "\n"
   );
   await Bun.write(
@@ -29,16 +40,22 @@ test("imports AI gloss source rows into lookup responses", async () => {
     }) + "\n"
   );
 
-  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${zhGlossPath} --ai-glosses ${koGlossPath}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath} --ai-glosses ${zhGlossPath} --ai-glosses ${zhCnGlossPath} --ai-glosses ${koGlossPath}`;
 
   const lookupDb = openLookupDb(dbPath);
   const app = createApp(lookupDb);
   const zhRes = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-tw");
   const zhBody = await zhRes.json();
+  const zhCnRes = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-cn");
+  const zhCnBody = await zhCnRes.json();
   const koRes = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=ko");
   const koBody = await koRes.json();
 
   expect(zhBody.item.senses[0].glosses).toEqual([
+    { text: "吃", source: "ai-assisted", reviewStatus: "checked" },
+    { text: "食用", source: "ai-assisted", reviewStatus: "checked" }
+  ]);
+  expect(zhCnBody.item.senses[0].glosses).toEqual([
     { text: "吃", source: "ai-assisted", reviewStatus: "checked" },
     { text: "食用", source: "ai-assisted", reviewStatus: "checked" }
   ]);
@@ -47,6 +64,34 @@ test("imports AI gloss source rows into lookup responses", async () => {
   ]);
 
   lookupDb.close();
+});
+
+test("converts reviewed Traditional Chinese glosses to Simplified Chinese", async () => {
+  const inputPath = tempPath("convert-zh-cn-input.jsonl");
+  const outPath = tempPath("convert-zh-cn-output.jsonl");
+  await Bun.$`rm -f ${inputPath} ${outPath}`;
+  await Bun.write(
+    inputPath,
+    `${JSON.stringify({
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "zh-tw",
+      glosses: ["軟體", "軟件", "網路", "計程車"],
+      source: "ai-assisted",
+      model: "gemini-3-flash-preview"
+    })}\n`
+  );
+
+  await Bun.$`bun run scripts/convert-zh-cn.ts --input ${inputPath} --out ${outPath}`;
+
+  expect(await readJsonl(outPath)).toEqual([
+    {
+      senseId: "yori:s_jmdict_1358280_1",
+      lang: "zh-cn",
+      glosses: ["软件", "网络", "出租车"],
+      source: "ai-assisted",
+      model: "opencc-js-1.3.1:twp-cn"
+    }
+  ]);
 });
 
 test("hides senses without glosses for the requested language", async () => {
