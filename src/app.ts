@@ -19,7 +19,7 @@ export function createApp(db: LookupDb) {
       batchLookup: "/v1/lookup/batch",
       docs: "/doc",
       openapi: "/openapi.yaml",
-      dataRelease: "https://github.com/anilahsu/yori-dict/releases/tag/data-2026-06-11"
+      dataRelease: "https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01"
     })
   );
 
