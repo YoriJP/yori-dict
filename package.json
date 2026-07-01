@@ -13,22 +13,24 @@
     "ai:seeds": "bun run scripts/export-ai-seeds.ts",
     "ai:summary": "bun run scripts/summarize-ai-batch.ts",
     "ai:validate": "bun run scripts/validate-ai-glosses.ts",
-    "build:db": "bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl --ai-glosses sources/ai-glosses/ko.jsonl",
+    "build:db": "bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl --ai-glosses sources/ai-glosses/zh-cn.jsonl --ai-glosses sources/ai-glosses/ko.jsonl",
     "dev": "bun run src/index.ts",
     "download:jmdict": "bun run scripts/download-jmdict.ts --out-dir data/raw",
     "import:jmdict": "bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out data/yori.sqlite",
     "import:jmdict:full": "bun run scripts/import-jmdict.ts --input data/raw/jmdict-all.json --out data/yori.sqlite",
     "ko:probe": "bun run scripts/probe-kaikki-ko.ts",
     "lookup:check": "bun run scripts/check-lookup.ts",
-    "release:check": "bun run build:db && bun run ai:validate -- --lang zh-tw --input sources/ai-glosses/zh-tw.jsonl && bun run ai:validate -- --lang ko --input sources/ai-glosses/ko.jsonl && bun run lookup:check && bun run typecheck && bun test",
+    "release:check": "bun run build:db && bun run ai:validate -- --lang zh-tw --input sources/ai-glosses/zh-tw.jsonl && bun run ai:validate -- --lang zh-cn --input sources/ai-glosses/zh-cn.jsonl && bun run ai:validate -- --lang ko --input sources/ai-glosses/ko.jsonl && bun run lookup:check && bun run typecheck && bun test",
     "release:package": "bun run release:check && bun run scripts/package-release.ts",
     "start": "bun run src/index.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "zh-cn:convert": "bun run scripts/convert-zh-cn.ts"
   },
   "dependencies": {
     "@scalar/hono-api-reference": "^0.11.0",
-    "hono": "^4.12.23"
+    "hono": "^4.12.23",
+    "opencc-js": "^1.3.1"
   },
   "devDependencies": {
     "@types/bun": "^1.2.16",

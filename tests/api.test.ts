@@ -56,6 +56,11 @@ test("returns metadata", async () => {
   expect(body.apiVersion).toBe("v1");
   expect(body.dictionaryVersion).toBe("2026-06-08");
   expect(body.sources).toContainEqual({
+    name: "Yori AI-assisted zh-CN glosses",
+    license: "CC-BY-SA-4.0",
+    url: "sources/ai-glosses/zh-cn.jsonl"
+  });
+  expect(body.sources).toContainEqual({
     name: "Yori AI-assisted Korean glosses",
     license: "CC-BY-SA-4.0",
     url: "sources/ai-glosses/ko.jsonl"
