@@ -27,6 +27,8 @@
     "validate:snapshot": "bun run scripts/pipeline/validate-snapshot.ts",
     "quality:canonical": "bun run scripts/pipeline/report-canonical-quality.ts",
     "release:manifest:canonical": "bun run scripts/pipeline/write-canonical-release-manifest.ts",
+    "review:claude:bundle": "bun run scripts/dev/create-claude-review-bundle.ts --print-command",
+    "review:claude:run": "bun run scripts/dev/create-claude-review-bundle.ts --run",
     "docker:build": "docker build -t yori-dict .",
     "docker:run": "docker run -p 3000:3000 -e PORT=3000 -e CANONICAL_RELEASE_DB_PATH=/app/data/releases/canonical/yori-dict.sqlite -v \"$(pwd)/data/releases/canonical:/app/data/releases/canonical:ro\" yori-dict",
     "sdk:generate": "openapi-ts"
