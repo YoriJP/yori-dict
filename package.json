@@ -22,6 +22,8 @@
     "lookup:check": "bun run scripts/check-lookup.ts",
     "release:check": "bun run build:db && bun run ai:validate -- --lang zh-tw --input sources/ai-glosses/zh-tw.jsonl && bun run ai:validate -- --lang zh-cn --input sources/ai-glosses/zh-cn.jsonl && bun run ai:validate -- --lang ko --input sources/ai-glosses/ko.jsonl && bun run lookup:check && bun run typecheck && bun test",
     "release:package": "bun run release:check && bun run scripts/package-release.ts",
+    "review:claude:bundle": "bun run scripts/dev/create-claude-review-bundle.ts --print-command",
+    "review:claude:run": "bun run scripts/dev/create-claude-review-bundle.ts --run",
     "start": "bun run src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
