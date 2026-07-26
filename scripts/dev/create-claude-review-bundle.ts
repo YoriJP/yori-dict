@@ -25,6 +25,11 @@ const defaultExcludedFiles = new Set(['bun.lock'])
 
 const args = new Set(process.argv.slice(2))
 
+function fail(message: string): never {
+  console.error(message)
+  process.exit(1)
+}
+
 function argValue(name: string, fallback: string): string {
   const prefix = `${name}=`
   const found = process.argv.slice(2).find((arg) => arg.startsWith(prefix))
@@ -41,7 +46,6 @@ const includeData = args.has('--include-data')
 const includeAiGlosses = args.has('--include-ai-glosses')
 const runClaude = args.has('--run')
 const printCommand = args.has('--print-command') || runClaude
-const bareMode = args.has('--bare')
 const maxPatchBytes = Number(argValue('--max-patch-bytes', '700000'))
 const maxUntrackedFileBytes = Number(argValue('--max-untracked-file-bytes', '80000'))
 const maxUntrackedMarkdownBytes = Number(argValue('--max-untracked-markdown-bytes', '3000'))
@@ -49,6 +53,14 @@ const maxUntrackedTotalBytes = Number(argValue('--max-untracked-total-bytes', '4
 
 const runId =
   argValue('--run-id', new Date().toISOString().replaceAll(':', '-').replace(/\.\d{3}Z$/, 'Z'))
+
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId) || runId === '.' || runId === '..') {
+  fail('Invalid --run-id. Use only letters, numbers, dots, underscores, and hyphens.')
+}
+if (args.has('--bare')) {
+  fail('The --bare option is not supported. Claude reviews always run in safe mode.')
+}
+
 const outputDir = join('.claude', 'review-runs', runId)
 
 function sh(cmd: string, commandArgs: string[]): CmdResult {
@@ -66,6 +78,14 @@ function sh(cmd: string, commandArgs: string[]): CmdResult {
 
 function git(args: string[]): CmdResult {
   return sh('git', args)
+}
+
+function gitOutput(args: string[], description: string): string {
+  const result = git(args)
+  if (result.status !== 0) {
+    fail(`${description} failed:\n${result.stderr.trim() || '(no error output)'}`)
+  }
+  return result.stdout
 }
 
 function commandExists(name: string): boolean {
@@ -114,21 +134,31 @@ function readIfExists(path: string): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
-function hasBase(ref: string): boolean {
-  return git(['rev-parse', '--verify', ref]).status === 0
-}
+gitOutput(['rev-parse', '--verify', `${baseRef}^{commit}`], `Base ref ${baseRef}`)
+gitOutput(['merge-base', baseRef, 'HEAD'], `Finding a merge base for ${baseRef} and HEAD`)
 
-const baseAvailable = hasBase(baseRef)
-const branch = git(['branch', '--show-current']).stdout.trim() || '(detached)'
-const head = git(['rev-parse', '--short', 'HEAD']).stdout.trim()
+const branch = gitOutput(['branch', '--show-current'], 'Reading the current branch').trim() || '(detached)'
+const head = gitOutput(['rev-parse', '--short', 'HEAD'], 'Reading HEAD').trim()
 const claudeVersion = sh('claude', ['--version']).stdout.trim() || '(not found)'
 
-const committedChanged = baseAvailable
-  ? lines(git(['diff', '--name-only', '--diff-filter=ACMRTUB', `${baseRef}...HEAD`]).stdout)
-  : []
-const stagedChanged = lines(git(['diff', '--cached', '--name-only', '--diff-filter=ACMRTUB']).stdout)
-const unstagedChanged = lines(git(['diff', '--name-only', '--diff-filter=ACMRTUB']).stdout)
-const untrackedChanged = lines(git(['ls-files', '--others', '--exclude-standard']).stdout)
+const committedChanged = lines(
+  gitOutput(
+    ['diff', '--name-only', '--diff-filter=ACDMRTUB', `${baseRef}...HEAD`],
+    'Reading committed changes',
+  ),
+)
+const stagedChanged = lines(
+  gitOutput(
+    ['diff', '--cached', '--name-only', '--diff-filter=ACDMRTUB'],
+    'Reading staged changes',
+  ),
+)
+const unstagedChanged = lines(
+  gitOutput(['diff', '--name-only', '--diff-filter=ACDMRTUB'], 'Reading unstaged changes'),
+)
+const untrackedChanged = lines(
+  gitOutput(['ls-files', '--others', '--exclude-standard'], 'Reading untracked files'),
+)
 
 const includedFiles = uniqueSorted(
   [...committedChanged, ...stagedChanged, ...unstagedChanged, ...untrackedChanged].filter(
@@ -141,19 +171,29 @@ const excludedFiles = uniqueSorted(
 
 mkdirSync(outputDir, { recursive: true })
 
-const status = git(['status', '--short', '--branch']).stdout
+const status = gitOutput(['status', '--short', '--branch'], 'Reading Git status')
 write(join(outputDir, 'status.txt'), status)
 write(join(outputDir, 'changed-files.txt'), `${includedFiles.join('\n')}\n`)
 write(join(outputDir, 'excluded-files.txt'), `${excludedFiles.join('\n')}\n`)
 
 const committedDiffstat =
-  baseAvailable && includedFiles.length > 0
-    ? git(['diff', '--stat', `${baseRef}...HEAD`, ...gitPathArgs(includedFiles)]).stdout
+  includedFiles.length > 0
+    ? gitOutput(
+        ['diff', '--stat', `${baseRef}...HEAD`, ...gitPathArgs(includedFiles)],
+        'Creating the committed diffstat',
+      )
     : ''
 const stagedDiffstat =
-  includedFiles.length > 0 ? git(['diff', '--cached', '--stat', ...gitPathArgs(includedFiles)]).stdout : ''
+  includedFiles.length > 0
+    ? gitOutput(
+        ['diff', '--cached', '--stat', ...gitPathArgs(includedFiles)],
+        'Creating the staged diffstat',
+      )
+    : ''
 const unstagedDiffstat =
-  includedFiles.length > 0 ? git(['diff', '--stat', ...gitPathArgs(includedFiles)]).stdout : ''
+  includedFiles.length > 0
+    ? gitOutput(['diff', '--stat', ...gitPathArgs(includedFiles)], 'Creating the unstaged diffstat')
+    : ''
 
 write(
   join(outputDir, 'diffstat.txt'),
@@ -168,16 +208,31 @@ write(
 )
 
 const committedPatch =
-  baseAvailable && includedFiles.length > 0
-    ? git(['diff', '--no-ext-diff', '--find-renames', `${baseRef}...HEAD`, ...gitPathArgs(includedFiles)]).stdout
+  includedFiles.length > 0
+    ? gitOutput(
+        [
+          'diff',
+          '--no-ext-diff',
+          '--find-renames',
+          `${baseRef}...HEAD`,
+          ...gitPathArgs(includedFiles),
+        ],
+        'Creating the committed patch',
+      )
     : ''
 const stagedPatch =
   includedFiles.length > 0
-    ? git(['diff', '--cached', '--no-ext-diff', '--find-renames', ...gitPathArgs(includedFiles)]).stdout
+    ? gitOutput(
+        ['diff', '--cached', '--no-ext-diff', '--find-renames', ...gitPathArgs(includedFiles)],
+        'Creating the staged patch',
+      )
     : ''
 const unstagedPatch =
   includedFiles.length > 0
-    ? git(['diff', '--no-ext-diff', '--find-renames', ...gitPathArgs(includedFiles)]).stdout
+    ? gitOutput(
+        ['diff', '--no-ext-diff', '--find-renames', ...gitPathArgs(includedFiles)],
+        'Creating the unstaged patch',
+      )
     : ''
 
 const patch = truncate(
@@ -223,7 +278,7 @@ const context = `# yori-dict-api Review Context
 Branch: ${branch}
 HEAD: ${head}
 Base ref: ${baseRef}
-Base available: ${baseAvailable ? 'yes' : 'no'}
+Base available: yes
 Claude CLI: ${claudeVersion}
 
 ## Scope Policy
@@ -313,7 +368,7 @@ write(join(outputDir, 'review-bundle.md'), bundle)
 const claudeArgs = [
   'claude',
   '-p',
-  bareMode ? '--bare' : '--safe-mode',
+  '--safe-mode',
   '--name',
   `scoped-review-${runId}`,
   '--no-session-persistence',
@@ -339,7 +394,9 @@ const claudeArgs = [
 
 const shellCommand = `${claudeArgs.map((arg) => JSON.stringify(arg)).join(' ')} < ${JSON.stringify(
   join(outputDir, 'review-bundle.md'),
-)} > ${JSON.stringify(join(outputDir, 'claude.stream.jsonl'))}`
+)} > ${JSON.stringify(join(outputDir, 'claude.stream.jsonl'))} 2> ${JSON.stringify(
+  join(outputDir, 'claude.stderr.log'),
+)}`
 
 write(join(outputDir, 'run-claude-review.sh'), `#!/usr/bin/env bash\nset -euo pipefail\n${shellCommand}\n`)
 
