@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
 type CmdResult = {
@@ -130,6 +130,10 @@ function write(path: string, content: string): void {
   writeFileSync(path, content)
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`
+}
+
 function readIfExists(path: string): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
@@ -259,6 +263,9 @@ const untrackedSnippets = includedUntracked
       return `## ${path}\n\n[untracked file omitted because extension does not look text-reviewable]\n`
     }
     if (!existsSync(path)) return `## ${path}\n\n[file no longer exists]\n`
+    if (!lstatSync(path).isFile()) {
+      return `## ${path}\n\n[untracked file omitted because path is not a regular file]\n`
+    }
 
     const maxBytes = Math.min(maxBytesForUntracked(path), remainingUntrackedBytes)
     const content = truncate(readFileSync(path, 'utf8'), maxBytes)
@@ -392,9 +399,9 @@ const claudeArgs = [
   '.claude/prompts/review.md',
 ]
 
-const shellCommand = `${claudeArgs.map((arg) => JSON.stringify(arg)).join(' ')} < ${JSON.stringify(
+const shellCommand = `${claudeArgs.map(shellQuote).join(' ')} < ${shellQuote(
   join(outputDir, 'review-bundle.md'),
-)} > ${JSON.stringify(join(outputDir, 'claude.stream.jsonl'))} 2> ${JSON.stringify(
+)} > ${shellQuote(join(outputDir, 'claude.stream.jsonl'))} 2> ${shellQuote(
   join(outputDir, 'claude.stderr.log'),
 )}`
 
