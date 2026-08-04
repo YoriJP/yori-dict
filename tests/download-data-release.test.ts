@@ -16,7 +16,7 @@ beforeAll(async () => {
   server = Bun.serve({
     port: 0,
     fetch(request) {
-      return new URL(request.url).pathname.endsWith("/yori-dict-2026-07-01.sqlite.gz")
+      return /\/yori-dict-2026-07-01(?:\.1)?\.sqlite\.gz$/.test(new URL(request.url).pathname)
         ? new Response(gzipBytes)
         : new Response("not found", { status: 404 });
     }
@@ -31,7 +31,7 @@ afterAll(async () => {
 test("downloads, verifies, and expands the pinned public release artifact", async () => {
   const pinPath = join(tempDir, "valid-pin.json");
   const outPath = join(tempDir, "valid.sqlite");
-  await writeFile(pinPath, JSON.stringify({ version: "2026-07-01", sha256 }));
+  await writeFile(pinPath, JSON.stringify({ version: "2026-07-01.1", sha256 }));
 
   await downloadPinnedDataRelease({
     pinPath,

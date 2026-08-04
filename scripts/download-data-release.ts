@@ -83,8 +83,8 @@ async function readPin(path: string): Promise<DataReleasePin> {
   }
 
   const pin = value as Partial<DataReleasePin>;
-  if (typeof pin.version !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(pin.version)) {
-    throw new Error(`Invalid data release pin ${path}: version must use YYYY-MM-DD`);
+  if (typeof pin.version !== "string" || !/^\d{4}-\d{2}-\d{2}(?:\.\d+)?$/.test(pin.version)) {
+    throw new Error(`Invalid data release pin ${path}: version must use YYYY-MM-DD with an optional numeric revision`);
   }
   if (typeof pin.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.sha256)) {
     throw new Error(`Invalid data release pin ${path}: sha256 must be 64 lowercase hex characters`);
