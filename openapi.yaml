@@ -92,6 +92,10 @@ paths:
                 apiVersion: v1
                 dictionaryVersion: "2026-06-01"
                 languages: [en, de, zh-tw, zh-cn, ko]
+                tags:
+                  uk: word usually written using kana alone
+                  vt: transitive verb
+                  ksb: Kansai-ben
                 sources:
                   - name: JMdict
                     license: CC-BY-SA-4.0
@@ -206,7 +210,7 @@ components:
       enum: [en, de, zh-tw, zh-cn, ko]
     MetaResponse:
       type: object
-      required: [apiVersion, dictionaryVersion, languages, sources]
+      required: [apiVersion, dictionaryVersion, languages, tags, sources]
       properties:
         apiVersion:
           type: string
@@ -217,6 +221,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ApiLang"
+        tags:
+          type: object
+          description: >-
+            Every JMdict tag code used in partOfSpeech, misc, field, and dialect,
+            mapped to its description. Empty when the dictionary carries no tag
+            metadata.
+          additionalProperties:
+            type: string
         sources:
           type: array
           items:
