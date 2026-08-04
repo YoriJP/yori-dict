@@ -235,19 +235,18 @@ async function enrichSense(
         zhTw = parseTranslation(raw);
       } catch {
         priorRejection = "malformed_translator";
-        attempts.push({ ...translatedAttempt, rejectionReason: priorRejection });
+        attempts.push({
+          ...translatedAttempt,
+          candidate: partialExample(japanese),
+          rejectionReason: priorRejection
+        });
         continue;
       }
     } catch (error) {
       const reason = transportReason("translator", error);
-      const partialExample: PublicExample = {
-        text: japanese.sentence,
-        translations: [{ lang: "en", text: japanese.english }],
-        source: "generated",
-        reviewStatus: "checked"
-      };
-      attempts.push({ ...translatedAttempt, candidate: partialExample, rejectionReason: reason });
-      overlay.write({ senseId: seed.senseId, status: "error", example: partialExample, attempts, reason });
+      const example = partialExample(japanese);
+      attempts.push({ ...translatedAttempt, candidate: example, rejectionReason: reason });
+      overlay.write({ senseId: seed.senseId, status: "error", example, attempts, reason });
       return;
     }
 
@@ -322,6 +321,15 @@ async function enrichSense(
     attempts,
     reason: priorRejection ?? "rejected"
   });
+}
+
+function partialExample(japanese: Extract<JapaneseGeneration, { kind: "candidate" }>): PublicExample {
+  return {
+    text: japanese.sentence,
+    translations: [{ lang: "en", text: japanese.english }],
+    source: "generated",
+    reviewStatus: "checked"
+  };
 }
 
 export function parseGeneration(text: string): JapaneseGeneration {

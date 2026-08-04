@@ -309,6 +309,24 @@ test("translator timeout persists the generated candidate and remains retryable"
   expect(translatorCalls).toBe(2);
 });
 
+test("malformed translator output preserves generated candidates in attempt history", async () => {
+  const runtime = await setup(async (input) => {
+    if (input.role === "translator") return '{"translation":42}';
+    return validResponse(input.role, input.prompt);
+  });
+
+  const response = await authorised(runtime.app, "学校");
+  const body = await response.json();
+  const record = runtime.overlay.read(body.item.senses[0].id);
+
+  expect(response.status).toBe(200);
+  expect(record?.status).toBe("dropped");
+  expect(record?.reason).toBe("malformed_translator");
+  expect(record?.attempts).toHaveLength(2);
+  expect(record?.attempts.every((attempt) => attempt.candidate?.source === "generated")).toBe(true);
+  expect(record?.attempts.every((attempt) => attempt.candidate?.translations.some(({ lang }) => lang === "en"))).toBe(true);
+});
+
 test("malformed reviewer output retries once and records the terminal drop", async () => {
   const roles: string[] = [];
   const generatorPrompts: string[] = [];
