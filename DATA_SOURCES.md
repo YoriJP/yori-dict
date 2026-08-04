@@ -64,6 +64,14 @@ Sources:
 - https://tatoeba.org/en/terms_of_use
 - https://github.com/scriptin/jmdict-simplified
 
+## AI-Assisted Example Sentences
+
+Accepted generated examples are exported from the service staging overlay to
+`sources/ai-examples/generated.jsonl`. Every candidate passes deterministic sentence,
+word-presence, translation, and Taiwanese-terminology checks before a separate model family
+may accept it. The committed row retains generation and review provenance and is folded into
+the next SQLite release. These additions are distributed under CC BY-SA 4.0.
+
 ## Estimated Levels
 
 Estimated levels come from `stephenmk/yomitan-jlpt-vocab`, pinned by commit in

@@ -134,6 +134,13 @@ paths:
           schema:
             $ref: "#/components/schemas/ApiLang"
           example: zh-tw
+        - name: enrich
+          in: query
+          required: false
+          description: Set to true to fill missing examples. Requires bearer authentication.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Best lookup result, or null if no entry matches.
@@ -149,6 +156,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "Missing required query parameter: q"
+        "401":
+          description: Enrichment was requested without the configured bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/lookup/batch:
     post:
       summary: Look up multiple Japanese terms
@@ -162,6 +175,7 @@ paths:
             example:
               queries: [食べました, 学校, 孑々]
               lang: zh-tw
+              enrich: false
       responses:
         "200":
           description: Lookup results in the same order as the input queries.
@@ -185,7 +199,18 @@ paths:
                 tooLarge:
                   value:
                     error: Batch size must be 100 or less
+        "401":
+          description: Enrichment was requested without the configured bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
+  securitySchemes:
+    enrichmentBearer:
+      type: http
+      scheme: bearer
+      description: Required only when `enrich=true`.
   schemas:
     IndexResponse:
       type: object
@@ -266,6 +291,10 @@ components:
             type: string
         lang:
           $ref: "#/components/schemas/ApiLang"
+        enrich:
+          type: boolean
+          default: false
+          description: Fill every missing sense example in this request. Requires bearer authentication.
     BatchLookupResponse:
       type: object
       required: [results]

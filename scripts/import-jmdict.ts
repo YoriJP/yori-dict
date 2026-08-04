@@ -8,6 +8,7 @@ type Args = {
   input: string;
   out: string;
   aiGlosses: string[];
+  aiExamples: string[];
   examples: string | null;
   jlptVocab: string | null;
 };
@@ -18,6 +19,17 @@ type AiGlossSource = {
   glosses: string[];
   source?: "ai-assisted";
   model?: string;
+};
+
+type AiExampleSource = {
+  senseId: string;
+  example: {
+    text: string;
+    translations: Array<{ lang: string; text: string }>;
+    source: "generated";
+    reviewStatus: "checked";
+  };
+  attempts: unknown[];
 };
 
 const args = parseArgs(Bun.argv.slice(2));
@@ -37,25 +49,28 @@ const estimatedLevels = args.jlptVocab
   ? await readEstimatedLevels(args.jlptVocab)
   : new Map<string, EstimatedLevel>();
 const aiGlosses = (await Promise.all(args.aiGlosses.map((path) => readJsonl<AiGlossSource>(path)))).flat();
+const aiExamples = (await Promise.all(args.aiExamples.map((path) => readJsonl<AiExampleSource>(path)))).flat();
 const db = new Database(args.out);
 
 createSchema(db);
 insertMetadata(db, source);
 insertWords(db, source.words, exampleSource, estimatedLevels);
 insertAiGlosses(db, aiGlosses);
+insertAiExamples(db, aiExamples);
 db.close();
 
 console.log(`Imported ${source.words.length} JMdict entries into ${args.out}`);
 if (aiGlosses.length > 0) {
   console.log(`Imported ${aiGlosses.length} AI gloss source row(s)`);
 }
+if (aiExamples.length > 0) console.log(`Imported ${aiExamples.length} AI example source row(s)`);
 
 function parseArgs(argv: string[]): Args {
   const input = readFlag(argv, "--input");
   const out = readFlag(argv, "--out");
   if (!input || !out) {
     console.error(
-      "Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite [--examples path/to/jmdict-examples.json] [--jlpt-vocab path/to/jlpt-csv-directory] [--ai-glosses path/to/glosses.jsonl]..."
+      "Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite [--examples path/to/jmdict-examples.json] [--jlpt-vocab path/to/jlpt-csv-directory] [--ai-glosses path/to/glosses.jsonl]... [--ai-examples path/to/examples.jsonl]..."
     );
     process.exit(1);
   }
@@ -64,7 +79,8 @@ function parseArgs(argv: string[]): Args {
     out,
     examples: readFlag(argv, "--examples"),
     jlptVocab: readFlag(argv, "--jlpt-vocab"),
-    aiGlosses: readFlags(argv, "--ai-glosses")
+    aiGlosses: readFlags(argv, "--ai-glosses"),
+    aiExamples: readFlags(argv, "--ai-examples")
   };
 }
 
@@ -345,6 +361,40 @@ function insertAiGlosses(db: Database, rows: AiGlossSource[]) {
     }
   });
 
+  transaction(rows);
+}
+
+function insertAiExamples(db: Database, rows: AiExampleSource[]) {
+  if (rows.length === 0) return;
+  const senseExists = db.prepare("select 1 from senses where id = ? limit 1");
+  const exampleCount = db.prepare("select count(*) as count from examples where sense_id = ?");
+  const insert = db.prepare(
+    `insert into examples
+      (sense_id, position, text, translations, source, source_name, source_id, review_status)
+     values (?, 1, ?, ?, 'generated', null, null, 'checked')`
+  );
+  const seen = new Set<string>();
+  const transaction = db.transaction((items: AiExampleSource[]) => {
+    for (const row of items) {
+      if (seen.has(row.senseId)) throw new Error(`Duplicate AI example row for ${row.senseId}`);
+      seen.add(row.senseId);
+      if (!senseExists.get(row.senseId)) throw new Error(`AI example references unknown senseId: ${row.senseId}`);
+      const existing = exampleCount.get(row.senseId) as { count: number } | null;
+      if ((existing?.count ?? 0) > 0) continue;
+      if (
+        !row.example ||
+        row.example.source !== "generated" ||
+        row.example.reviewStatus !== "checked" ||
+        !row.example.text?.trim() ||
+        !Array.isArray(row.example.translations) ||
+        !Array.isArray(row.attempts) ||
+        row.attempts.length === 0
+      ) {
+        throw new Error(`Invalid AI example row for ${row.senseId}`);
+      }
+      insert.run(row.senseId, row.example.text.trim(), JSON.stringify(row.example.translations));
+    }
+  });
   transaction(rows);
 }
 

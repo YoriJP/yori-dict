@@ -129,6 +129,11 @@ export function openLookupDb(path: string): LookupDb {
             name: "Yori AI-assisted Korean glosses",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/ko.jsonl"
+          },
+          {
+            name: "Yori generated examples",
+            license: "CC-BY-SA-4.0",
+            url: "sources/ai-examples/generated.jsonl"
           }
         ]
       };

@@ -28,6 +28,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Sense annotations from JMdict: usage tags, field of application, dialect, notes,
   cross-references, and loanword origin.
 - Human-written Tatoeba examples attached to individual senses.
+- Reviewed generated examples staged by authorised enrichment lookups.
 - Unofficial JLPT-band estimates joined by JMdict source ID.
 - An inflection path explaining how a conjugated lookup reached its dictionary form.
 
@@ -114,7 +115,7 @@ Each entry carries `headwordLanguage` (`ja` for the current dictionary).
 cover the entry. If a source ID occurs in several bands, the easiest band wins.
 
 Examples are ordered within their JMdict sense. `source` distinguishes
-`sourced` examples from future `generated` examples; sourced examples also
+`sourced` examples from checked `generated` examples; sourced examples also
 carry `sourceName` and `sourceId`. `text` is the Japanese sentence,
 `translations` keeps each translation's `lang` and `text` explicit, and
 `reviewStatus` distinguishes untouched source material from checked additions.
@@ -270,6 +271,37 @@ bun run start
 
 The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`. Railway obtains that database
 from the release pinned in `data-release.json`; deploys do not contact JMdict upstream.
+
+### Example enrichment
+
+Normal lookups are read-only and never call a model. A maintainer can opt into filling all
+missing examples exposed by a lookup with `enrich=true` and a bearer token:
+
+```sh
+curl -H "Authorization: Bearer $YORI_ENRICHMENT_TOKEN" \
+  'http://localhost:3000/v1/lookup?q=学校&enrich=true'
+```
+
+Configure `YORI_ENRICHMENT_TOKEN`, `GEMINI_API_KEY`, and `ANTHROPIC_API_KEY`. The writable
+overlay defaults to `data/example-overlay.sqlite`; set `YORI_EXAMPLE_OVERLAY_PATH` to the
+mounted volume in production. `YORI_ENRICHMENT_CONCURRENCY` defaults to 4 and
+`YORI_MODEL_TIMEOUT_MS` to 15000. The generator is pinned to `gemini-2.5-flash` at low
+reasoning through Google, and the separate reviewer family is pinned to
+`claude-haiku-4-5-20251001` through Anthropic. Direct provider APIs do not provide fallback
+routing, so unsupported request parameters cannot be silently dropped by another provider.
+
+Abstentions and candidates rejected twice are recorded and not regenerated indefinitely.
+Transient model errors and timeouts leave the sense empty and do not fail the lookup.
+Export accepted staging rows before a data release, then rebuild normally:
+
+```sh
+bun run examples:export -- --overlay data/example-overlay.sqlite \
+  --out sources/ai-examples/generated.jsonl
+bun run build:db
+```
+
+The committed JSONL retains every generation attempt and its exact model, reasoning effort,
+and provider. `build:db` folds accepted rows into the read-only release database.
 
 ## API Shape
 

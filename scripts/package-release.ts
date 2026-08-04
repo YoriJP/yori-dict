@@ -79,6 +79,11 @@ await writeFile(
           name: "Yori AI-assisted Korean glosses",
           license: "CC-BY-SA-4.0",
           path: "sources/ai-glosses/ko.jsonl"
+        },
+        {
+          name: "Yori generated examples",
+          license: "CC-BY-SA-4.0",
+          path: "sources/ai-examples/generated.jsonl"
         }
       ]
     },
@@ -119,7 +124,8 @@ function readDbMetadata(dbPath: string) {
         aiAssistedGlosses: readCount(
           db,
           "select count(*) as count from glosses where source = 'ai-assisted'"
-        )
+        ),
+        generatedExamples: readCount(db, "select count(*) as count from examples where source = 'generated'")
       }
     };
   } finally {
