@@ -112,9 +112,8 @@ async function main(): Promise<void> {
   if (skippedMissingContext > 0) {
     console.log(`Skipped ${skippedMissingContext} row(s) missing DB context`);
   }
-  console.log(`Next offset: ${args.offset + reviewRows.length}`);
-
   if (!args.runClaude) {
+    console.log(`Next offset: ${args.offset + reviewRows.length}`);
     console.log("");
     console.log("Claude review prompt:");
     console.log(reviewPrompt(args.lang));
@@ -122,6 +121,9 @@ async function main(): Promise<void> {
     console.log("Run the bounded reviewer with `bun run ai:review:run` using the same arguments.");
     return;
   }
+
+  await Bun.$`mkdir -p ${dirname(args.issuesPath)}`;
+  await Bun.write(args.issuesPath, "");
   if (reviewRows.length === 0) {
     throw new Error("Cannot run AI-gloss review because the prepared bundle is empty.");
   }
@@ -130,6 +132,7 @@ async function main(): Promise<void> {
   }
 
   await runClaudeReview(args, reviewRows, bundle);
+  console.log(`Next offset: ${args.offset + reviewRows.length}`);
 }
 
 async function runClaudeReview(args: Args, reviewRows: ReviewRow[], bundle: string): Promise<void> {
@@ -137,8 +140,6 @@ async function runClaudeReview(args: Args, reviewRows: ReviewRow[], bundle: stri
   const rawPath = join(outputDirectory, "claude.raw.txt");
   const stderrPath = join(outputDirectory, "claude.stderr.log");
   const debugPath = join(outputDirectory, "claude.debug.log");
-  await Bun.$`mkdir -p ${outputDirectory}`;
-  await Bun.write(args.issuesPath, "");
 
   const claudeArgs = [
     "claude",
@@ -252,7 +253,10 @@ function parseArgs(argv: string[]): Args {
     throw new Error("Use either --common-only or --non-common-only, not both");
   }
   const offset = parseNonNegativeInt(readFlag(argv, "--offset") ?? "0", "--offset");
-  const defaultOutputDirectory = `data/ai-review/${lang}/offset-${offset}`;
+  const reviewScope = commonOnly ? "common-only" : nonCommonOnly ? "non-common-only" : null;
+  const defaultOutputDirectory = reviewScope
+    ? `data/ai-review/${lang}/${reviewScope}/offset-${offset}`
+    : `data/ai-review/${lang}/offset-${offset}`;
 
   return {
     dbPath: readFlag(argv, "--db") ?? "data/yori.sqlite",

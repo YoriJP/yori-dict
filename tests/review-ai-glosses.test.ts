@@ -196,8 +196,121 @@ test("invalidates stale issues before rerunning a checkpoint", async () => {
   });
 
   expect(valid.exitCode).toBe(0);
+  expect(new TextDecoder().decode(valid.stdout)).toContain("Next offset: 1");
   expect(invalid.exitCode).not.toBe(0);
+  expect(new TextDecoder().decode(invalid.stdout)).not.toContain("Next offset:");
   expect(readFileSync(issuesPath, "utf8")).toBe("");
+});
+
+test("invalidates stale issues before a missing-Claude preflight failure", async () => {
+  const fixture = await createDefaultReviewFixture();
+  const fakeClaude = createFakeClaude(fixture.directory);
+  const issuesPath = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-0",
+    "issues.jsonl"
+  );
+  const valid = runDefaultReview(fixture.directory, 0, {
+    PATH: `${fakeClaude.binDir}:${process.env.PATH ?? ""}`,
+    CLAUDE_ARGS_LOG: fakeClaude.argsLog,
+    CLAUDE_STDIN_LOG: fakeClaude.stdinLog,
+    CLAUDE_FAKE_OUTPUT: reviewIssue("yori:s_jmdict_1358280_1")
+  });
+
+  const missingClaude = Bun.spawnSync(
+    [
+      process.execPath,
+      "run",
+      reviewScript,
+      "--run",
+      "--lang",
+      "zh-tw",
+      "--limit",
+      "1",
+      "--offset",
+      "0"
+    ],
+    {
+      cwd: fixture.directory,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, PATH: "/usr/bin:/bin" }
+    }
+  );
+
+  expect(valid.exitCode).toBe(0);
+  expect(missingClaude.exitCode).not.toBe(0);
+  expect(new TextDecoder().decode(missingClaude.stderr)).toContain(
+    "`claude` is not available on PATH"
+  );
+  expect(readFileSync(issuesPath, "utf8")).toBe("");
+});
+
+test("invalidates stale issues before an empty-bundle preflight failure", async () => {
+  const fixture = await createDefaultReviewFixture();
+  const fakeClaude = createFakeClaude(fixture.directory);
+  const env = {
+    PATH: `${fakeClaude.binDir}:${process.env.PATH ?? ""}`,
+    CLAUDE_ARGS_LOG: fakeClaude.argsLog,
+    CLAUDE_STDIN_LOG: fakeClaude.stdinLog,
+    CLAUDE_FAKE_OUTPUT: reviewIssue("yori:s_jmdict_1358280_1")
+  };
+  const issuesPath = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-0",
+    "issues.jsonl"
+  );
+
+  const valid = runDefaultReview(fixture.directory, 0, env);
+  writeFileSync(join(fixture.directory, "sources", "ai-glosses", "zh-tw.jsonl"), "");
+  const empty = runDefaultReview(fixture.directory, 0, env);
+
+  expect(valid.exitCode).toBe(0);
+  expect(empty.exitCode).not.toBe(0);
+  expect(new TextDecoder().decode(empty.stderr)).toContain("prepared bundle is empty");
+  expect(readFileSync(issuesPath, "utf8")).toBe("");
+});
+
+test("keeps common and non-common default checkpoints separate", async () => {
+  const fixture = await createDefaultReviewFixture();
+
+  const common = runDefaultBundle(fixture.directory, ["--common-only"]);
+  const nonCommon = runDefaultBundle(fixture.directory, ["--non-common-only"]);
+
+  expect(common.exitCode).toBe(0);
+  expect(nonCommon.exitCode).toBe(0);
+  expect(
+    existsSync(
+      join(
+        fixture.directory,
+        "data",
+        "ai-review",
+        "zh-tw",
+        "common-only",
+        "offset-0",
+        "review-bundle.jsonl"
+      )
+    )
+  ).toBe(true);
+  expect(
+    existsSync(
+      join(
+        fixture.directory,
+        "data",
+        "ai-review",
+        "zh-tw",
+        "non-common-only",
+        "offset-0",
+        "review-bundle.jsonl"
+      )
+    )
+  ).toBe(true);
 });
 
 type ReviewFixture = {
@@ -285,6 +398,13 @@ async function createDefaultReviewFixture(): Promise<{ directory: string }> {
         glosses: ["學校"],
         source: "ai-assisted",
         model: "test-model"
+      },
+      {
+        senseId: "yori:s_jmdict_1000300_1",
+        lang: "zh-tw",
+        glosses: ["處理"],
+        source: "ai-assisted",
+        model: "test-model"
       }
     ]
       .map((row) => JSON.stringify(row))
@@ -349,6 +469,29 @@ function runDefaultReview(
       stdout: "pipe",
       stderr: "pipe",
       env: { ...process.env, ...env }
+    }
+  );
+}
+
+function runDefaultBundle(directory: string, extraArgs: string[]): ReturnType<typeof Bun.spawnSync> {
+  return Bun.spawnSync(
+    [
+      "bun",
+      "run",
+      reviewScript,
+      "--lang",
+      "zh-tw",
+      "--limit",
+      "1",
+      "--offset",
+      "0",
+      ...extraArgs
+    ],
+    {
+      cwd: directory,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: process.env
     }
   );
 }
