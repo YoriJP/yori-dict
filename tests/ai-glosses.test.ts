@@ -12,13 +12,15 @@ test("flags reviewed PRC terminology with Taiwanese replacements", () => {
     [{ term: "屏幕", replacement: "螢幕", index: 0 }]
   ]);
   expect(findPrcTerms("初中生")).toEqual([{ term: "初中", replacement: "國中", index: 0 }]);
-  expect(["用戶", "智能終端機", "幼兒園", "網絡", "菜單"].map((text) => findPrcTerms(text))).toEqual([
+  expect(["用戶", "智能終端機", "幼兒園", "網絡", "軟體菜單"].map((text) => findPrcTerms(text))).toEqual([
     [{ term: "用戶", replacement: "使用者", index: 0 }],
     [{ term: "智能", replacement: "智慧", index: 0 }],
     [{ term: "幼兒園", replacement: "幼稚園", index: 0 }],
     [{ term: "網絡", replacement: "網路", index: 0 }],
-    [{ term: "菜單", replacement: "選單", index: 0 }]
+    [{ term: "菜單", replacement: "選單", index: 2 }]
   ]);
+  expect(findPrcTerms("從CSV檔案導入資料")).toContainEqual({ term: "導入", replacement: "匯入", index: 6 });
+  expect(findPrcTerms("將資料導出為JSON檔案")).toContainEqual({ term: "導出", replacement: "匯出", index: 3 });
 });
 
 test("allows reviewed Taiwanese terminology overlap cases", () => {
@@ -31,7 +33,10 @@ test("allows reviewed Taiwanese terminology overlap cases", () => {
     "不變量",
     "多變量分析",
     "智能障礙",
-    "木質接口"
+    "木質接口",
+    "餐廳今天換了新菜單",
+    "從前提導出結論",
+    "新制度的導入需要時間"
   ]) {
     expect(findPrcTerms(text)).toEqual([]);
   }

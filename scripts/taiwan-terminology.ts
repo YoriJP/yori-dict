@@ -9,6 +9,7 @@ export type TaiwanTerminologyMatch = {
 type TermPolicy = {
   replacement: string;
   matchPrefix?: boolean;
+  requiredContext?: readonly string[];
 };
 
 // Reviewed, unambiguous cross-strait vocabulary from OpenCC's TWPhrases data.
@@ -31,7 +32,6 @@ const reviewedOpenCcTerms = [
   "算法",
   "網絡",
   "線程",
-  "菜單",
   "視頻",
   "變量",
   "軟件",
@@ -39,8 +39,6 @@ const reviewedOpenCcTerms = [
   "隊列",
   "集成",
   "音頻",
-  "導入",
-  "導出",
   "屏幕",
   "寄存器",
   "遞歸",
@@ -52,6 +50,15 @@ const reviewedOpenCcTerms = [
 const auditedAdditions = new Map<string, TermPolicy>([
   ["幼兒園", { replacement: "幼稚園" }],
   ["初中", { replacement: "國中", matchPrefix: true }]
+]);
+
+// These OpenCC mappings are terminology errors only in a software context.
+// The same words are valid Taiwanese for a restaurant menu, introducing a
+// system, or deriving a conclusion.
+const contextualOpenCcTerms = new Map<string, readonly string[]>([
+  ["菜單", ["軟體", "應用程式", "介面", "下拉", "右鍵", "功能表"]],
+  ["導入", ["檔案", "文件", "資料庫", "數據庫", "CSV", "JSON", "XML", "設定檔", "配置檔"]],
+  ["導出", ["檔案", "文件", "資料庫", "數據庫", "CSV", "JSON", "XML", "設定檔", "配置檔"]]
 ]);
 
 // These phrases contain a reviewed term but are established Taiwanese usages.
@@ -82,7 +89,9 @@ export function findPrcTerms(text: string): TaiwanTerminologyMatch[] {
         segment.index === index &&
         (segment.index + segment.segment.length === end || policy.matchPrefix === true);
 
-      if (isBoundaryMatch && !isAllowedPhrase(text, index, end, term)) {
+      const hasRequiredContext =
+        !policy.requiredContext || policy.requiredContext.some((context) => text.includes(context));
+      if (isBoundaryMatch && hasRequiredContext && !isAllowedPhrase(text, index, end, term)) {
         matches.push({ term, replacement: policy.replacement, index });
       }
 
@@ -107,6 +116,14 @@ function buildTermPolicies(): Map<string, TermPolicy> {
 
   for (const [term, policy] of auditedAdditions) {
     policies.set(term, policy);
+  }
+
+  for (const [term, requiredContext] of contextualOpenCcTerms) {
+    const replacement = openCcMap.get(term);
+    if (!replacement || replacement === term) {
+      throw new Error(`Contextual Taiwan terminology term is missing from OpenCC TWPhrases: ${term}`);
+    }
+    policies.set(term, { replacement, requiredContext });
   }
 
   return policies;
