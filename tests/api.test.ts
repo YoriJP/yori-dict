@@ -42,7 +42,7 @@ test("returns API index links from the root route", async () => {
   expect(body.meta).toBe("/v1/meta");
   expect(body.docs).toBe("/doc");
   expect(body.openapi).toBe("/openapi.yaml");
-  expect(body.dataRelease).toBe("https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.1");
+  expect(body.dataRelease).toBe("https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.2");
 });
 
 test("serves Scalar API reference from the doc route", async () => {
