@@ -1,12 +1,15 @@
 import { Database } from "bun:sqlite";
-import { dirname } from "node:path";
-import type { JmdictFile, JmdictWord } from "../src/types";
+import { basename, dirname, join } from "node:path";
+import { readdir } from "node:fs/promises";
+import type { EstimatedLevel, JmdictFile, JmdictWord } from "../src/types";
 import { parseApiLang, toApiLang } from "../src/lang";
 
 type Args = {
   input: string;
   out: string;
   aiGlosses: string[];
+  examples: string | null;
+  jlptVocab: string | null;
 };
 
 type AiGlossSource = {
@@ -24,12 +27,21 @@ await Bun.$`rm -f ${args.out}-shm`;
 await Bun.$`rm -f ${args.out}-wal`;
 
 const source = (await Bun.file(args.input).json()) as JmdictFile;
+const exampleSource = args.examples ? ((await Bun.file(args.examples).json()) as JmdictFile) : null;
+if (exampleSource && source.version !== exampleSource.version) {
+  throw new Error(
+    `JMdict example version ${exampleSource.version ?? "unknown"} does not match dictionary version ${source.version ?? "unknown"}`
+  );
+}
+const estimatedLevels = args.jlptVocab
+  ? await readEstimatedLevels(args.jlptVocab)
+  : new Map<string, EstimatedLevel>();
 const aiGlosses = (await Promise.all(args.aiGlosses.map((path) => readJsonl<AiGlossSource>(path)))).flat();
 const db = new Database(args.out);
 
 createSchema(db);
 insertMetadata(db, source);
-insertWords(db, source.words);
+insertWords(db, source.words, exampleSource, estimatedLevels);
 insertAiGlosses(db, aiGlosses);
 db.close();
 
@@ -43,11 +55,17 @@ function parseArgs(argv: string[]): Args {
   const out = readFlag(argv, "--out");
   if (!input || !out) {
     console.error(
-      "Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite [--ai-glosses sources/ai-glosses/zh-tw.jsonl]..."
+      "Usage: bun run scripts/import-jmdict.ts --input path/to/jmdict.json --out data/yori.sqlite [--examples path/to/jmdict-examples.json] [--jlpt-vocab path/to/jlpt-csv-directory] [--ai-glosses path/to/glosses.jsonl]..."
     );
     process.exit(1);
   }
-  return { input, out, aiGlosses: readFlags(argv, "--ai-glosses") };
+  return {
+    input,
+    out,
+    examples: readFlag(argv, "--examples"),
+    jlptVocab: readFlag(argv, "--jlpt-vocab"),
+    aiGlosses: readFlags(argv, "--ai-glosses")
+  };
 }
 
 function readFlag(argv: string[], flag: string): string | null {
@@ -79,7 +97,9 @@ function createSchema(db: Database) {
     create table entries (
       id text primary key,
       source text not null,
-      source_id text not null unique
+      source_id text not null unique,
+      headword_language text not null,
+      estimated_level text check (estimated_level in ('N1', 'N2', 'N3', 'N4', 'N5'))
     );
 
     create table forms (
@@ -116,6 +136,22 @@ function createSchema(db: Database) {
       type text
     );
 
+    create table examples (
+      sense_id text not null references senses(id),
+      position integer not null,
+      text text not null,
+      translations text not null,
+      source text not null check (source in ('sourced', 'generated')),
+      source_name text,
+      source_id text,
+      review_status text not null check (review_status in ('source', 'checked')),
+      check (
+        (source = 'sourced' and review_status = 'source') or
+        (source = 'generated' and review_status = 'checked')
+      ),
+      unique (sense_id, position)
+    );
+
     create table lookup_terms (
       term text not null,
       entry_id text not null references entries(id),
@@ -126,6 +162,7 @@ function createSchema(db: Database) {
     create index forms_entry_idx on forms(entry_id);
     create index senses_entry_idx on senses(entry_id);
     create index glosses_sense_idx on glosses(sense_id);
+    create index examples_sense_idx on examples(sense_id);
   `);
 }
 
@@ -137,8 +174,15 @@ function insertMetadata(db: Database, source: JmdictFile) {
   if (source.tags) insert.run("tags", JSON.stringify(source.tags));
 }
 
-function insertWords(db: Database, words: JmdictWord[]) {
-  const insertEntry = db.prepare("insert into entries (id, source, source_id) values (?, 'jmdict', ?)");
+function insertWords(
+  db: Database,
+  words: JmdictWord[],
+  exampleSource: JmdictFile | null,
+  estimatedLevels: Map<string, EstimatedLevel>
+) {
+  const insertEntry = db.prepare(
+    "insert into entries (id, source, source_id, headword_language, estimated_level) values (?, 'jmdict', ?, 'ja', ?)"
+  );
   const insertForm = db.prepare(
     "insert into forms (entry_id, text, reading, kind, common, tags) values (?, ?, ?, ?, ?, ?)"
   );
@@ -155,11 +199,20 @@ function insertWords(db: Database, words: JmdictWord[]) {
   const insertLookup = db.prepare(
     "insert into lookup_terms (term, entry_id, match_kind) values (?, ?, ?)"
   );
-
+  const insertExample = db.prepare(
+    `insert into examples
+      (sense_id, position, text, translations, source, source_name, source_id, review_status)
+     values (?, ?, ?, ?, 'sourced', ?, ?, 'source')`
+  );
+  const examplesBySourceId = new Map((exampleSource?.words ?? []).map((word) => [word.id, word]));
   const transaction = db.transaction((items: JmdictWord[]) => {
     for (const word of items) {
       const entryId = yoriEntryId(word.id);
-      insertEntry.run(entryId, word.id);
+      insertEntry.run(entryId, word.id, estimatedLevels.get(word.id) ?? null);
+      const exampleWord = examplesBySourceId.get(word.id);
+      if (exampleWord && exampleWord.sense.length !== word.sense.length) {
+        throw new Error(`JMdict examples have a different sense count for source ID ${word.id}`);
+      }
 
       const lookupTerms = new Set<string>();
       for (const kanji of word.kanji) {
@@ -201,11 +254,53 @@ function insertWords(db: Database, words: JmdictWord[]) {
           if (!apiLang) continue;
           insertGloss.run(senseId, apiLang, gloss.text, gloss.type ?? null);
         }
+
+        const sourceSense = exampleWord?.sense[index];
+        for (const [exampleIndex, example] of (sourceSense?.examples ?? []).entries()) {
+          const japanese = example.sentences.find((sentence) => sentence.lang === "jpn")?.text;
+          if (!japanese) continue;
+          const translations = example.sentences
+            .filter((sentence) => sentence.lang !== "jpn")
+            .map((sentence) => ({ lang: toApiLang(sentence.lang) ?? sentence.lang, text: sentence.text }));
+          insertExample.run(
+            senseId,
+            exampleIndex + 1,
+            japanese,
+            JSON.stringify(translations),
+            example.source.type === "tatoeba" ? "Tatoeba" : example.source.type,
+            example.source.value
+          );
+        }
       });
     }
   });
 
   transaction(words);
+}
+
+async function readEstimatedLevels(directory: string): Promise<Map<string, EstimatedLevel>> {
+  const levels = new Map<string, EstimatedLevel>();
+  const files = (await readdir(directory)).filter((file) => /^n[1-5]\.csv$/i.test(file)).sort();
+  if (files.length !== 5) {
+    throw new Error(`Expected n1.csv through n5.csv in ${directory}`);
+  }
+  for (const file of files) {
+    const match = basename(file).match(/^n([1-5])\.csv$/i);
+    if (!match) continue;
+    const level = `N${match[1]}` as EstimatedLevel;
+    const lines = (await Bun.file(join(directory, file)).text()).split(/\r?\n/).slice(1);
+    for (const line of lines) {
+      const separator = line.indexOf(",");
+      if (separator === -1) continue;
+      const sourceId = line.slice(0, separator).trim();
+      if (!/^\d+$/.test(sourceId)) continue;
+      const current = levels.get(sourceId);
+      if (!current || Number(level.slice(1)) > Number(current.slice(1))) {
+        levels.set(sourceId, level);
+      }
+    }
+  }
+  return levels;
 }
 
 function insertAiGlosses(db: Database, rows: AiGlossSource[]) {

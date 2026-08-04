@@ -27,6 +27,9 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Requested-language responses: no automatic English fallback.
 - Sense annotations from JMdict: usage tags, field of application, dialect, notes,
   cross-references, and loanword origin.
+- Human-written Tatoeba examples attached to individual senses.
+- Unofficial JLPT-band estimates joined by JMdict source ID.
+- An inflection path explaining how a conjugated lookup reached its dictionary form.
 
 Current coverage and limitations:
 
@@ -43,6 +46,8 @@ Current coverage and limitations:
   have Korean glosses, `lang=ko` returns those two senses instead of returning
   empty gloss lists for the other two.
 - Deinflection is word-level lookup help, not full sentence parsing.
+- `estimatedLevel` is omitted when the source lists do not cover an entry; it is
+  an estimate, not an official JLPT classification.
 
 ## Quick API Use
 
@@ -101,6 +106,23 @@ curl 'https://yori-dict-production.up.railway.app/v1/meta' | jq '.tags.uk'
 Cross-references in `related` and `antonym` are arrays in one of the
 JMdict-simplified forms: `[word]`, `[word, senseIndex]`, `[word, reading]`, or
 `[word, reading, senseIndex]`.
+
+## Examples, Estimated Levels, and Inflection Paths
+
+Each entry carries `headwordLanguage` (`ja` for the current dictionary).
+`estimatedLevel` is present only when the pinned unofficial vocabulary lists
+cover the entry. If a source ID occurs in several bands, the easiest band wins.
+
+Examples are ordered within their JMdict sense. `source` distinguishes
+`sourced` examples from future `generated` examples; sourced examples also
+carry `sourceName` and `sourceId`. `text` is the Japanese sentence,
+`translations` keeps each translation's `lang` and `text` explicit, and
+`reviewStatus` distinguishes untouched source material from checked additions.
+
+A lookup of a conjugated form adds `inflectionPath`, an ordered list of the
+actual reduction steps used for the selected result. Each step carries `from`,
+`to`, and a learner-readable `reason`. Exact lookups omit it, and adding it does
+not change result ranking.
 
 ## SQLite Download
 
@@ -170,6 +192,8 @@ This creates:
 
 ```txt
 data/raw/jmdict-all.json
+data/raw/jmdict-examples-eng.json
+data/raw/jlpt-vocab/n1.csv ... n5.csv
 data/yori.sqlite
 ```
 
@@ -179,6 +203,8 @@ Both are local generated files and are not committed.
 gloss sources were built against: `3.6.2+20260601171836`. To intentionally
 refresh to a different upstream release, pass `--tag` or set
 `JMDICT_SIMPLIFIED_TAG`, then revalidate and review affected AI gloss rows.
+The JLPT source is also pinned by commit in `scripts/download-jmdict.ts`; pass
+`--jlpt-commit` only when intentionally refreshing it.
 
 Reviewed AI gloss sources are committed under:
 

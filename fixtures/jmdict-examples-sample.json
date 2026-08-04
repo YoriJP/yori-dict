@@ -1,0 +1,60 @@
+{
+  "version": "3.6.1",
+  "languages": ["eng"],
+  "dictDate": "2026-06-08",
+  "words": [
+    {
+      "id": "1358280",
+      "kanji": [],
+      "kana": [],
+      "sense": [
+        {
+          "partOfSpeech": [],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "gloss": [],
+          "examples": [
+            {
+              "source": { "type": "tatoeba", "value": "193344" },
+              "text": "食べる",
+              "sentences": [
+                { "lang": "jpn", "text": "もっと果物を食べるべきです。" },
+                { "lang": "eng", "text": "You should eat more fruit." }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1000300",
+      "kanji": [],
+      "kana": [],
+      "sense": [
+        {
+          "partOfSpeech": [],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "gloss": [],
+          "examples": [
+            {
+              "source": { "type": "tatoeba", "value": "114734" },
+              "text": "あしらえない",
+              "sentences": [
+                { "lang": "jpn", "text": "彼はいいかげんにあしらえない人である。" },
+                { "lang": "eng", "text": "He is not a man to trifle with." }
+              ]
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "gloss": [],
+          "examples": []
+        }
+      ]
+    }
+  ]
+}

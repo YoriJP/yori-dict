@@ -45,7 +45,14 @@ export type JmdictSense = {
   misc?: string[];
   info?: string[];
   languageSource?: JmdictLanguageSource[];
+  examples?: JmdictExample[];
   gloss: JmdictGloss[];
+};
+
+export type JmdictExample = {
+  source: { type: string; value: string };
+  text: string;
+  sentences: Array<{ lang: SourceLang; text: string }>;
 };
 
 export type JmdictWord = {
@@ -84,6 +91,9 @@ export type PublicLookupItem = {
   common: boolean;
   source: "jmdict";
   sourceId: string;
+  headwordLanguage: "ja";
+  estimatedLevel?: EstimatedLevel;
+  inflectionPath?: InflectionStep[];
   headwords: PublicHeadword[];
   senses: PublicSense[];
 };
@@ -92,6 +102,8 @@ export type PublicEntry = {
   id: string;
   source: "jmdict";
   sourceId: string;
+  headwordLanguage: "ja";
+  estimatedLevel?: EstimatedLevel;
   headwords: PublicHeadword[];
   senses: PublicSense[];
 };
@@ -123,7 +135,25 @@ export type PublicSense = {
   related?: Xref[];
   antonym?: Xref[];
   languageSource?: PublicLanguageSource[];
+  examples?: PublicExample[];
   glosses: PublicGloss[];
+};
+
+export type EstimatedLevel = "N1" | "N2" | "N3" | "N4" | "N5";
+
+export type InflectionStep = {
+  from: string;
+  to: string;
+  reason: string;
+};
+
+export type PublicExample = {
+  text: string;
+  translations: Array<{ lang: string; text: string }>;
+  source: "sourced" | "generated";
+  sourceName?: string;
+  sourceId?: string;
+  reviewStatus: "source" | "checked";
 };
 
 export type PublicLanguageSource = {

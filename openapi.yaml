@@ -100,6 +100,12 @@ paths:
                   - name: JMdict
                     license: CC-BY-SA-4.0
                     url: https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project
+                  - name: Tatoeba example sentences
+                    license: CC BY 2.0 FR
+                    url: https://tatoeba.org/
+                  - name: yomitan-jlpt-vocab estimated levels
+                    license: CC BY-SA 4.0
+                    url: https://github.com/stephenmk/yomitan-jlpt-vocab
                   - name: Yori AI-assisted zh-TW glosses
                     license: CC-BY-SA-4.0
                     url: sources/ai-glosses/zh-tw.jsonl
@@ -278,7 +284,7 @@ components:
                   - type: "null"
     LookupItem:
       type: object
-      required: [id, word, reading, common, source, sourceId, headwords, senses]
+      required: [id, word, reading, common, source, sourceId, headwordLanguage, headwords, senses]
       properties:
         id:
           type: string
@@ -297,6 +303,23 @@ components:
         sourceId:
           type: string
           example: "1358280"
+        headwordLanguage:
+          type: string
+          description: BCP 47 language of the entry's headwords. Currently always Japanese.
+          const: ja
+        estimatedLevel:
+          type: string
+          description: >-
+            Unofficial estimated JLPT band. Omitted when the pinned source lists do not
+            cover the JMdict source ID; this is not an official JLPT classification.
+          enum: [N1, N2, N3, N4, N5]
+        inflectionPath:
+          type: array
+          description: >-
+            Ordered deinflection steps used for the selected result. Omitted for exact
+            lookups. This metadata does not affect result ranking.
+          items:
+            $ref: "#/components/schemas/InflectionStep"
         headwords:
           type: array
           items:
@@ -416,6 +439,11 @@ components:
           description: Origin of loanwords and wasei-eigo. Empty for words of Japanese origin.
           items:
             $ref: "#/components/schemas/LanguageSource"
+        examples:
+          type: array
+          description: Human-sourced or generated examples, ordered within this JMdict sense.
+          items:
+            $ref: "#/components/schemas/SenseExample"
         glosses:
           type: array
           minItems: 1
@@ -437,6 +465,58 @@ components:
           type: string
           description: Kind of translation. Omitted when absent.
           enum: [literal, figurative, explanation, trademark]
+    InflectionStep:
+      type: object
+      required: [from, to, reason]
+      properties:
+        from:
+          type: string
+          example: 食べました
+        to:
+          type: string
+          example: 食べる
+        reason:
+          type: string
+          example: polite past
+    ExampleTranslation:
+      type: object
+      required: [lang, text]
+      properties:
+        lang:
+          type: string
+          description: BCP 47 language code for the translation.
+          example: en
+        text:
+          type: string
+          example: You should eat more fruit.
+    SenseExample:
+      type: object
+      required: [text, translations, source, reviewStatus]
+      properties:
+        text:
+          type: string
+          description: Japanese example sentence.
+          example: もっと果物を食べるべきです。
+        translations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExampleTranslation"
+        source:
+          type: string
+          description: Distinguishes imported human examples from future generated examples.
+          enum: [sourced, generated]
+        sourceName:
+          type: string
+          description: Corpus name for a sourced example. Omitted when not applicable.
+          example: Tatoeba
+        sourceId:
+          type: string
+          description: Identifier in the source corpus. Omitted when not applicable.
+          example: "193344"
+        reviewStatus:
+          type: string
+          description: Source examples are untouched; generated examples must be checked.
+          enum: [source, checked]
     ErrorResponse:
       type: object
       required: [error]

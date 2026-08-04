@@ -41,6 +41,34 @@ Simplified Chinese glosses are derived from the reviewed Traditional Chinese
 source with OpenCC phrase conversion, then validated as a separate `zh-cn`
 source file.
 
+## Tatoeba Example Sentences
+
+Sourced sense examples come from Tatoeba through the `jmdict-examples-eng`
+asset published by `scriptin/jmdict-simplified`. Each example remains attached
+to its JMdict sense and retains its Tatoeba sentence ID.
+
+Tatoeba sentence data is distributed under Creative Commons Attribution 2.0
+France (CC BY 2.0 FR).
+
+Sources:
+
+- https://tatoeba.org/
+- https://tatoeba.org/en/terms_of_use
+- https://github.com/scriptin/jmdict-simplified
+
+## Estimated Levels
+
+Estimated levels come from `stephenmk/yomitan-jlpt-vocab`, pinned by commit in
+the download script and joined to entries only by `jmdict_seq`. That project
+packages its dictionary under CC BY-SA 4.0 and attributes the underlying JLPT
+lists to Jonathan Waller under CC BY. These are unofficial estimates: the JLPT
+does not publish an official vocabulary list.
+
+Sources:
+
+- https://github.com/stephenmk/yomitan-jlpt-vocab
+- http://www.tanos.co.uk/jlpt/
+
 ## Release SQLite Database
 
 Release artifacts are generated under `releases/` by:
@@ -49,9 +77,10 @@ Release artifacts are generated under `releases/` by:
 bun run release:package
 ```
 
-The release SQLite database contains JMdict-derived dictionary data and
-project-reviewed AI-assisted glosses. The database artifact is distributed
-under CC BY-SA 4.0.
+The release SQLite database contains JMdict-derived dictionary data, Tatoeba
+examples, estimated levels, and project-reviewed AI-assisted glosses. The
+database artifact is distributed under CC BY-SA 4.0; embedded source records
+retain the attribution described above.
 
 The release package includes:
 
@@ -64,7 +93,9 @@ yori-dict-<dictDate>.json
 ## Attribution
 
 Applications, services, and redistributed data artifacts using this database
-should acknowledge the JMdict project and EDRDG. A suitable attribution is:
+should acknowledge JMdict/EDRDG, Tatoeba, Jonathan Waller's source lists, and
+the `yomitan-jlpt-vocab` packaging project under the licenses above. A suitable
+JMdict attribution is:
 
 ```txt
 This product uses JMdict dictionary data from the Electronic Dictionary
@@ -77,3 +108,6 @@ If the AI-assisted glosses are used, also acknowledge this project:
 Some glosses include AI-assisted, project-reviewed additions from Yori Dict,
 distributed under CC BY-SA 4.0.
 ```
+
+For example sentences and estimated levels, also retain the Tatoeba IDs and
+source links carried by the database and name the list projects above.
