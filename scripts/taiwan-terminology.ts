@@ -16,17 +16,11 @@ type TermPolicy = {
 // TWPhrases also contains preferences and context-dependent mappings, so using
 // every entry as an error would reject valid Taiwanese text.
 const reviewedOpenCcTerms = [
-  "仿真",
   "信息",
-  "用戶",
   "兼容",
-  "創建",
   "批量",
   "接口",
-  "數據",
   "文件夾",
-  "智能",
-  "查看",
   "界面",
   "算法",
   "網絡",
@@ -35,41 +29,37 @@ const reviewedOpenCcTerms = [
   "變量",
   "軟件",
   "錄像",
-  "隊列",
-  "集成",
   "音頻",
   "屏幕",
   "寄存器",
   "遞歸",
-  "默認",
   "枚舉"
 ] as const;
 
 // Reviewed gaps in OpenCC 1.3.1's Taiwan phrase dictionary.
 const auditedAdditions = new Map<string, TermPolicy>([
-  ["幼兒園", { replacement: "幼稚園" }],
   ["初中", { replacement: "國中", matchPrefix: true }]
 ]);
 
-// These OpenCC mappings are terminology errors only in a software context.
-// The same words are valid Taiwanese for a restaurant menu, introducing a
-// system, or deriving a conclusion.
+// These OpenCC mappings are terminology errors only in specific technical
+// contexts. The same words also have ordinary Taiwanese meanings.
 const contextualOpenCcTerms = new Map<string, readonly string[]>([
+  ["用戶", ["軟體", "應用程式", "介面", "帳號", "登入", "權限", "用戶端"]],
+  ["創建", ["檔案", "資料夾", "帳號", "專案", "應用程式"]],
+  ["數據", ["數據庫", "流量", "處理", "檔案", "工藝", "技藝"]],
+  ["智能", ["終端機", "建築", "裝置", "設備", "手機", "系統", "軟體"]],
+  ["查看", ["檔案", "資料夾", "介面", "選單", "按鈕"]],
+  ["集成", ["軟體", "系統", "平台", "介面", "服務", "工具"]],
+  ["隊列", ["工作", "訊息", "任務", "資料結構", "演算法", "程式"]],
+  ["默認", ["設定", "配置", "選項", "值", "參數", "帳號"]],
   ["全局", ["變數", "變量", "作用域", "設定", "配置", "狀態", "物件", "函式", "函數"]],
   ["菜單", ["軟體", "應用程式", "介面", "下拉", "右鍵", "功能表"]],
   ["導入", ["檔案", "文件", "資料庫", "數據庫", "CSV", "JSON", "XML", "設定檔", "配置檔"]],
   ["導出", ["檔案", "文件", "資料庫", "數據庫", "CSV", "JSON", "XML", "設定檔", "配置檔"]]
 ]);
 
-// These phrases contain a reviewed term but are established Taiwanese usages.
-// Word segmentation handles the remaining overlap cases, such as 聚集成群.
-const allowedPhrases = new Map<string, readonly string[]>([
-  ["智能", ["智能障礙", "智能低下", "智能不足", "智能低下兒童", "重度智能障礙"]]
-]);
-
 const allowedTexts = new Map<string, readonly string[]>([
-  ["接口", ["接口", "連接口", "木質接口"]],
-  ["智能", ["智能"]]
+  ["接口", ["接口", "連接口", "木質接口"]]
 ]);
 
 const segmenter = new Intl.Segmenter("zh-TW", { granularity: "word" });
@@ -92,7 +82,7 @@ export function findPrcTerms(text: string): TaiwanTerminologyMatch[] {
       const localContext = clauseContaining(text, index, end);
       const hasRequiredContext =
         !policy.requiredContext || policy.requiredContext.some((context) => localContext.includes(context));
-      if (isBoundaryMatch && hasRequiredContext && !isAllowedPhrase(text, index, end, term)) {
+      if (isBoundaryMatch && hasRequiredContext && !isAllowedText(text, term)) {
         matches.push({ term, replacement: policy.replacement, index });
       }
 
@@ -150,15 +140,6 @@ function openCcTaiwanPhraseMap(): Map<string, string> {
   throw new Error("OpenCC TWPhrases dictionary is unavailable");
 }
 
-function isAllowedPhrase(text: string, start: number, end: number, term: string): boolean {
-  if ((allowedTexts.get(term) ?? []).includes(text)) return true;
-  return (allowedPhrases.get(term) ?? []).some((phrase) => {
-    let phraseStart = text.indexOf(phrase);
-    while (phraseStart !== -1) {
-      const phraseEnd = phraseStart + phrase.length;
-      if (phraseStart <= start && phraseEnd >= end) return true;
-      phraseStart = text.indexOf(phrase, phraseStart + phrase.length);
-    }
-    return false;
-  });
+function isAllowedText(text: string, term: string): boolean {
+  return (allowedTexts.get(term) ?? []).includes(text);
 }

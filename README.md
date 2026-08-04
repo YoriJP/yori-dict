@@ -15,7 +15,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Public API: <https://yori-dict-production.up.railway.app>
 - API docs: <https://yori-dict-production.up.railway.app/doc>
 - Raw OpenAPI spec: <https://yori-dict-production.up.railway.app/openapi.yaml>
-- SQLite data release: <https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.2>
+- SQLite data release: <https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3>
 
 ## What Yori Dict Supports
 
@@ -35,7 +35,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 Current coverage and limitations:
 
 - Traditional Chinese coverage is partial but broad for common lookup. The
-  `data-2026-08-04.2` release covers 77,863 zh-TW senses, including 19.60% of
+  `data-2026-08-04.3` release covers 77,863 zh-TW senses, including 19.60% of
   common JMdict senses.
 - Simplified Chinese is derived from the reviewed Traditional Chinese source
   with OpenCC phrase conversion. The same release covers 77,863 zh-CN
@@ -130,30 +130,30 @@ not change result ranking.
 Download and verify the current SQLite database:
 
 ```sh
-curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.2/yori-dict-2026-08-04.2.sqlite.gz
-curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.2/yori-dict-2026-08-04.2.sqlite.gz.sha256
-shasum -a 256 -c yori-dict-2026-08-04.2.sqlite.gz.sha256
-gunzip yori-dict-2026-08-04.2.sqlite.gz
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.3/yori-dict-2026-08-04.3.sqlite.gz
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.3/yori-dict-2026-08-04.3.sqlite.gz.sha256
+shasum -a 256 -c yori-dict-2026-08-04.3.sqlite.gz.sha256
+gunzip yori-dict-2026-08-04.3.sqlite.gz
 ```
 
 Release manifest:
 
 ```sh
-curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.2/yori-dict-2026-08-04.2.json
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.3/yori-dict-2026-08-04.3.json
 ```
 
-The `data-2026-08-04.2` release contains:
+The `data-2026-08-04.3` release contains:
 
 | Item | Count |
 | --- | ---: |
 | Entries | 217,294 |
 | Senses | 675,094 |
-| Glosses | 1,187,463 |
-| AI-assisted glosses | 413,457 |
+| Glosses | 1,187,469 |
+| AI-assisted glosses | 413,463 |
 | Sourced examples | 31,992 |
 | Entries with estimated levels | 7,747 |
 | Traditional Chinese senses | 77,863 |
-| Traditional Chinese glosses | 184,702 |
+| Traditional Chinese glosses | 184,708 |
 | Simplified Chinese senses | 77,863 |
 | Simplified Chinese glosses | 184,515 |
 | Korean senses | 19,072 |
@@ -225,7 +225,7 @@ SQLite artifact with the existing validation and packaging pipeline:
 ```sh
 bun run download:jmdict
 bun run release:check
-bun run scripts/package-release.ts --version 2026-08-04.2
+bun run scripts/package-release.ts --version 2026-08-04.3
 ```
 
 This writes ignored release files under `releases/`:

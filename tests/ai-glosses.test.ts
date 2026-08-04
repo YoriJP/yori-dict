@@ -12,12 +12,12 @@ test("flags reviewed PRC terminology with Taiwanese replacements", () => {
     [{ term: "屏幕", replacement: "螢幕", index: 0 }]
   ]);
   expect(findPrcTerms("初中生")).toEqual([{ term: "初中", replacement: "國中", index: 0 }]);
-  expect(["用戶", "智能終端機", "幼兒園", "網絡", "軟體菜單"].map((text) => findPrcTerms(text))).toEqual([
-    [{ term: "用戶", replacement: "使用者", index: 0 }],
+  expect(["軟體用戶", "智能終端機", "網絡", "軟體菜單", "默認設定"].map((text) => findPrcTerms(text))).toEqual([
+    [{ term: "用戶", replacement: "使用者", index: 2 }],
     [{ term: "智能", replacement: "智慧", index: 0 }],
-    [{ term: "幼兒園", replacement: "幼稚園", index: 0 }],
     [{ term: "網絡", replacement: "網路", index: 0 }],
-    [{ term: "菜單", replacement: "選單", index: 2 }]
+    [{ term: "菜單", replacement: "選單", index: 2 }],
+    [{ term: "默認", replacement: "預設", index: 0 }]
   ]);
   expect(findPrcTerms("從CSV檔案導入資料")).toContainEqual({ term: "導入", replacement: "匯入", index: 6 });
   expect(findPrcTerms("將資料導出為JSON檔案")).toContainEqual({ term: "導出", replacement: "匯出", index: 3 });
@@ -36,12 +36,34 @@ test("allows reviewed Taiwanese terminology overlap cases", () => {
     "智能障礙",
     "木質接口",
     "餐廳今天換了新菜單",
+    "孩子去幼兒園上學",
+    "他雖然沒有回答，但不表示默認",
+    "人類擁有很高的智能",
+    "警方查看屋內是否有財物遺失",
+    "創建一番事業",
+    "隊列整齊地向前行進",
+    "這把仿真槍沒有擊發功能",
     "從前提導出結論",
     "從前提導出結論後，把檔案收好。",
     "新制度的導入需要時間",
     "觀察整場比賽的全局"
   ]) {
     expect(findPrcTerms(text)).toEqual([]);
+  }
+});
+
+test("flags ambiguous terms only in the technical context where the replacement applies", () => {
+  for (const [text, term] of [
+    ["軟體用戶", "用戶"],
+    ["創建帳號", "創建"],
+    ["數據處理", "數據"],
+    ["智能終端機", "智能"],
+    ["查看檔案", "查看"],
+    ["系統集成", "集成"],
+    ["工作隊列", "隊列"],
+    ["默認設定", "默認"]
+  ]) {
+    expect(findPrcTerms(text).map((match) => match.term)).toContain(term);
   }
 });
 
