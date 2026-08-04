@@ -89,8 +89,8 @@ export function createEnrichmentService(options: {
   concurrency?: number;
   timeoutMs?: number;
 }): EnrichmentService {
-  const concurrency = Math.max(1, options.concurrency ?? 4);
-  const timeoutMs = Math.max(1, options.timeoutMs ?? 15_000);
+  const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
+  const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
   const inFlight = new Map<string, Promise<void>>();
   const runLimited = createLimiter(concurrency);
 
@@ -119,6 +119,13 @@ export function createEnrichmentService(options: {
     },
     enrichMany
   };
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
 }
 
 export function missingSeeds(item: PublicLookupItem, overlay: ExampleOverlay): GenerationSeed[] {

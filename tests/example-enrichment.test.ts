@@ -41,6 +41,25 @@ test("parsers reject malformed generator output and reviewer prose or rewrites",
   });
 });
 
+test("rejects invalid enrichment limits instead of silently disabling work", () => {
+  const overlay: ExampleOverlay = {
+    read: () => null,
+    write: () => {},
+    accepted: () => [],
+    close: () => {}
+  };
+  const modelCall: ModelCall = async () => "";
+
+  for (const concurrency of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 1.5]) {
+    expect(() => createEnrichmentService({ overlay, modelCall, concurrency })).toThrow(
+      "Enrichment concurrency must be a positive integer"
+    );
+  }
+  expect(() => createEnrichmentService({ overlay, modelCall, timeoutMs: Number.NaN })).toThrow(
+    "Model timeout must be a positive integer"
+  );
+});
+
 test("deterministic filter accepts a conjugated target and rejects PRC terminology", () => {
   const seed: GenerationSeed = {
     senseId: "sense",
