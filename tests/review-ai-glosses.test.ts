@@ -277,6 +277,82 @@ test("invalidates stale issues before an empty-bundle preflight failure", async 
   expect(readFileSync(issuesPath, "utf8")).toBe("");
 });
 
+test("invalidates stale issues before bundle preparation can fail in run mode", async () => {
+  const fixture = await createDefaultReviewFixture();
+  const fakeClaude = createFakeClaude(fixture.directory);
+  const env = {
+    PATH: `${fakeClaude.binDir}:${process.env.PATH ?? ""}`,
+    CLAUDE_ARGS_LOG: fakeClaude.argsLog,
+    CLAUDE_STDIN_LOG: fakeClaude.stdinLog,
+    CLAUDE_FAKE_OUTPUT: reviewIssue("yori:s_jmdict_1358280_1")
+  };
+  const issuesPath = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-0",
+    "issues.jsonl"
+  );
+
+  const valid = runDefaultReview(fixture.directory, 0, env);
+  writeFileSync(
+    join(fixture.directory, "sources", "ai-glosses", "zh-tw.jsonl"),
+    "not jsonl\n"
+  );
+  const malformed = runDefaultReview(fixture.directory, 0, env);
+
+  expect(valid.exitCode).toBe(0);
+  expect(malformed.exitCode).not.toBe(0);
+  expect(readFileSync(issuesPath, "utf8")).toBe("");
+});
+
+test("invalidates stale issues after regenerating a bundle-only checkpoint", async () => {
+  const fixture = await createDefaultReviewFixture();
+  const fakeClaude = createFakeClaude(fixture.directory);
+  const issuesPath = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-0",
+    "issues.jsonl"
+  );
+  const bundlePath = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-0",
+    "review-bundle.jsonl"
+  );
+  const valid = runDefaultReview(fixture.directory, 0, {
+    PATH: `${fakeClaude.binDir}:${process.env.PATH ?? ""}`,
+    CLAUDE_ARGS_LOG: fakeClaude.argsLog,
+    CLAUDE_STDIN_LOG: fakeClaude.stdinLog,
+    CLAUDE_FAKE_OUTPUT: reviewIssue("yori:s_jmdict_1358280_1")
+  });
+  writeFileSync(
+    join(fixture.directory, "sources", "ai-glosses", "zh-tw.jsonl"),
+    `${JSON.stringify({
+      senseId: "yori:s_jmdict_1206730_1",
+      lang: "zh-tw",
+      glosses: ["學校"],
+      source: "ai-assisted",
+      model: "test-model"
+    })}\n`
+  );
+
+  const regenerated = runDefaultBundle(fixture.directory, []);
+
+  expect(valid.exitCode).toBe(0);
+  expect(regenerated.exitCode).toBe(0);
+  expect(await readJsonl(bundlePath)).toEqual([
+    expect.objectContaining({ senseId: "yori:s_jmdict_1206730_1" })
+  ]);
+  expect(readFileSync(issuesPath, "utf8")).toBe("");
+});
+
 test("keeps common and non-common default checkpoints separate", async () => {
   const fixture = await createDefaultReviewFixture();
 

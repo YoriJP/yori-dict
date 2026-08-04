@@ -61,6 +61,9 @@ await main();
 
 async function main(): Promise<void> {
   const args = parseArgs(Bun.argv.slice(2));
+  if (args.runClaude) {
+    await invalidateReviewIssues(args.issuesPath, true);
+  }
   const sourceRows = await readJsonl<AiGlossSource>(args.sourcePath);
   const db = new Database(args.dbPath, { readonly: true });
   const reviewRows: ReviewRow[] = [];
@@ -103,6 +106,9 @@ async function main(): Promise<void> {
   const bundle = formatJsonl(reviewRows);
   await Bun.$`mkdir -p ${dirname(args.outPath)}`;
   await Bun.write(args.outPath, bundle);
+  if (!args.runClaude) {
+    await invalidateReviewIssues(args.issuesPath, false);
+  }
 
   console.log(`Wrote ${reviewRows.length} ${args.lang} review row(s) to ${args.outPath}`);
   if (args.commonOnly) console.log(`Skipped ${skippedNonCommon} non-common AI row(s)`);
@@ -122,8 +128,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  await Bun.$`mkdir -p ${dirname(args.issuesPath)}`;
-  await Bun.write(args.issuesPath, "");
   if (reviewRows.length === 0) {
     throw new Error("Cannot run AI-gloss review because the prepared bundle is empty.");
   }
@@ -133,6 +137,12 @@ async function main(): Promise<void> {
 
   await runClaudeReview(args, reviewRows, bundle);
   console.log(`Next offset: ${args.offset + reviewRows.length}`);
+}
+
+async function invalidateReviewIssues(issuesPath: string, createIfMissing: boolean): Promise<void> {
+  if (!createIfMissing && !(await Bun.file(issuesPath).exists())) return;
+  await Bun.$`mkdir -p ${dirname(issuesPath)}`;
+  await Bun.write(issuesPath, "");
 }
 
 async function runClaudeReview(args: Args, reviewRows: ReviewRow[], bundle: string): Promise<void> {

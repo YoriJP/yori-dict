@@ -369,9 +369,10 @@ preparing the bundle; run mode prints it only after Claude output is validated.
 Review output contains JSONL issues only; an empty output means no issues were
 flagged. The runner rejects malformed output and issue rows whose `senseId` was
 not present in the prepared bundle.
-Each offset keeps its own bundle, issues, raw output, and diagnostic logs. A
-failed rerun clears that checkpoint's validated issues before writing new raw
-output, so stale results cannot look current.
+Each offset keeps its own bundle, issues, raw output, and diagnostic logs. Run
+mode clears that checkpoint's validated issues before preparing a new bundle,
+and bundle-only regeneration clears existing issues after replacing the bundle,
+so stale results cannot look current.
 
 If a batch result has failures, export only those failed seeds for a rerun:
 
