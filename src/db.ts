@@ -5,8 +5,10 @@ import type {
   PublicEntry,
   PublicGloss,
   PublicHeadword,
+  PublicLanguageSource,
   PublicLookupItem,
-  PublicSense
+  PublicSense,
+  Xref
 } from "./types";
 import { normalizeQuery } from "./normalize";
 import { deinflect, type DeinflectionCandidate } from "./deinflect";
@@ -34,6 +36,14 @@ type SenseRow = {
   applies_to_kanji: string;
   applies_to_kana: string;
   part_of_speech: string;
+  // Absent in databases built before these columns existed.
+  misc?: string;
+  field?: string;
+  dialect?: string;
+  info?: string;
+  related?: string;
+  antonym?: string;
+  language_source?: string;
 };
 
 type GlossRow = {
@@ -42,6 +52,7 @@ type GlossRow = {
   text: string;
   source: "jmdict" | "ai-assisted";
   review_status: "source" | "checked";
+  type: string | null;
 };
 
 type LookupCandidate = {
@@ -55,6 +66,7 @@ export type LookupDb = {
     apiVersion: "v1";
     dictionaryVersion: string | null;
     languages: string[];
+    tags: Record<string, string>;
     sources: Array<{ name: string; license: string; url: string }>;
   };
   close(): void;
@@ -72,6 +84,7 @@ export function openLookupDb(path: string): LookupDb {
         apiVersion: "v1",
         dictionaryVersion: readMetadata(db, "dictDate"),
         languages: apiLanguages,
+        tags: readTags(db),
         sources: [
           {
             name: "JMdict",
@@ -225,8 +238,7 @@ function readHeadwords(db: Database, entryId: string): PublicHeadword[] {
 function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[] {
   return db
     .query<SenseRow, [string]>(
-      `select id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech
-       from senses
+      `select * from senses
        where entry_id = ?
        order by position`
     )
@@ -244,40 +256,48 @@ function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[]
             kana: JSON.parse(row.applies_to_kana) as string[]
           },
           partOfSpeech: JSON.parse(row.part_of_speech) as string[],
+          ...whenPresent("misc", parseList<string>(row.misc)),
+          ...whenPresent("field", parseList<string>(row.field)),
+          ...whenPresent("dialect", parseList<string>(row.dialect)),
+          ...whenPresent("info", parseList<string>(row.info)),
+          ...whenPresent("related", parseList<Xref>(row.related)),
+          ...whenPresent("antonym", parseList<Xref>(row.antonym)),
+          ...whenPresent("languageSource", parseList<PublicLanguageSource>(row.language_source)),
           glosses
         }
       ];
     });
 }
 
-function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {
-  try {
-    return db
-      .query<GlossRow, [string, ApiLang]>(
-        "select sense_id, lang, text, source, review_status from glosses where sense_id = ? and lang = ? order by rowid"
-      )
-      .all(senseId, lang)
-      .map((row) => ({
-        text: row.text,
-        source: row.source,
-        reviewStatus: row.review_status
-      }));
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("no such column: source")) {
-      throw error;
-    }
+function parseList<T>(value: string | null | undefined): T[] {
+  if (!value) return [];
+  return JSON.parse(value) as T[];
+}
 
-    return db
-      .query<{ text: string }, [string, ApiLang]>(
-        "select text from glosses where sense_id = ? and lang = ? order by rowid"
-      )
-      .all(senseId, lang)
-      .map((row) => ({
-        text: row.text,
-        source: "jmdict",
-        reviewStatus: "source"
-      }));
-  }
+function whenPresent<K extends string, T>(key: K, values: T[]): Partial<Record<K, T[]>> {
+  return values.length > 0 ? ({ [key]: values } as Record<K, T[]>) : {};
+}
+
+// `select *` so that databases built before a column was added still load:
+// missing columns read back as undefined and fall through to their defaults.
+function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {
+  return db
+    .query<Partial<GlossRow>, [string, ApiLang]>(
+      "select * from glosses where sense_id = ? and lang = ? order by rowid"
+    )
+    .all(senseId, lang)
+    .map((row) => ({
+      text: row.text ?? "",
+      source: row.source ?? "jmdict",
+      reviewStatus: row.review_status ?? "source",
+      ...(row.type ? { type: row.type } : {})
+    }));
+}
+
+function readTags(db: Database): Record<string, string> {
+  const raw = readMetadata(db, "tags");
+  if (!raw) return {};
+  return JSON.parse(raw) as Record<string, string>;
 }
 
 function readMetadata(db: Database, key: string): string | null {

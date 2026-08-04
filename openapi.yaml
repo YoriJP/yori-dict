@@ -92,6 +92,10 @@ paths:
                 apiVersion: v1
                 dictionaryVersion: "2026-06-01"
                 languages: [en, de, zh-tw, zh-cn, ko]
+                tags:
+                  uk: word usually written using kana alone
+                  vt: transitive verb
+                  ksb: Kansai-ben
                 sources:
                   - name: JMdict
                     license: CC-BY-SA-4.0
@@ -206,7 +210,7 @@ components:
       enum: [en, de, zh-tw, zh-cn, ko]
     MetaResponse:
       type: object
-      required: [apiVersion, dictionaryVersion, languages, sources]
+      required: [apiVersion, dictionaryVersion, languages, tags, sources]
       properties:
         apiVersion:
           type: string
@@ -217,6 +221,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ApiLang"
+        tags:
+          type: object
+          description: >-
+            Every JMdict tag code used in partOfSpeech, misc, field, and dialect,
+            mapped to its description. Empty when the dictionary carries no tag
+            metadata.
+          additionalProperties:
+            type: string
         sources:
           type: array
           items:
@@ -311,9 +323,39 @@ components:
           type: array
           items:
             type: string
+    Xref:
+      type: array
+      description: >-
+        Cross-reference to another entry, in one of the JMdict-simplified forms:
+        [word], [word, senseIndex], [word, reading], or [word, reading, senseIndex].
+      items:
+        oneOf:
+          - type: string
+          - type: integer
+      example: [汚い, きたない, 1]
+    LanguageSource:
+      type: object
+      required: [lang, full, wasei, text]
+      properties:
+        lang:
+          type: string
+          description: ISO 639-2 code of the source language.
+          example: eng
+        full:
+          type: boolean
+          description: Whether the source text fully describes the loanword.
+        wasei:
+          type: boolean
+          description: Whether the word is wasei-eigo (Japanese-made pseudo-loanword).
+        text:
+          type: [string, "null"]
+          example: personal computer
     Sense:
       type: object
       required: [id, position, appliesTo, partOfSpeech, glosses]
+      description: >-
+        Annotation fields are omitted when JMdict has no values for them. Tag codes in
+        misc, field, dialect, and partOfSpeech are described by `tags` on /v1/meta.
       properties:
         id:
           type: string
@@ -338,6 +380,42 @@ components:
           items:
             type: string
           example: [v1, vt]
+        misc:
+          type: array
+          description: Miscellaneous tags, such as `uk` (usually written in kana) or `col`.
+          items:
+            type: string
+          example: [uk]
+        field:
+          type: array
+          description: Fields of application, such as `comp`, `med`, or `finc`.
+          items:
+            type: string
+          example: [comp]
+        dialect:
+          type: array
+          description: Dialects the sense belongs to, such as `ksb` (Kansai-ben).
+          items:
+            type: string
+          example: [ksb]
+        info:
+          type: array
+          description: Free-text notes about this sense.
+          items:
+            type: string
+        related:
+          type: array
+          items:
+            $ref: "#/components/schemas/Xref"
+        antonym:
+          type: array
+          items:
+            $ref: "#/components/schemas/Xref"
+        languageSource:
+          type: array
+          description: Origin of loanwords and wasei-eigo. Empty for words of Japanese origin.
+          items:
+            $ref: "#/components/schemas/LanguageSource"
         glosses:
           type: array
           minItems: 1
@@ -355,6 +433,10 @@ components:
         reviewStatus:
           type: string
           enum: [source, checked]
+        type:
+          type: string
+          description: Kind of translation. Omitted when absent.
+          enum: [literal, figurative, explanation, trademark]
     ErrorResponse:
       type: object
       required: [error]
