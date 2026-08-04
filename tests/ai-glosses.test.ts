@@ -35,6 +35,7 @@ test("allows reviewed Taiwanese terminology overlap cases", () => {
     "多變量分析",
     "智能障礙",
     "木質接口",
+    "這個木質接口很牢固。",
     "餐廳今天換了新菜單",
     "孩子去幼兒園上學",
     "他雖然沒有回答，但不表示默認",
@@ -65,6 +66,10 @@ test("flags ambiguous terms only in the technical context where the replacement 
   ]) {
     expect(findPrcTerms(text).map((match) => match.term)).toContain(term);
   }
+});
+
+test("does not let an allowed physical interface phrase hide a software interface", () => {
+  expect(findPrcTerms("這個軟體接口很難用。")).toContainEqual({ term: "接口", replacement: "介面", index: 4 });
 });
 
 test("imports AI gloss source rows into lookup responses", async () => {

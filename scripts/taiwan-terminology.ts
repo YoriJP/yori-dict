@@ -59,7 +59,11 @@ const contextualOpenCcTerms = new Map<string, readonly string[]>([
 ]);
 
 const allowedTexts = new Map<string, readonly string[]>([
-  ["接口", ["接口", "連接口", "木質接口"]]
+  ["接口", ["接口"]]
+]);
+
+const allowedPhrases = new Map<string, readonly string[]>([
+  ["接口", ["連接口", "木質接口"]]
 ]);
 
 const segmenter = new Intl.Segmenter("zh-TW", { granularity: "word" });
@@ -82,7 +86,7 @@ export function findPrcTerms(text: string): TaiwanTerminologyMatch[] {
       const localContext = clauseContaining(text, index, end);
       const hasRequiredContext =
         !policy.requiredContext || policy.requiredContext.some((context) => localContext.includes(context));
-      if (isBoundaryMatch && hasRequiredContext && !isAllowedText(text, term)) {
+      if (isBoundaryMatch && hasRequiredContext && !isAllowedUsage(text, index, end, term)) {
         matches.push({ term, replacement: policy.replacement, index });
       }
 
@@ -140,6 +144,14 @@ function openCcTaiwanPhraseMap(): Map<string, string> {
   throw new Error("OpenCC TWPhrases dictionary is unavailable");
 }
 
-function isAllowedText(text: string, term: string): boolean {
-  return (allowedTexts.get(term) ?? []).includes(text);
+function isAllowedUsage(text: string, start: number, end: number, term: string): boolean {
+  if ((allowedTexts.get(term) ?? []).includes(text)) return true;
+  return (allowedPhrases.get(term) ?? []).some((phrase) => {
+    let phraseStart = text.indexOf(phrase);
+    while (phraseStart !== -1) {
+      if (phraseStart <= start && phraseStart + phrase.length >= end) return true;
+      phraseStart = text.indexOf(phrase, phraseStart + phrase.length);
+    }
+    return false;
+  });
 }
