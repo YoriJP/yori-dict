@@ -124,7 +124,8 @@ export function createEnrichmentService(options: {
 export function missingSeeds(item: PublicLookupItem, overlay: ExampleOverlay): GenerationSeed[] {
   const glosses = new Map(item.senses.map((sense) => [sense.id, sense.glosses.map((gloss) => gloss.text)]));
   return item.senses.flatMap((sense) => {
-    if ((sense.examples?.length ?? 0) > 0 || overlay.read(sense.id)) return [];
+    const record = overlay.read(sense.id);
+    if ((sense.examples?.length ?? 0) > 0 || (record && record.status !== "error")) return [];
     return [seedFor(item, sense, glosses)];
   });
 }
@@ -149,11 +150,12 @@ async function enrichSense(
   modelCall: ModelCall,
   timeoutMs: number
 ): Promise<void> {
-  const attempts: EnrichmentAttempt[] = [];
+  const previous = overlay.read(seed.senseId);
+  const attempts: EnrichmentAttempt[] = previous?.status === "error" ? [...previous.attempts] : [];
   let priorRejection: string | null = null;
 
   for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
-    const candidateId = `${seed.senseId}:${attemptIndex + 1}`;
+    const candidateId = `${seed.senseId}:${attempts.length + 1}`;
     const baseAttempt: EnrichmentAttempt = {
       candidateId,
       generator: provenance(generatorConfig)
@@ -262,7 +264,15 @@ async function enrichSense(
         });
         continue;
       }
-    } catch {
+    } catch (error) {
+      const reason = transportReason("reviewer", error);
+      attempts.push({
+        ...translatedAttempt,
+        reviewer: provenance(reviewerConfig),
+        candidate: example,
+        rejectionReason: reason
+      });
+      overlay.write({ senseId: seed.senseId, status: "error", example, attempts, reason });
       return;
     }
 
@@ -490,6 +500,22 @@ function parseObject(text: string): unknown {
   return parsed;
 }
 
+function transportReason(role: ModelRole, error: unknown): string {
+  return error instanceof Error && error.message === "Model call timed out"
+    ? `${role}_timeout`
+    : `${role}_error`;
+}
+
+export function makeGeminiRequestBody(input: Pick<Parameters<ModelCall>[0], "prompt" | "reasoningEffort">) {
+  return {
+    contents: [{ role: "user", parts: [{ text: input.prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      thinkingConfig: { thinkingBudget: input.reasoningEffort === "none" ? 0 : 1024 }
+    }
+  };
+}
+
 export const defaultModelCall: ModelCall = async (input) => {
   if (input.allowFallbacks || !input.requireParameters) {
     throw new Error("Model routing must disable fallbacks and require every request parameter");
@@ -503,13 +529,7 @@ export const defaultModelCall: ModelCall = async (input) => {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: input.signal,
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: input.prompt }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            thinkingConfig: { thinkingBudget: 1024 }
-          }
-        })
+        body: JSON.stringify(makeGeminiRequestBody(input))
       }
     );
     if (!response.ok) throw new Error(`Gemini request failed: ${response.status}`);

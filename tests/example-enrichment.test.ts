@@ -7,8 +7,11 @@ import { openLookupDb, type LookupDb } from "../src/db";
 import {
   createEnrichmentService,
   filterCandidate,
+  generatorConfig,
+  makeGeminiRequestBody,
   parseGeneration,
   parseReview,
+  translatorConfig,
   type GenerationSeed,
   type ModelCall
 } from "../src/example-enrichment";
@@ -70,10 +73,12 @@ test("deterministic filter accepts a conjugated target and rejects PRC terminolo
 
 test("authorised lookup fills a gap, persists provenance, and public lookup reuses it", async () => {
   let calls = 0;
+  const translatorRequests: Array<ReturnType<typeof makeGeminiRequestBody>> = [];
   const runtime = await setup(async (input) => {
     calls += 1;
     expect(input.allowFallbacks).toBe(false);
     expect(input.requireParameters).toBe(true);
+    if (input.role === "translator") translatorRequests.push(makeGeminiRequestBody(input));
     return validResponse(input.role, input.prompt);
   });
   const enriched = await runtime.app.request("/v1/lookup?q=%E5%AD%A6%E6%A0%A1&enrich=true", {
@@ -96,6 +101,10 @@ test("authorised lookup fills a gap, persists provenance, and public lookup reus
     reasoningEffort: "none",
     provider: "google"
   });
+  expect(translatorRequests[0]?.generationConfig.thinkingConfig.thinkingBudget).toBe(0);
+  expect(makeGeminiRequestBody({ prompt: "test", reasoningEffort: generatorConfig.reasoningEffort })
+    .generationConfig.thinkingConfig.thinkingBudget).toBe(1024);
+  expect(translatorConfig.reasoningEffort).toBe("none");
   expect(enrichedBody.item.senses[0].examples[0].translations).toEqual([
     { lang: "en", text: "We talked about 学校." },
     { lang: "zh-tw", text: "我們和老師談了這個詞。" },
@@ -214,6 +223,43 @@ test("malformed reviewer output retries once and records the terminal drop", asy
   expect(record?.reason).toBe("malformed_reviewer");
   expect(generatorPrompts[1]).toContain("malformed_reviewer");
   expect(roles).toEqual(["generator", "translator", "reviewer", "generator", "translator", "reviewer"]);
+});
+
+test("reviewer timeout persists full provenance and remains retryable", async () => {
+  let reviewerCalls = 0;
+  let totalCalls = 0;
+  const runtime = await setup(async (input) => {
+    totalCalls += 1;
+    if (input.role === "reviewer") {
+      reviewerCalls += 1;
+      if (reviewerCalls === 1) return new Promise<string>(() => {});
+    }
+    return validResponse(input.role, input.prompt);
+  }, { timeoutMs: 5 });
+
+  const first = await authorised(runtime.app, "学校");
+  const firstBody = await first.json();
+  expect(first.status).toBe(200);
+  expect(firstBody.item.senses[0]).not.toHaveProperty("examples");
+  const failed = runtime.overlay.read(firstBody.item.senses[0].id);
+  expect(failed?.status).toBe("error");
+  expect(failed?.reason).toBe("reviewer_timeout");
+  expect(failed?.example?.translations.map((item) => item.lang)).toEqual(["en", "zh-tw", "zh-cn"]);
+  expect(failed?.attempts[0].generator.provider).toBe("google");
+  expect(failed?.attempts[0].translator?.reasoningEffort).toBe("none");
+  expect(failed?.attempts[0].reviewer?.provider).toBe("anthropic");
+
+  const publicLookup = await runtime.app.request("/v1/lookup?q=%E5%AD%A6%E6%A0%A1");
+  expect((await publicLookup.json()).item.senses[0]).not.toHaveProperty("examples");
+  expect(totalCalls).toBe(3);
+
+  const retry = await authorised(runtime.app, "学校");
+  expect((await retry.json()).item.senses[0].examples[0].source).toBe("generated");
+  const accepted = runtime.overlay.read(firstBody.item.senses[0].id);
+  expect(accepted?.status).toBe("accepted");
+  expect(accepted?.attempts).toHaveLength(2);
+  expect(accepted?.attempts[0].rejectionReason).toBe("reviewer_timeout");
+  expect(reviewerCalls).toBe(2);
 });
 
 test("many gaps have no enrichment cap and model concurrency stays bounded", async () => {

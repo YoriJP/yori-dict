@@ -20,7 +20,7 @@ export type EnrichmentAttempt = {
 
 export type OverlayRecord = {
   senseId: string;
-  status: "accepted" | "abstained" | "dropped";
+  status: "accepted" | "abstained" | "dropped" | "error";
   example?: PublicExample;
   attempts: EnrichmentAttempt[];
   reason?: string;
@@ -36,16 +36,7 @@ export type ExampleOverlay = {
 export function openExampleOverlay(path: string): ExampleOverlay {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { create: true });
-  db.exec(`
-    create table if not exists example_enrichments (
-      sense_id text primary key,
-      status text not null check (status in ('accepted', 'abstained', 'dropped')),
-      example_json text,
-      attempts_json text not null,
-      reason text,
-      updated_at text not null
-    )
-  `);
+  ensureSchema(db);
   const read = db.prepare<{
     sense_id: string;
     status: OverlayRecord["status"];
@@ -109,6 +100,36 @@ export function openExampleOverlay(path: string): ExampleOverlay {
       db.close();
     }
   };
+}
+
+function ensureSchema(db: Database): void {
+  const createTable = `
+    create table if not exists example_enrichments (
+      sense_id text primary key,
+      status text not null check (status in ('accepted', 'abstained', 'dropped', 'error')),
+      example_json text,
+      attempts_json text not null,
+      reason text,
+      updated_at text not null
+    )
+  `;
+  const existing = db
+    .query<{ sql: string }, []>("select sql from sqlite_master where type = 'table' and name = 'example_enrichments'")
+    .get();
+  if (!existing) {
+    db.exec(createTable);
+    return;
+  }
+  if (existing.sql.includes("'error'")) return;
+  db.transaction(() => {
+    db.exec("alter table example_enrichments rename to example_enrichments_old");
+    db.exec(createTable);
+    db.exec(`insert into example_enrichments
+      (sense_id, status, example_json, attempts_json, reason, updated_at)
+      select sense_id, status, example_json, attempts_json, reason, updated_at
+      from example_enrichments_old`);
+    db.exec("drop table example_enrichments_old");
+  })();
 }
 
 export function applyOverlay(item: PublicLookupItem | null, overlay: ExampleOverlay): PublicLookupItem | null {
