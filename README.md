@@ -274,55 +274,6 @@ bun run start
 The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`. Railway obtains that database
 from the release pinned in `data-release.json`; deploys do not contact JMdict upstream.
 
-### Example enrichment
-
-Normal lookups are read-only and never call a model. A maintainer can opt into filling all
-missing examples exposed by a lookup with `enrich=true` and a bearer token:
-
-```sh
-curl -H "Authorization: Bearer $YORI_ENRICHMENT_TOKEN" \
-  'http://localhost:3000/v1/lookup?q=学校&enrich=true'
-```
-
-Configure `YORI_ENRICHMENT_TOKEN`, `GEMINI_API_KEY`, `GEMINI_ZH_TW_API_KEY`, and
-`ANTHROPIC_API_KEY`. The writable
-overlay defaults to `data/example-overlay.sqlite`; set `YORI_EXAMPLE_OVERLAY_PATH` to the
-mounted volume in production. `YORI_ENRICHMENT_CONCURRENCY` defaults to 4 and
-`YORI_MODEL_TIMEOUT_MS` to 15000. Japanese generation is pinned to `gemini-2.5-flash` at low
-reasoning. A separate Traditional Chinese translation call is pinned to
-`gemini-2.5-flash-lite` with no reasoning, and Simplified Chinese is derived from that output
-with OpenCC. The separate reviewer family is pinned to
-`claude-haiku-4-5-20251001` through Anthropic. Direct provider APIs do not provide fallback
-routing, so unsupported request parameters cannot be silently dropped by another provider.
-
-Abstentions and candidates rejected twice are recorded and not regenerated indefinitely.
-Transient model errors and timeouts leave the sense empty and do not fail the lookup.
-Export accepted staging rows before a data release, then rebuild normally:
-
-```sh
-bun run examples:export -- --overlay data/example-overlay.sqlite \
-  --out sources/ai-examples/generated.jsonl
-bun run build:db
-```
-
-The committed JSONL retains every generation attempt and its exact model, reasoning effort,
-and provider. `build:db` folds accepted rows into the read-only release database.
-
-Run the fixed-corpus generator comparison and reviewer calibration on demand:
-
-```sh
-GEMINI_API_KEY=... GEMINI_ZH_TW_API_KEY=... ANTHROPIC_API_KEY=... \
-  bun run examples:eval -- --run-id 2026-08-04-baseline
-```
-
-The command runs each generation case three times for both pinned candidate triples, then
-calibrates the pinned reviewer against accepted examples and one-defect mutations. It writes
-one immutable result to `data/example-evaluation/<run-id>/result.json` and refuses to replace
-an existing run. The result embeds the corpus, mutations, exact configs, input hashes, raw
-responses, and separate false-accept and false-reject denominators. These calls spend provider
-credits and intentionally do not run in CI. See [the evaluation findings](docs/example-evaluation.md)
-before interpreting a run.
-
 ## API Shape
 
 See [openapi.yaml](openapi.yaml) for the full OpenAPI description.
