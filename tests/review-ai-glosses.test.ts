@@ -119,10 +119,85 @@ test("fails closed when Claude returns invalid or out-of-scope issues", async ()
 
   expect(result.exitCode).not.toBe(0);
   expect(new TextDecoder().decode(result.stderr)).toContain("not present in the review bundle");
-  expect(existsSync(fixture.issuesPath)).toBe(false);
+  expect(readFileSync(fixture.issuesPath, "utf8")).toBe("");
   expect(readFileSync(join(fixture.directory, "claude.raw.txt"), "utf8")).toContain(
     "yori:s_jmdict_missing_1"
   );
+});
+
+test("keeps default artifacts separate for sequential offsets", async () => {
+  const fixture = await createDefaultReviewFixture();
+  const fakeClaude = createFakeClaude(fixture.directory);
+  const baseEnv = {
+    PATH: `${fakeClaude.binDir}:${process.env.PATH ?? ""}`,
+    CLAUDE_ARGS_LOG: fakeClaude.argsLog,
+    CLAUDE_STDIN_LOG: fakeClaude.stdinLog
+  };
+
+  const first = runDefaultReview(fixture.directory, 0, {
+    ...baseEnv,
+    CLAUDE_FAKE_OUTPUT: reviewIssue("yori:s_jmdict_1358280_1")
+  });
+  const second = runDefaultReview(fixture.directory, 1, {
+    ...baseEnv,
+    CLAUDE_FAKE_OUTPUT: reviewIssue("yori:s_jmdict_1206730_1")
+  });
+
+  expect(first.exitCode).toBe(0);
+  expect(second.exitCode).toBe(0);
+  const firstIssues = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-0",
+    "issues.jsonl"
+  );
+  const secondIssues = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-1",
+    "issues.jsonl"
+  );
+  expect(await readJsonl(firstIssues)).toEqual([
+    expect.objectContaining({ senseId: "yori:s_jmdict_1358280_1" })
+  ]);
+  expect(await readJsonl(secondIssues)).toEqual([
+    expect.objectContaining({ senseId: "yori:s_jmdict_1206730_1" })
+  ]);
+});
+
+test("invalidates stale issues before rerunning a checkpoint", async () => {
+  const fixture = await createDefaultReviewFixture();
+  const fakeClaude = createFakeClaude(fixture.directory);
+  const baseEnv = {
+    PATH: `${fakeClaude.binDir}:${process.env.PATH ?? ""}`,
+    CLAUDE_ARGS_LOG: fakeClaude.argsLog,
+    CLAUDE_STDIN_LOG: fakeClaude.stdinLog
+  };
+  const issuesPath = join(
+    fixture.directory,
+    "data",
+    "ai-review",
+    "zh-tw",
+    "offset-0",
+    "issues.jsonl"
+  );
+
+  const valid = runDefaultReview(fixture.directory, 0, {
+    ...baseEnv,
+    CLAUDE_FAKE_OUTPUT: reviewIssue("yori:s_jmdict_1358280_1")
+  });
+  const invalid = runDefaultReview(fixture.directory, 0, {
+    ...baseEnv,
+    CLAUDE_FAKE_OUTPUT: "not jsonl"
+  });
+
+  expect(valid.exitCode).toBe(0);
+  expect(invalid.exitCode).not.toBe(0);
+  expect(readFileSync(issuesPath, "utf8")).toBe("");
 });
 
 type ReviewFixture = {
@@ -171,6 +246,53 @@ async function createReviewFixture(): Promise<ReviewFixture> {
   return { directory, dbPath, sourcePath, bundlePath, issuesPath };
 }
 
+async function createDefaultReviewFixture(): Promise<{ directory: string }> {
+  const directory = mkdtempSync(join(tmpdir(), "yori-ai-review-default-"));
+  temporaryDirectories.push(directory);
+  const dbPath = join(directory, "data", "yori.sqlite");
+  const sourcePath = join(directory, "sources", "ai-glosses", "zh-tw.jsonl");
+  mkdirSync(join(directory, "data"), { recursive: true });
+  mkdirSync(join(directory, "sources", "ai-glosses"), { recursive: true });
+
+  const imported = Bun.spawnSync(
+    [
+      "bun",
+      "run",
+      join(repoRoot, "scripts", "import-jmdict.ts"),
+      "--input",
+      join(repoRoot, "fixtures", "jmdict-sample.json"),
+      "--out",
+      dbPath
+    ],
+    { cwd: repoRoot, stdout: "pipe", stderr: "pipe" }
+  );
+  if (imported.exitCode !== 0) {
+    throw new Error(new TextDecoder().decode(imported.stderr));
+  }
+  await Bun.write(
+    sourcePath,
+    [
+      {
+        senseId: "yori:s_jmdict_1358280_1",
+        lang: "zh-tw",
+        glosses: ["食用"],
+        source: "ai-assisted",
+        model: "test-model"
+      },
+      {
+        senseId: "yori:s_jmdict_1206730_1",
+        lang: "zh-tw",
+        glosses: ["學校"],
+        source: "ai-assisted",
+        model: "test-model"
+      }
+    ]
+      .map((row) => JSON.stringify(row))
+      .join("\n") + "\n"
+  );
+  return { directory };
+}
+
 function runReview(
   fixture: ReviewFixture,
   extraArgs: string[] = [],
@@ -202,6 +324,42 @@ function runReview(
       env: { ...process.env, ...env }
     }
   );
+}
+
+function runDefaultReview(
+  directory: string,
+  offset: number,
+  env: Record<string, string>
+): ReturnType<typeof Bun.spawnSync> {
+  return Bun.spawnSync(
+    [
+      "bun",
+      "run",
+      reviewScript,
+      "--run",
+      "--lang",
+      "zh-tw",
+      "--limit",
+      "1",
+      "--offset",
+      String(offset)
+    ],
+    {
+      cwd: directory,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, ...env }
+    }
+  );
+}
+
+function reviewIssue(senseId: string): string {
+  return JSON.stringify({
+    senseId,
+    severity: "medium",
+    reason: "Needs review.",
+    suggestedGlosses: []
+  });
 }
 
 function createFakeClaude(directory: string): {

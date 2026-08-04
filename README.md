@@ -355,7 +355,8 @@ bun run ai:review:run -- --lang ko --limit 500 --offset 100
 The runner sends the prepared rows through stdin, keeps repository tools
 disabled, defaults to low effort, one turn, and a USD 1.00 budget, and writes
 validated JSONL issues plus raw output and diagnostic logs under
-`data/ai-review/<lang>/`. Override the execution limits when needed:
+`data/ai-review/<lang>/offset-<offset>/`. Override the execution limits when
+needed:
 
 ```sh
 bun run ai:review:run -- --lang ko --limit 500 --offset 100 --model sonnet --effort low --max-turns 1 --max-budget-usd 1.00
@@ -365,6 +366,9 @@ Each bundle is capped at 500 rows. The command prints the next offset for the
 following bundle. Review output contains JSONL issues only; an empty output
 means no issues were flagged. The runner rejects malformed output and issue
 rows whose `senseId` was not present in the prepared bundle.
+Each offset keeps its own bundle, issues, raw output, and diagnostic logs. A
+failed rerun clears that checkpoint's validated issues before writing new raw
+output, so stale results cannot look current.
 
 If a batch result has failures, export only those failed seeds for a rerun:
 

@@ -138,6 +138,7 @@ async function runClaudeReview(args: Args, reviewRows: ReviewRow[], bundle: stri
   const stderrPath = join(outputDirectory, "claude.stderr.log");
   const debugPath = join(outputDirectory, "claude.debug.log");
   await Bun.$`mkdir -p ${outputDirectory}`;
+  await Bun.write(args.issuesPath, "");
 
   const claudeArgs = [
     "claude",
@@ -250,15 +251,17 @@ function parseArgs(argv: string[]): Args {
   if (commonOnly && nonCommonOnly) {
     throw new Error("Use either --common-only or --non-common-only, not both");
   }
+  const offset = parseNonNegativeInt(readFlag(argv, "--offset") ?? "0", "--offset");
+  const defaultOutputDirectory = `data/ai-review/${lang}/offset-${offset}`;
 
   return {
     dbPath: readFlag(argv, "--db") ?? "data/yori.sqlite",
     sourcePath: readFlag(argv, "--source") ?? `sources/ai-glosses/${lang}.jsonl`,
-    outPath: readFlag(argv, "--out") ?? `data/ai-review/${lang}/review-bundle.jsonl`,
-    issuesPath: readFlag(argv, "--issues") ?? `data/ai-review/${lang}/issues.jsonl`,
+    outPath: readFlag(argv, "--out") ?? join(defaultOutputDirectory, "review-bundle.jsonl"),
+    issuesPath: readFlag(argv, "--issues") ?? join(defaultOutputDirectory, "issues.jsonl"),
     lang,
     limit: parseBoundedPositiveInt(readFlag(argv, "--limit") ?? "200", "--limit", maxReviewRows),
-    offset: parseNonNegativeInt(readFlag(argv, "--offset") ?? "0", "--offset"),
+    offset,
     commonOnly,
     nonCommonOnly,
     runClaude: argv.includes("--run"),
