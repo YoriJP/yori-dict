@@ -18,6 +18,7 @@ export type JmdictLanguageSource = {
 export type JmdictGloss = {
   lang: SourceLang;
   text: string;
+  gender?: string | null;
   type?: string | null;
 };
 

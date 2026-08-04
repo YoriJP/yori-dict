@@ -9,10 +9,20 @@
       "kana": [],
       "sense": [
         {
-          "partOfSpeech": [],
+          "partOfSpeech": ["v1", "vt"],
           "appliesToKanji": ["*"],
           "appliesToKana": ["*"],
-          "gloss": [],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "to eat" },
+            { "lang": "ger", "gender": null, "type": null, "text": "essen" }
+          ],
           "examples": [
             {
               "source": { "type": "tatoeba", "value": "193344" },
@@ -32,10 +42,19 @@
       "kana": [],
       "sense": [
         {
-          "partOfSpeech": [],
+          "partOfSpeech": ["v5u", "vt"],
           "appliesToKanji": ["*"],
           "appliesToKana": ["*"],
-          "gloss": [],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": ["uk"],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "to arrange" }
+          ],
           "examples": [
             {
               "source": { "type": "tatoeba", "value": "114734" },
@@ -46,13 +65,38 @@
               ]
             }
           ]
-        },
+        }
+      ]
+    },
+    {
+      "id": "2000006",
+      "kanji": [],
+      "kana": [],
+      "sense": [
         {
-          "partOfSpeech": [],
+          "partOfSpeech": ["n"],
           "appliesToKanji": ["*"],
           "appliesToKana": ["*"],
-          "gloss": [],
-          "examples": []
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "ambiguous fixture" }
+          ],
+          "examples": [
+            {
+              "source": { "type": "tatoeba", "value": "ambiguous" },
+              "text": "あいまい語",
+              "sentences": [
+                { "lang": "jpn", "text": "これはあいまい語です。" },
+                { "lang": "eng", "text": "This is ambiguous." }
+              ]
+            }
+          ]
         }
       ]
     }

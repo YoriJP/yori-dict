@@ -54,12 +54,19 @@ const db = new Database(args.out);
 
 createSchema(db);
 insertMetadata(db, source);
-insertWords(db, source.words, exampleSource, estimatedLevels);
+const sourcedExampleStats = insertWords(db, source.words, exampleSource, estimatedLevels);
 insertAiGlosses(db, aiGlosses);
 insertAiExamples(db, aiExamples);
 db.close();
 
 console.log(`Imported ${source.words.length} JMdict entries into ${args.out}`);
+if (exampleSource) {
+  console.log(
+    `Imported ${sourcedExampleStats.imported} sourced example(s); ` +
+      `skipped ${sourcedExampleStats.unmatched} unmatched, ` +
+      `${sourcedExampleStats.ambiguous} ambiguous, and ${sourcedExampleStats.invalid} invalid example(s)`
+  );
+}
 if (aiGlosses.length > 0) {
   console.log(`Imported ${aiGlosses.length} AI gloss source row(s)`);
 }
@@ -196,6 +203,7 @@ function insertWords(
   exampleSource: JmdictFile | null,
   estimatedLevels: Map<string, EstimatedLevel>
 ) {
+  const exampleStats = { imported: 0, unmatched: 0, ambiguous: 0, invalid: 0 };
   const insertEntry = db.prepare(
     "insert into entries (id, source, source_id, headword_language, estimated_level) values (?, 'jmdict', ?, 'ja', ?)"
   );
@@ -221,14 +229,18 @@ function insertWords(
      values (?, ?, ?, ?, 'sourced', ?, ?, 'source')`
   );
   const examplesBySourceId = new Map((exampleSource?.words ?? []).map((word) => [word.id, word]));
+  const wordSourceIds = new Set(words.map((word) => word.id));
+  for (const exampleWord of exampleSource?.words ?? []) {
+    if (!wordSourceIds.has(exampleWord.id)) {
+      exampleStats.unmatched += countExamples(exampleWord);
+    }
+  }
   const transaction = db.transaction((items: JmdictWord[]) => {
     for (const word of items) {
       const entryId = yoriEntryId(word.id);
       insertEntry.run(entryId, word.id, estimatedLevels.get(word.id) ?? null);
       const exampleWord = examplesBySourceId.get(word.id);
-      if (exampleWord && exampleWord.sense.length !== word.sense.length) {
-        throw new Error(`JMdict examples have a different sense count for source ID ${word.id}`);
-      }
+      const examplesBySensePosition = matchExampleSenses(word, exampleWord, exampleStats);
 
       const lookupTerms = new Set<string>();
       for (const kanji of word.kanji) {
@@ -271,10 +283,12 @@ function insertWords(
           insertGloss.run(senseId, apiLang, gloss.text, gloss.type ?? null);
         }
 
-        const sourceSense = exampleWord?.sense[index];
-        for (const [exampleIndex, example] of (sourceSense?.examples ?? []).entries()) {
+        for (const [exampleIndex, example] of (examplesBySensePosition.get(index)?.entries() ?? [])) {
           const japanese = example.sentences.find((sentence) => sentence.lang === "jpn")?.text;
-          if (!japanese) continue;
+          if (!japanese) {
+            exampleStats.invalid += 1;
+            continue;
+          }
           const translations = example.sentences
             .filter((sentence) => sentence.lang !== "jpn")
             .map((sentence) => ({ lang: toApiLang(sentence.lang) ?? sentence.lang, text: sentence.text }));
@@ -286,12 +300,77 @@ function insertWords(
             example.source.type === "tatoeba" ? "Tatoeba" : example.source.type,
             example.source.value
           );
+          exampleStats.imported += 1;
         }
       });
     }
   });
 
   transaction(words);
+  return exampleStats;
+}
+
+function matchExampleSenses(
+  word: JmdictWord,
+  exampleWord: JmdictWord | undefined,
+  stats: { unmatched: number; ambiguous: number }
+): Map<number, NonNullable<JmdictWord["sense"][number]["examples"]>> {
+  const matched = new Map<number, NonNullable<JmdictWord["sense"][number]["examples"]>>();
+  if (!exampleWord) return matched;
+
+  const targetKeys = word.sense.map(senseIdentity);
+  const sourceGroups = new Map<
+    string,
+    Array<NonNullable<JmdictWord["sense"][number]["examples"]>>
+  >();
+  for (const exampleSense of exampleWord.sense) {
+    const examples = exampleSense.examples ?? [];
+    if (examples.length === 0) continue;
+    const key = senseIdentity(exampleSense);
+    const group = sourceGroups.get(key) ?? [];
+    group.push(examples);
+    sourceGroups.set(key, group);
+  }
+
+  for (const [key, sourceSenses] of sourceGroups) {
+    const examples = sourceSenses.flat();
+    const candidates = targetKeys
+      .map((targetKey, index) => (targetKey === key ? index : -1))
+      .filter((index) => index !== -1);
+    if (candidates.length === 1 && sourceSenses.length === 1) {
+      matched.set(candidates[0], examples);
+    } else if (candidates.length === 0) {
+      stats.unmatched += examples.length;
+    } else {
+      stats.ambiguous += examples.length;
+    }
+  }
+  return matched;
+}
+
+function countExamples(word: JmdictWord): number {
+  return word.sense.reduce((count, sense) => count + (sense.examples?.length ?? 0), 0);
+}
+
+function senseIdentity(sense: JmdictWord["sense"][number]): string {
+  return JSON.stringify({
+    partOfSpeech: sense.partOfSpeech,
+    appliesToKanji: sense.appliesToKanji,
+    appliesToKana: sense.appliesToKana,
+    related: sense.related ?? [],
+    antonym: sense.antonym ?? [],
+    field: sense.field ?? [],
+    dialect: sense.dialect ?? [],
+    misc: sense.misc ?? [],
+    info: sense.info ?? [],
+    languageSource: sense.languageSource ?? [],
+    gloss: sense.gloss.map((gloss) => ({
+      lang: gloss.lang,
+      gender: gloss.gender ?? null,
+      type: gloss.type ?? null,
+      text: gloss.text
+    }))
+  });
 }
 
 async function readEstimatedLevels(directory: string): Promise<Map<string, EstimatedLevel>> {

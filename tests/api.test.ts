@@ -116,10 +116,18 @@ test("returns headword language, sourced sense examples, and the easiest estimat
   ]);
 });
 
-test("keeps examples sense-scoped and omits absent examples", async () => {
+test("matches examples to the exact sense when the source has fewer senses", async () => {
   const res = await app.request("/v1/lookup?q=%E9%85%8D%E3%81%86");
   const body = await res.json();
-  expect(body.item.senses[0].examples[0].sourceId).toBe("114734");
+  expect(body.item.senses[0]).not.toHaveProperty("examples");
+  expect(body.item.senses[1].examples[0].sourceId).toBe("114734");
+});
+
+test("omits an example when identical senses make its attachment ambiguous", async () => {
+  const res = await app.request("/v1/lookup?q=%E3%81%82%E3%81%84%E3%81%BE%E3%81%84%E8%AA%9E");
+  const body = await res.json();
+  expect(body.item.senses).toHaveLength(2);
+  expect(body.item.senses[0]).not.toHaveProperty("examples");
   expect(body.item.senses[1]).not.toHaveProperty("examples");
 });
 
