@@ -10,7 +10,9 @@ The reviewer stays a different model family from the generator, as it already is
 
 ## Consequences
 
-The deterministic filter still runs first; a model call is never spent on something code can check. The reviewer's rubric leads with sense correctness — whether the sentence illustrates the sense it is attached to — because that is the check code cannot do and the one that hurts a learner most.
+The deterministic filter still runs first; a model call is never spent on something code can check. It resolves tokens through the existing deinflection before judging the target word absent, because a natural sentence conjugates — an example for 引く normally contains 引いて, and a literal match would reject it. The reviewer's rubric leads with sense correctness — whether the sentence illustrates the sense it is attached to — because that is the check code cannot do and the one that hurts a learner most.
+
+Because the runner reviews a bundle rather than a single row, each candidate carries an id and the reviewer returns one verdict per id. Output that omits a candidate, repeats one, or names one absent from the bundle is rejected. Without this, a verdict cannot be matched to its candidate and a missing verdict is invisible — reintroducing the silent-review failure this decision exists to remove.
 
 Reject-only review is only trustworthy if calibrated, and model judges skew toward accepting. Without measurement, this gate cannot be distinguished from one that accepts everything — a failure mode that looks perfectly healthy in production.
 

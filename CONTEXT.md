@@ -73,8 +73,8 @@ _Avoid_: Build output, database, deploy
 ## Review
 
 **Deterministic Filter**:
-Pure-code validation that runs before any model sees a candidate: target word present, length within bounds, expected script, translation non-empty.
-_Avoid_: Model review, linting
+Pure-code validation that runs before any model sees a candidate: the target word present in any inflected form, length within bounds, expected script, translation non-empty.
+_Avoid_: Model review, linting, literal string match
 
 **Reviewer**:
 A model that accepts or rejects a candidate with a reason code, and never rewrites it.
