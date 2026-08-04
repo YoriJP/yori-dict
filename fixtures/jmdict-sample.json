@@ -370,6 +370,45 @@
           ]
         }
       ]
+    },
+    {
+      "id": "2000006",
+      "kanji": [],
+      "kana": [
+        { "text": "あいまい語", "common": false, "tags": [], "appliesToKanji": [] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["n"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "ambiguous fixture" }
+          ]
+        },
+        {
+          "partOfSpeech": ["n"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "ambiguous fixture" }
+          ]
+        }
+      ]
     }
   ]
 }

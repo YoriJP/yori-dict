@@ -5,6 +5,8 @@ import type {
   PublicEntry,
   PublicGloss,
   PublicHeadword,
+  PublicExample,
+  InflectionStep,
   PublicLanguageSource,
   PublicLookupItem,
   PublicSense,
@@ -18,6 +20,8 @@ type EntryRow = {
   id: string;
   source: "jmdict";
   source_id: string;
+  headword_language?: "ja";
+  estimated_level?: PublicEntry["estimatedLevel"] | null;
 };
 
 type FormRow = {
@@ -58,6 +62,16 @@ type GlossRow = {
 type LookupCandidate = {
   rank: number;
   entryIds: string[];
+  inflectionPath: InflectionStep[];
+};
+
+type ExampleRow = {
+  text: string;
+  translations: string;
+  source: "sourced" | "generated";
+  source_name: string | null;
+  source_id: string | null;
+  review_status: "source" | "checked";
 };
 
 export type LookupDb = {
@@ -92,6 +106,16 @@ export function openLookupDb(path: string): LookupDb {
             url: "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
           },
           {
+            name: "Tatoeba example sentences",
+            license: "CC BY 2.0 FR",
+            url: "https://tatoeba.org/"
+          },
+          {
+            name: "yomitan-jlpt-vocab estimated levels",
+            license: "CC BY-SA 4.0",
+            url: "https://github.com/stephenmk/yomitan-jlpt-vocab"
+          },
+          {
             name: "Yori AI-assisted zh-TW glosses",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/zh-tw.jsonl"
@@ -105,6 +129,11 @@ export function openLookupDb(path: string): LookupDb {
             name: "Yori AI-assisted Korean glosses",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/ko.jsonl"
+          },
+          {
+            name: "Yori generated examples",
+            license: "CC-BY-SA-4.0",
+            url: "sources/ai-examples/generated.jsonl"
           }
         ]
       };
@@ -124,7 +153,8 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
   if (exactEntryIds.length > 0) {
     candidates.push({
       rank: 0,
-      entryIds: exactEntryIds
+      entryIds: exactEntryIds,
+      inflectionPath: []
     });
   }
 
@@ -134,7 +164,8 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
 
     candidates.push({
       rank: matchRank(candidate),
-      entryIds: candidateEntryIds
+      entryIds: candidateEntryIds,
+      inflectionPath: [{ from: normalizedQuery, to: candidate.text, reason: candidate.reasons[0] ?? "deinflected" }]
     });
   }
 
@@ -181,10 +212,10 @@ function readBestItem(
   const entry = readEntries(db, [best.entryIds[0]], lang)[0];
   if (!entry) return null;
 
-  return toLookupItem(entry);
+  return toLookupItem(entry, best.inflectionPath);
 }
 
-function toLookupItem(entry: PublicEntry): PublicLookupItem {
+function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): PublicLookupItem {
   const headword = entry.headwords[0];
   return {
     id: entry.id,
@@ -193,6 +224,9 @@ function toLookupItem(entry: PublicEntry): PublicLookupItem {
     common: entry.headwords.some((item) => item.common),
     source: entry.source,
     sourceId: entry.sourceId,
+    headwordLanguage: entry.headwordLanguage,
+    ...(entry.estimatedLevel ? { estimatedLevel: entry.estimatedLevel } : {}),
+    ...(inflectionPath.length > 0 ? { inflectionPath } : {}),
     headwords: entry.headwords,
     senses: entry.senses
   };
@@ -202,7 +236,7 @@ function readEntries(db: Database, entryIds: string[], lang: ApiLang): PublicEnt
   if (entryIds.length === 0) return [];
 
   const entryQuery = db.query<EntryRow, [string]>(
-    "select id, source, source_id from entries where id = ?"
+    "select * from entries where id = ?"
   );
   const entries = entryIds
     .map((entryId) => entryQuery.get(entryId))
@@ -212,6 +246,8 @@ function readEntries(db: Database, entryIds: string[], lang: ApiLang): PublicEnt
     id: entry.id,
     source: entry.source,
     sourceId: entry.source_id,
+    headwordLanguage: entry.headword_language ?? "ja",
+    ...(entry.estimated_level ? { estimatedLevel: entry.estimated_level } : {}),
     headwords: readHeadwords(db, entry.id),
     senses: readSenses(db, entry.id, lang)
   }));
@@ -263,10 +299,31 @@ function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[]
           ...whenPresent("related", parseList<Xref>(row.related)),
           ...whenPresent("antonym", parseList<Xref>(row.antonym)),
           ...whenPresent("languageSource", parseList<PublicLanguageSource>(row.language_source)),
+          ...whenPresent("examples", readExamples(db, row.id)),
           glosses
         }
       ];
     });
+}
+
+function readExamples(db: Database, senseId: string): PublicExample[] {
+  try {
+    return db
+      .query<Partial<ExampleRow>, [string]>(
+        "select * from examples where sense_id = ? order by position"
+      )
+      .all(senseId)
+      .map((row) => ({
+        text: row.text ?? "",
+        translations: parseList<{ lang: string; text: string }>(row.translations),
+        source: row.source ?? "sourced",
+        ...(row.source_name ? { sourceName: row.source_name } : {}),
+        ...(row.source_id ? { sourceId: row.source_id } : {}),
+        reviewStatus: row.review_status ?? "source"
+      }));
+  } catch {
+    return [];
+  }
 }
 
 function parseList<T>(value: string | null | undefined): T[] {

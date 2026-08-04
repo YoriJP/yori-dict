@@ -5,7 +5,7 @@ info:
   description: Japanese dictionary lookup API built from JMdict-simplified with multilingual lookup support.
   license:
     name: MIT for code; CC BY-SA 4.0 for dictionary data
-    url: https://github.com/anilahsu/yori-dict/blob/main/DATA_SOURCES.md
+    url: https://github.com/YoriJP/yori-dict/blob/main/DATA_SOURCES.md
 servers:
   - url: https://{host}
     description: Railway deployment
@@ -35,7 +35,7 @@ paths:
                 batchLookup: /v1/lookup/batch
                 docs: /doc
                 openapi: /openapi.yaml
-                dataRelease: https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01
+                dataRelease: https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3
   /doc:
     get:
       summary: API documentation
@@ -100,6 +100,12 @@ paths:
                   - name: JMdict
                     license: CC-BY-SA-4.0
                     url: https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project
+                  - name: Tatoeba example sentences
+                    license: CC BY 2.0 FR
+                    url: https://tatoeba.org/
+                  - name: yomitan-jlpt-vocab estimated levels
+                    license: CC BY-SA 4.0
+                    url: https://github.com/stephenmk/yomitan-jlpt-vocab
                   - name: Yori AI-assisted zh-TW glosses
                     license: CC-BY-SA-4.0
                     url: sources/ai-glosses/zh-tw.jsonl
@@ -128,6 +134,13 @@ paths:
           schema:
             $ref: "#/components/schemas/ApiLang"
           example: zh-tw
+        - name: enrich
+          in: query
+          required: false
+          description: Set to true to fill missing examples. Requires bearer authentication.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Best lookup result, or null if no entry matches.
@@ -143,6 +156,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
               example:
                 error: "Missing required query parameter: q"
+        "401":
+          description: Enrichment was requested without the configured bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/lookup/batch:
     post:
       summary: Look up multiple Japanese terms
@@ -156,6 +175,7 @@ paths:
             example:
               queries: [食べました, 学校, 孑々]
               lang: zh-tw
+              enrich: false
       responses:
         "200":
           description: Lookup results in the same order as the input queries.
@@ -164,7 +184,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/BatchLookupResponse"
         "400":
-          description: Invalid JSON body, invalid shape, or more than 100 queries.
+          description: Invalid JSON body or invalid shape.
           content:
             application/json:
               schema:
@@ -176,10 +196,18 @@ paths:
                 invalidShape:
                   value:
                     error: "Request body must be { queries: string[], lang?: string }"
-                tooLarge:
-                  value:
-                    error: Batch size must be 100 or less
+        "401":
+          description: Enrichment was requested without the configured bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
+  securitySchemes:
+    enrichmentBearer:
+      type: http
+      scheme: bearer
+      description: Required only when `enrich=true`.
   schemas:
     IndexResponse:
       type: object
@@ -255,11 +283,16 @@ components:
       properties:
         queries:
           type: array
-          maxItems: 100
+          minItems: 1
           items:
             type: string
+            minLength: 1
         lang:
           $ref: "#/components/schemas/ApiLang"
+        enrich:
+          type: boolean
+          default: false
+          description: Fill every missing sense example in this request. Requires bearer authentication.
     BatchLookupResponse:
       type: object
       required: [results]
@@ -278,7 +311,7 @@ components:
                   - type: "null"
     LookupItem:
       type: object
-      required: [id, word, reading, common, source, sourceId, headwords, senses]
+      required: [id, word, reading, common, source, sourceId, headwordLanguage, headwords, senses]
       properties:
         id:
           type: string
@@ -297,6 +330,23 @@ components:
         sourceId:
           type: string
           example: "1358280"
+        headwordLanguage:
+          type: string
+          description: BCP 47 language of the entry's headwords. Currently always Japanese.
+          const: ja
+        estimatedLevel:
+          type: string
+          description: >-
+            Unofficial estimated JLPT band. Omitted when the pinned source lists do not
+            cover the JMdict source ID; this is not an official JLPT classification.
+          enum: [N1, N2, N3, N4, N5]
+        inflectionPath:
+          type: array
+          description: >-
+            Ordered deinflection steps used for the selected result. Omitted for exact
+            lookups. This metadata does not affect result ranking.
+          items:
+            $ref: "#/components/schemas/InflectionStep"
         headwords:
           type: array
           items:
@@ -416,6 +466,11 @@ components:
           description: Origin of loanwords and wasei-eigo. Empty for words of Japanese origin.
           items:
             $ref: "#/components/schemas/LanguageSource"
+        examples:
+          type: array
+          description: Human-sourced or generated examples, ordered within this JMdict sense.
+          items:
+            $ref: "#/components/schemas/SenseExample"
         glosses:
           type: array
           minItems: 1
@@ -437,6 +492,58 @@ components:
           type: string
           description: Kind of translation. Omitted when absent.
           enum: [literal, figurative, explanation, trademark]
+    InflectionStep:
+      type: object
+      required: [from, to, reason]
+      properties:
+        from:
+          type: string
+          example: 食べました
+        to:
+          type: string
+          example: 食べる
+        reason:
+          type: string
+          example: polite past
+    ExampleTranslation:
+      type: object
+      required: [lang, text]
+      properties:
+        lang:
+          type: string
+          description: BCP 47 language code for the translation.
+          example: en
+        text:
+          type: string
+          example: You should eat more fruit.
+    SenseExample:
+      type: object
+      required: [text, translations, source, reviewStatus]
+      properties:
+        text:
+          type: string
+          description: Japanese example sentence.
+          example: もっと果物を食べるべきです。
+        translations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExampleTranslation"
+        source:
+          type: string
+          description: Distinguishes imported human examples from future generated examples.
+          enum: [sourced, generated]
+        sourceName:
+          type: string
+          description: Corpus name for a sourced example. Omitted when not applicable.
+          example: Tatoeba
+        sourceId:
+          type: string
+          description: Identifier in the source corpus. Omitted when not applicable.
+          example: "193344"
+        reviewStatus:
+          type: string
+          description: Source examples are untouched; generated examples must be checked.
+          enum: [source, checked]
     ErrorResponse:
       type: object
       required: [error]

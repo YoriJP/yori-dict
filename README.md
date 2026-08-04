@@ -15,7 +15,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Public API: <https://yori-dict-production.up.railway.app>
 - API docs: <https://yori-dict-production.up.railway.app/doc>
 - Raw OpenAPI spec: <https://yori-dict-production.up.railway.app/openapi.yaml>
-- SQLite data release: <https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01>
+- SQLite data release: <https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3>
 
 ## What Yori Dict Supports
 
@@ -27,11 +27,15 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Requested-language responses: no automatic English fallback.
 - Sense annotations from JMdict: usage tags, field of application, dialect, notes,
   cross-references, and loanword origin.
+- Human-written Tatoeba examples attached to individual senses.
+- Reviewed generated examples staged by authorised enrichment lookups.
+- Unofficial JLPT-band estimates joined by JMdict source ID.
+- An inflection path explaining how a conjugated lookup reached its dictionary form.
 
 Current coverage and limitations:
 
 - Traditional Chinese coverage is partial but broad for common lookup. The
-  `data-2026-07-01` release covers 77,863 zh-TW senses, including 19.60% of
+  `data-2026-08-04.3` release covers 77,863 zh-TW senses, including 19.60% of
   common JMdict senses.
 - Simplified Chinese is derived from the reviewed Traditional Chinese source
   with OpenCC phrase conversion. The same release covers 77,863 zh-CN
@@ -43,6 +47,8 @@ Current coverage and limitations:
   have Korean glosses, `lang=ko` returns those two senses instead of returning
   empty gloss lists for the other two.
 - Deinflection is word-level lookup help, not full sentence parsing.
+- `estimatedLevel` is omitted when the source lists do not cover an entry; it is
+  an estimate, not an official JLPT classification.
 
 ## Quick API Use
 
@@ -102,33 +108,52 @@ Cross-references in `related` and `antonym` are arrays in one of the
 JMdict-simplified forms: `[word]`, `[word, senseIndex]`, `[word, reading]`, or
 `[word, reading, senseIndex]`.
 
+## Examples, Estimated Levels, and Inflection Paths
+
+Each entry carries `headwordLanguage` (`ja` for the current dictionary).
+`estimatedLevel` is present only when the pinned unofficial vocabulary lists
+cover the entry. If a source ID occurs in several bands, the easiest band wins.
+
+Examples are ordered within their JMdict sense. `source` distinguishes
+`sourced` examples from checked `generated` examples; sourced examples also
+carry `sourceName` and `sourceId`. `text` is the Japanese sentence,
+`translations` keeps each translation's `lang` and `text` explicit, and
+`reviewStatus` distinguishes untouched source material from checked additions.
+
+A lookup of a conjugated form adds `inflectionPath`, an ordered list of the
+actual reduction steps used for the selected result. Each step carries `from`,
+`to`, and a learner-readable `reason`. Exact lookups omit it, and adding it does
+not change result ranking.
+
 ## SQLite Download
 
 Download and verify the current SQLite database:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz.sha256
-shasum -a 256 -c yori-dict-2026-07-01.sqlite.gz.sha256
-gunzip yori-dict-2026-07-01.sqlite.gz
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.3/yori-dict-2026-08-04.3.sqlite.gz
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.3/yori-dict-2026-08-04.3.sqlite.gz.sha256
+shasum -a 256 -c yori-dict-2026-08-04.3.sqlite.gz.sha256
+gunzip yori-dict-2026-08-04.3.sqlite.gz
 ```
 
 Release manifest:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.json
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-08-04.3/yori-dict-2026-08-04.3.json
 ```
 
-The `data-2026-07-01` release contains:
+The `data-2026-08-04.3` release contains:
 
 | Item | Count |
 | --- | ---: |
 | Entries | 217,294 |
 | Senses | 675,094 |
-| Glosses | 1,187,499 |
-| AI-assisted glosses | 413,493 |
+| Glosses | 1,187,469 |
+| AI-assisted glosses | 413,463 |
+| Sourced examples | 31,992 |
+| Entries with estimated levels | 7,747 |
 | Traditional Chinese senses | 77,863 |
-| Traditional Chinese glosses | 184,738 |
+| Traditional Chinese glosses | 184,708 |
 | Simplified Chinese senses | 77,863 |
 | Simplified Chinese glosses | 184,515 |
 | Korean senses | 19,072 |
@@ -138,8 +163,7 @@ The `data-2026-07-01` release contains:
 
 ```sh
 bun install
-bun run download:jmdict
-bun run build:db
+bun run data:download
 bun run dev
 ```
 
@@ -171,6 +195,8 @@ This creates:
 
 ```txt
 data/raw/jmdict-all.json
+data/raw/jmdict-examples-eng.json
+data/raw/jlpt-vocab/n1.csv ... n5.csv
 data/yori.sqlite
 ```
 
@@ -180,6 +206,8 @@ Both are local generated files and are not committed.
 gloss sources were built against: `3.6.2+20260601171836`. To intentionally
 refresh to a different upstream release, pass `--tag` or set
 `JMDICT_SIMPLIFIED_TAG`, then revalidate and review affected AI gloss rows.
+The JLPT source is also pinned by commit in `scripts/download-jmdict.ts`; pass
+`--jlpt-commit` only when intentionally refreshing it.
 
 Reviewed AI gloss sources are committed under:
 
@@ -189,14 +217,15 @@ sources/ai-glosses/zh-cn.jsonl
 sources/ai-glosses/ko.jsonl
 ```
 
-## Release
+## Data Release
 
-Prepare a release SQLite artifact:
+Rebuilding from source remains available independently of service deploys. Prepare a release
+SQLite artifact with the existing validation and packaging pipeline:
 
 ```sh
 bun run download:jmdict
 bun run release:check
-bun run scripts/package-release.ts --version 2026-07-01
+bun run scripts/package-release.ts --version 2026-08-04.3
 ```
 
 This writes ignored release files under `releases/`:
@@ -211,6 +240,19 @@ releases/yori-dict-<artifactVersion>.json
 Upload the `.sqlite.gz`, `.sha256`, and `.json` files as GitHub release assets.
 Users can decompress the SQLite file and use it directly.
 
+After publishing the `data-<version>` GitHub release, pin the service to it by updating only
+`version` and `sha256` in [`data-release.json`](data-release.json). Copy the SHA-256 from the
+published `.sqlite.gz.sha256` file, then verify the complete public download path locally:
+
+```sh
+bun run data:download
+```
+
+Commit the `data-release.json` diff normally. This changes the deployed data without requiring
+an application-code change. The deploy downloads the same `.sqlite.gz` asset offered to public
+users, verifies it against the committed checksum before installing it, and only then replaces the
+current database. A mismatch stops the build and leaves any existing database untouched.
+
 ## Railway
 
 Railway build and deploy settings are defined in [railway.json](railway.json).
@@ -220,8 +262,7 @@ Build command:
 
 ```sh
 bun install
-bun run download:jmdict
-bun run build:db
+bun run data:download
 ```
 
 Start command:
@@ -230,7 +271,8 @@ Start command:
 bun run start
 ```
 
-The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`.
+The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`. Railway obtains that database
+from the release pinned in `data-release.json`; deploys do not contact JMdict upstream.
 
 ## API Shape
 

@@ -1,15 +1,15 @@
 # Example generation and review prompts
 
-Draft prompts for the enrichment path (ADR-0002, ADR-0003). Not yet wired in. When
-implemented they follow the existing pattern in `scripts/ai-common.ts`: built inline by a
+Prompts for the enrichment path (ADR-0002, ADR-0003). They follow the existing pattern in
+`scripts/ai-common.ts`: built inline by a
 `promptFor(seed)` function, JSON-only output, parsed by a dedicated parser that fails loudly
 on anything unexpected.
 
 The gloss prompt in `ai-common.ts` says "Do not add examples." That stays true — glosses and
 examples are produced by separate prompts and stored separately.
 
-Target model tier is fast and cheap (Flash class, low reasoning effort), so both prompts carry
-worked examples rather than relying on the model's own judgment.
+The generation and translation models use fast Flash-class tiers. Prompts carry explicit
+contracts and examples rather than relying on the models' own judgment.
 
 ## Generator
 
@@ -24,7 +24,6 @@ INPUT
   targetSense     the English glosses of the ONE meaning to illustrate
   otherSenses     glosses of the word's other meanings, for contrast only
   tags            JMdict sense tags; "uk" means the word is normally written in kana
-  languages       which translations to return
 
 The glosses in targetSense define the meaning. They are authoritative.
 otherSenses exist only so you can avoid illustrating the wrong meaning.
@@ -39,9 +38,7 @@ A correct sentence:
 - makes sense alone, with no surrounding context
 - invents no real people, places, brands, or events
 
-Translations must describe the sentence you wrote, not the gloss.
-Traditional Chinese must use Taiwanese vocabulary: 軟體 not 軟件, 資訊 not 信息,
-影片 not 視頻, 螢幕 not 屏幕.
+The English translation must describe the sentence you wrote, not the gloss.
 
 ABSTAIN when a natural modern sentence cannot show this meaning — archaic or
 obsolete senses, narrow technical senses, or words that do not stand alone.
@@ -50,7 +47,7 @@ Abstaining is a correct answer. A forced sentence is worse than none.
 OUTPUT
 Return only JSON, one of these two shapes:
 
-{"sentence": "...", "translations": {"en": "...", "zh-tw": "..."}}
+{"sentence": "...", "english": "..."}
 {"abstain": true, "reason": "archaic" | "too_technical" | "not_standalone" | "unclear_sense"}
 
 EXAMPLES
@@ -58,17 +55,33 @@ EXAMPLES
 word 引く / ひく, targetSense ["to quote","to cite"],
 otherSenses ["to pull","to tug","to draw (a line)"]
 {"sentence":"先生は例を引いて説明した。",
- "translations":{"en":"The teacher explained by citing an example.",
-                 "zh-tw":"老師舉例說明。"}}
+ "english":"The teacher explained by citing an example."}
 
 word 沢山 / たくさん, tags ["uk"], targetSense ["a lot","many"]
 {"sentence":"公園には子どもがたくさんいた。",
- "translations":{"en":"There were a lot of children in the park.",
-                 "zh-tw":"公園裡有很多小孩。"}}
+ "english":"There were a lot of children in the park."}
 
 word 汝 / なんじ, targetSense ["thou","you"], tags ["arch"]
 {"abstain":true,"reason":"archaic"}
 ```
+
+## Traditional Chinese translator
+
+Japanese generation and Traditional Chinese translation are separate, independently pinned
+model calls. The translator receives only an accepted-shape Japanese candidate and returns:
+
+```
+Translate this Japanese example sentence into Traditional Chinese used in Taiwan.
+Translate the sentence, not the dictionary gloss. Use Taiwanese vocabulary: 軟體 not 軟件,
+資訊 not 信息, 影片 not 視頻, 螢幕 not 屏幕.
+
+OUTPUT
+Return only JSON: {"translation":"..."}
+```
+
+The deterministic Taiwan terminology gate checks this result. Simplified Chinese is then
+derived from the checked zh-TW text with the existing OpenCC `twp` to `cn` conversion; it is
+never produced by another model call.
 
 ## Reviewer
 
@@ -115,8 +128,8 @@ worked example for 引く contains 引いて, not 引く. A substring check woul
 other valid verb examples. The filter resolves candidate tokens through the existing
 deinflection before deciding the target word is absent.
 
-**Both prompts restate rules the deterministic filter also enforces.** That is intentional. The
-filter guarantees them; the prompt avoids spending a generation that would fail them.
+**The prompts restate rules the deterministic filter also enforces.** That is intentional. The
+filter guarantees them; the prompts avoid spending calls on candidates that would fail it.
 
 **Neither prompt mentions a JLPT number.** "No vocabulary more advanced than the word itself" is
 something a model can actually check. "Write an N3 sentence" invites fake precision.

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createApp } from "../src/app";
+import { dataReleaseUrl } from "../src/data-release";
 import { openLookupDb, type LookupDb } from "../src/db";
 
 const testDbPath = "/tmp/yori-dict-api-test.sqlite";
@@ -9,7 +10,20 @@ let app: ReturnType<typeof createApp>;
 
 beforeAll(async () => {
   await Bun.$`rm -f ${testDbPath}`;
-  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${testDbPath}`;
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --examples fixtures/jmdict-examples-sample.json --jlpt-vocab fixtures/jlpt-vocab --out ${testDbPath}`;
+  const writableDb = new Database(testDbPath);
+  writableDb
+    .prepare(
+      `insert into examples
+        (sense_id, position, text, translations, source, review_status)
+       values (?, 1, ?, ?, 'generated', 'checked')`
+    )
+    .run(
+      "yori:s_jmdict_1283190_1",
+      "それは高かったです。",
+      JSON.stringify([{ lang: "en", text: "It was expensive." }])
+    );
+  writableDb.close();
   lookupDb = openLookupDb(testDbPath);
   app = createApp(lookupDb);
 });
@@ -29,7 +43,7 @@ test("returns API index links from the root route", async () => {
   expect(body.meta).toBe("/v1/meta");
   expect(body.docs).toBe("/doc");
   expect(body.openapi).toBe("/openapi.yaml");
-  expect(body.dataRelease).toBe("https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01");
+  expect(body.dataRelease).toBe("https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3");
 });
 
 test("serves Scalar API reference from the doc route", async () => {
@@ -46,7 +60,9 @@ test("serves OpenAPI YAML from the OpenAPI route", async () => {
   const res = await app.request("/openapi.yaml");
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("application/yaml");
-  expect(await res.text()).toStartWith("openapi: 3.1.0");
+  const body = await res.text();
+  expect(body).toStartWith("openapi: 3.1.0");
+  expect(body).toContain(`dataRelease: ${dataReleaseUrl}`);
 });
 
 test("returns metadata", async () => {
@@ -84,6 +100,57 @@ test("defaults lookup glosses to English", async () => {
   expect(res.status).toBe(200);
   const body = await res.json();
   expect(body.item.senses[0].glosses[0].text).toBe("to eat");
+});
+
+test("returns headword language, sourced sense examples, and the easiest estimated level", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
+  const body = await res.json();
+  expect(body.item.headwordLanguage).toBe("ja");
+  expect(body.item.estimatedLevel).toBe("N5");
+  expect(body.item.senses[0].examples).toEqual([
+    {
+      text: "もっと果物を食べるべきです。",
+      translations: [{ lang: "en", text: "You should eat more fruit." }],
+      source: "sourced",
+      sourceName: "Tatoeba",
+      sourceId: "193344",
+      reviewStatus: "source"
+    }
+  ]);
+});
+
+test("matches examples to the exact sense when the source has fewer senses", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%85%8D%E3%81%86");
+  const body = await res.json();
+  expect(body.item.senses[0]).not.toHaveProperty("examples");
+  expect(body.item.senses[1].examples[0].sourceId).toBe("114734");
+});
+
+test("omits an example when identical senses make its attachment ambiguous", async () => {
+  const res = await app.request("/v1/lookup?q=%E3%81%82%E3%81%84%E3%81%BE%E3%81%84%E8%AA%9E");
+  const body = await res.json();
+  expect(body.item.senses).toHaveLength(2);
+  expect(body.item.senses[0]).not.toHaveProperty("examples");
+  expect(body.item.senses[1]).not.toHaveProperty("examples");
+});
+
+test("represents generated examples distinctly without generating them at lookup time", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%AB%98%E3%81%84");
+  const body = await res.json();
+  expect(body.item.senses[0].examples).toEqual([
+    {
+      text: "それは高かったです。",
+      translations: [{ lang: "en", text: "It was expensive." }],
+      source: "generated",
+      reviewStatus: "checked"
+    }
+  ]);
+});
+
+test("omits estimated level when the source lists do not cover an entry", async () => {
+  const res = await app.request("/v1/lookup?q=%E8%AA%AD%E3%82%80");
+  const body = await res.json();
+  expect(body.item).not.toHaveProperty("estimatedLevel");
 });
 
 test("preserves form tags and sense applicability", async () => {
@@ -152,6 +219,15 @@ test("returns an item for deinflected ichidan forms", async () => {
   const body = await res.json();
   expect(body.item.id).toBe("yori:e_jmdict_1358280");
   expect(body.item.word).toBe("食べる");
+  expect(body.item.inflectionPath).toEqual([
+    { from: "食べました", to: "食べる", reason: "polite past" }
+  ]);
+});
+
+test("omits an inflection path for an exact lookup", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
+  const body = await res.json();
+  expect(body.item).not.toHaveProperty("inflectionPath");
 });
 
 test("returns an item for deinflected godan forms", async () => {

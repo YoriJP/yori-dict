@@ -66,6 +66,16 @@ await writeFile(
           url: "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
         },
         {
+          name: "Tatoeba example sentences",
+          license: "CC-BY-2.0-FR",
+          url: "https://tatoeba.org/en/terms_of_use"
+        },
+        {
+          name: "yomitan-jlpt-vocab",
+          license: "CC-BY-SA-4.0",
+          url: "https://github.com/stephenmk/yomitan-jlpt-vocab"
+        },
+        {
           name: "Yori AI-assisted zh-TW glosses",
           license: "CC-BY-SA-4.0",
           path: "sources/ai-glosses/zh-tw.jsonl"
@@ -79,6 +89,11 @@ await writeFile(
           name: "Yori AI-assisted Korean glosses",
           license: "CC-BY-SA-4.0",
           path: "sources/ai-glosses/ko.jsonl"
+        },
+        {
+          name: "Yori generated examples",
+          license: "CC-BY-SA-4.0",
+          path: "sources/ai-examples/generated.jsonl"
         }
       ]
     },
@@ -119,6 +134,12 @@ function readDbMetadata(dbPath: string) {
         aiAssistedGlosses: readCount(
           db,
           "select count(*) as count from glosses where source = 'ai-assisted'"
+        ),
+        sourcedExamples: readCount(db, "select count(*) as count from examples where source = 'sourced'"),
+        generatedExamples: readCount(db, "select count(*) as count from examples where source = 'generated'"),
+        estimatedLevels: readCount(
+          db,
+          "select count(*) as count from entries where estimated_level is not null"
         )
       }
     };

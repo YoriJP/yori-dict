@@ -2,6 +2,75 @@ import { expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import { openLookupDb } from "../src/db";
 import { candidateFromResponse, type AiSeed, type Candidate } from "../scripts/ai-common";
+import { findPrcTerms } from "../scripts/taiwan-terminology";
+
+test("flags reviewed PRC terminology with Taiwanese replacements", () => {
+  expect(["軟件", "信息", "視頻", "屏幕"].map((text) => findPrcTerms(text))).toEqual([
+    [{ term: "軟件", replacement: "軟體", index: 0 }],
+    [{ term: "信息", replacement: "資訊", index: 0 }],
+    [{ term: "視頻", replacement: "影片", index: 0 }],
+    [{ term: "屏幕", replacement: "螢幕", index: 0 }]
+  ]);
+  expect(findPrcTerms("初中生")).toEqual([{ term: "初中", replacement: "國中", index: 0 }]);
+  expect(["軟體用戶", "智能終端機", "網絡", "軟體菜單", "默認設定"].map((text) => findPrcTerms(text))).toEqual([
+    [{ term: "用戶", replacement: "使用者", index: 2 }],
+    [{ term: "智能", replacement: "智慧", index: 0 }],
+    [{ term: "網絡", replacement: "網路", index: 0 }],
+    [{ term: "菜單", replacement: "選單", index: 2 }],
+    [{ term: "默認", replacement: "預設", index: 0 }]
+  ]);
+  expect(findPrcTerms("從CSV檔案導入資料")).toContainEqual({ term: "導入", replacement: "匯入", index: 6 });
+  expect(findPrcTerms("將資料導出為JSON檔案")).toContainEqual({ term: "導出", replacement: "匯出", index: 3 });
+  expect(findPrcTerms("全局變量")).toContainEqual({ term: "全局", replacement: "全域性", index: 0 });
+});
+
+test("allows reviewed Taiwanese terminology overlap cases", () => {
+  for (const text of [
+    "聚集成群",
+    "假離線程式",
+    "和平進程",
+    "演算法",
+    "數據機",
+    "不變量",
+    "多變量分析",
+    "智能障礙",
+    "木質接口",
+    "這個木質接口很牢固。",
+    "餐廳今天換了新菜單",
+    "孩子去幼兒園上學",
+    "他雖然沒有回答，但不表示默認",
+    "人類擁有很高的智能",
+    "警方查看屋內是否有財物遺失",
+    "創建一番事業",
+    "隊列整齊地向前行進",
+    "這把仿真槍沒有擊發功能",
+    "從前提導出結論",
+    "從前提導出結論後，把檔案收好。",
+    "新制度的導入需要時間",
+    "觀察整場比賽的全局"
+  ]) {
+    expect(findPrcTerms(text)).toEqual([]);
+  }
+});
+
+test("flags ambiguous terms only in the technical context where the replacement applies", () => {
+  for (const [text, term] of [
+    ["軟體用戶", "用戶"],
+    ["創建帳號", "創建"],
+    ["數據處理", "數據"],
+    ["智能終端機", "智能"],
+    ["查看檔案", "查看"],
+    ["系統集成", "集成"],
+    ["工作隊列", "隊列"],
+    ["默認設定", "默認"]
+  ]) {
+    expect(findPrcTerms(text).map((match) => match.term)).toContain(term);
+  }
+});
+
+test("does not let an allowed physical interface phrase hide a software interface", () => {
+  expect(findPrcTerms("這個軟體接口很難用。")).toContainEqual({ term: "接口", replacement: "介面", index: 4 });
+});
 
 test("imports AI gloss source rows into lookup responses", async () => {
   const dbPath = tempPath("ai-gloss-import.sqlite");
@@ -407,11 +476,15 @@ test("validates filtered AI gloss source files", async () => {
   await Bun.write(validPath, `${JSON.stringify(validRow)}\n`);
   await Bun.$`bun run scripts/validate-ai-glosses.ts --db ${dbPath} --input ${validPath}`;
 
-  await Bun.write(invalidPath, `${JSON.stringify(validRow)}\n${JSON.stringify({ ...validRow, glosses: ["eat"] })}\n`);
+  await Bun.write(
+    invalidPath,
+    `${JSON.stringify(validRow)}\n${JSON.stringify({ ...validRow, glosses: ["eat"] })}\n${JSON.stringify({ ...validRow, glosses: ["軟件"] })}\n`
+  );
   const result = await Bun.$`bun run scripts/validate-ai-glosses.ts --db ${dbPath} --input ${invalidPath}`.nothrow();
   expect(result.exitCode).toBe(1);
   expect(result.stderr.toString()).toContain("duplicate source row for yori:s_jmdict_1358280_1:zh-tw");
   expect(result.stderr.toString()).toContain("Chinese gloss has no Han text: eat");
+  expect(result.stderr.toString()).toContain("Traditional Chinese gloss uses PRC term 軟件; use 軟體: 軟件");
 });
 
 test("reports AI gloss coverage", async () => {
