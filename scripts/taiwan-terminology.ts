@@ -19,7 +19,6 @@ const reviewedOpenCcTerms = [
   "仿真",
   "信息",
   "用戶",
-  "全局",
   "兼容",
   "創建",
   "批量",
@@ -56,6 +55,7 @@ const auditedAdditions = new Map<string, TermPolicy>([
 // The same words are valid Taiwanese for a restaurant menu, introducing a
 // system, or deriving a conclusion.
 const contextualOpenCcTerms = new Map<string, readonly string[]>([
+  ["全局", ["變數", "變量", "作用域", "設定", "配置", "狀態", "物件", "函式", "函數"]],
   ["菜單", ["軟體", "應用程式", "介面", "下拉", "右鍵", "功能表"]],
   ["導入", ["檔案", "文件", "資料庫", "數據庫", "CSV", "JSON", "XML", "設定檔", "配置檔"]],
   ["導出", ["檔案", "文件", "資料庫", "數據庫", "CSV", "JSON", "XML", "設定檔", "配置檔"]]

@@ -46,8 +46,8 @@ terms. The policy derives replacements from OpenCC's `TWPhrases` mapping and
 adds the audited `初中` and `幼兒園` gaps. OpenCC is deliberately not applied as a
 mapping-wide rejection list: it also maps valid, context-dependent Taiwanese
 words such as `進程`, and naive substring matching corrupts words such as
-`聚集成群`. Terms such as `菜單`, `導入`, and `導出` are rejected only in the
-software contexts where the OpenCC replacement applies. The check therefore
+`聚集成群`. Terms such as `全局`, `菜單`, `導入`, and `導出` are rejected only in
+the software contexts where the OpenCC replacement applies. The check therefore
 uses word boundaries, reviewed contexts, and phrase exceptions. The executable
 policy lives in `scripts/taiwan-terminology.ts`.
 

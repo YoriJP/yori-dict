@@ -21,6 +21,7 @@ test("flags reviewed PRC terminology with Taiwanese replacements", () => {
   ]);
   expect(findPrcTerms("從CSV檔案導入資料")).toContainEqual({ term: "導入", replacement: "匯入", index: 6 });
   expect(findPrcTerms("將資料導出為JSON檔案")).toContainEqual({ term: "導出", replacement: "匯出", index: 3 });
+  expect(findPrcTerms("全局變量")).toContainEqual({ term: "全局", replacement: "全域性", index: 0 });
 });
 
 test("allows reviewed Taiwanese terminology overlap cases", () => {
@@ -36,7 +37,8 @@ test("allows reviewed Taiwanese terminology overlap cases", () => {
     "木質接口",
     "餐廳今天換了新菜單",
     "從前提導出結論",
-    "新制度的導入需要時間"
+    "新制度的導入需要時間",
+    "觀察整場比賽的全局"
   ]) {
     expect(findPrcTerms(text)).toEqual([]);
   }
