@@ -277,8 +277,8 @@ Rows rejected by the filter stay under ignored `data/ai-candidates/` files for
 inspection or later retry. Filtered rows are still treated as untrusted until
 they are reviewed.
 
-`ai:review` writes a JSONL review bundle for a CLI or agent reviewer. Each row
-contains the AI glosses plus the original JMdict context:
+`ai:review` writes a bounded JSONL review bundle. Each row contains the AI
+glosses plus the original JMdict context:
 
 ```txt
 senseId, word, reading, part of speech, English glosses, AI glosses
@@ -346,9 +346,25 @@ Prepare a review bundle:
 bun run ai:review -- --lang ko --limit 500 --offset 100
 ```
 
-The command prints the exact review prompt and a ready-to-run Claude CLI
-command. Review output should be JSONL issues only; an empty output means no
-issues were flagged.
+Run the same bounded bundle through Claude:
+
+```sh
+bun run ai:review:run -- --lang ko --limit 500 --offset 100
+```
+
+The runner sends the prepared rows through stdin, keeps repository tools
+disabled, defaults to low effort, one turn, and a USD 1.00 budget, and writes
+validated JSONL issues plus raw output and diagnostic logs under
+`data/ai-review/<lang>/`. Override the execution limits when needed:
+
+```sh
+bun run ai:review:run -- --lang ko --limit 500 --offset 100 --model sonnet --effort low --max-turns 1 --max-budget-usd 1.00
+```
+
+Each bundle is capped at 500 rows. The command prints the next offset for the
+following bundle. Review output contains JSONL issues only; an empty output
+means no issues were flagged. The runner rejects malformed output and issue
+rows whose `senseId` was not present in the prepared bundle.
 
 If a batch result has failures, export only those failed seeds for a rerun:
 

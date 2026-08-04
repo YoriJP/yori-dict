@@ -463,8 +463,7 @@ test("exports AI gloss review bundles with JMdict context", async () => {
   expect(result).toContain("Wrote 1 zh-tw review row(s)");
   expect(result).toContain("Claude review prompt:");
   expect(result).toContain("If the response is not empty, its first non-whitespace character must be {.");
-  expect(result).toContain("Claude CLI command:");
-  expect(result).toContain("data/ai-review/zh-tw/issues.jsonl");
+  expect(result).toContain("Run the bounded reviewer with `bun run ai:review:run`");
   expect(rows).toEqual([
     {
       senseId: "yori:s_jmdict_1358280_1",

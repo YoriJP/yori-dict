@@ -9,6 +9,7 @@
     "ai:filter": "bun run scripts/filter-ai-candidates.ts",
     "ai:generate": "bun run scripts/enrich-ai.ts",
     "ai:review": "bun run scripts/review-ai-glosses.ts",
+    "ai:review:run": "bun run scripts/review-ai-glosses.ts --run",
     "ai:retry-seeds": "bun run scripts/export-failed-ai-seeds.ts",
     "ai:seeds": "bun run scripts/export-ai-seeds.ts",
     "ai:summary": "bun run scripts/summarize-ai-batch.ts",
