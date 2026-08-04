@@ -9,8 +9,11 @@ import {
   filterCandidate,
   generatorConfig,
   makeGeminiRequestBody,
+  missingSeeds,
   parseGeneration,
   parseReview,
+  generatorPrompt,
+  reviewerPrompt,
   translatorConfig,
   type GenerationSeed,
   type ModelCall
@@ -69,6 +72,55 @@ test("deterministic filter accepts a conjugated target and rejects PRC terminolo
       ]
     })
   ).toContain("zh_tw_style");
+});
+
+test("enrichment respects the forms that apply to each sense", () => {
+  const overlay: ExampleOverlay = {
+    read: () => null,
+    write: () => {},
+    accepted: () => [],
+    close: () => {}
+  };
+  const [seed] = missingSeeds({
+    id: "entry",
+    word: "除外形",
+    reading: "きょうつう",
+    common: false,
+    source: "jmdict",
+    sourceId: "1",
+    headwordLanguage: "ja",
+    headwords: [
+      { text: "有効形", reading: "ゆうこう", kind: "kanji", common: false, tags: [] },
+      { text: "除外形", reading: "じょがい", kind: "kanji", common: false, tags: [] },
+      { text: "ゆうこう", reading: null, kind: "kana", common: false, tags: [] },
+      { text: "きょうつう", reading: null, kind: "kana", common: false, tags: [] }
+    ],
+    senses: [{
+      id: "sense",
+      position: 1,
+      appliesTo: { kanji: ["有効形"], kana: ["ゆうこう"] },
+      partOfSpeech: ["n"],
+      glosses: [{ text: "valid form", source: "jmdict", reviewStatus: "source" }]
+    }]
+  }, overlay);
+
+  expect(seed?.word).toBe("有効形");
+  expect(seed?.reading).toBe("ゆうこう");
+  expect(seed?.forms).toEqual([
+    { text: "有効形", kind: "kanji" },
+    { text: "ゆうこう", kind: "kana" }
+  ]);
+  expect(generatorPrompt(seed!, null)).toContain('forms: [{"text":"有効形","kind":"kanji"},{"text":"ゆうこう","kind":"kana"}]');
+  expect(reviewerPrompt("candidate", seed!, {
+    kind: "candidate",
+    sentence: "有効形について説明します。",
+    translations: [{ lang: "en", text: "This explains the valid form." }, { lang: "zh-tw", text: "這說明有效形式。" }]
+  })).toContain('forms: [{"text":"有効形","kind":"kanji"},{"text":"ゆうこう","kind":"kana"}]');
+  expect(filterCandidate(seed!, {
+    kind: "candidate",
+    sentence: "除外形について説明します。",
+    translations: [{ lang: "en", text: "This explains the excluded form." }, { lang: "zh-tw", text: "這說明排除形式。" }]
+  })).toContain("word_absent");
 });
 
 test("authorised lookup fills a gap, persists provenance, and public lookup reuses it", async () => {

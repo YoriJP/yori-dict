@@ -126,16 +126,27 @@ export function missingSeeds(item: PublicLookupItem, overlay: ExampleOverlay): G
   return item.senses.flatMap((sense) => {
     const record = overlay.read(sense.id);
     if ((sense.examples?.length ?? 0) > 0 || (record && record.status !== "error")) return [];
-    return [seedFor(item, sense, glosses)];
+    const seed = seedFor(item, sense, glosses);
+    return seed ? [seed] : [];
   });
 }
 
-function seedFor(item: PublicLookupItem, sense: PublicSense, glosses: Map<string, string[]>): GenerationSeed {
-  const forms = item.headwords.map((form) => ({ text: form.text, kind: form.kind }));
+function seedFor(item: PublicLookupItem, sense: PublicSense, glosses: Map<string, string[]>): GenerationSeed | null {
+  const forms = item.headwords
+    .filter((form) => {
+      const appliesTo = form.kind === "kanji" ? sense.appliesTo.kanji : sense.appliesTo.kana;
+      return appliesTo.includes("*") || appliesTo.includes(form.text);
+    })
+    .map((form) => ({ text: form.text, kind: form.kind }));
+  const word = forms.find((form) => form.text === item.word)?.text ?? forms.find((form) => form.kind === "kanji")?.text ?? forms[0]?.text;
+  const reading = forms.find((form) => form.kind === "kana" && form.text === item.reading)?.text
+    ?? forms.find((form) => form.kind === "kana")?.text
+    ?? null;
+  if (!word) return null;
   return {
     senseId: sense.id,
-    word: item.word,
-    reading: item.reading,
+    word,
+    reading,
     forms,
     partOfSpeech: sense.partOfSpeech,
     tags: sense.misc ?? [],
@@ -398,6 +409,7 @@ export function generatorPrompt(seed: GenerationSeed, rejection: string | null):
     "Use kana when tags include uk. Do not name real people, places, brands, or events.",
     `word: ${seed.word}`,
     `reading: ${seed.reading ?? ""}`,
+    `forms: ${JSON.stringify(seed.forms)}`,
     `partOfSpeech: ${JSON.stringify(seed.partOfSpeech)}`,
     `tags: ${JSON.stringify(seed.tags)}`,
     `targetSense: ${JSON.stringify(seed.targetSense)}`,
@@ -415,6 +427,7 @@ export function translatorPrompt(
     "Return JSON only: {\"translation\":\"...\"}",
     "Translate the sentence, not the dictionary gloss. Use Taiwanese vocabulary such as 軟體, 資訊, 影片, and 螢幕.",
     `word: ${seed.word}`,
+    `forms: ${JSON.stringify(seed.forms)}`,
     `targetSense: ${JSON.stringify(seed.targetSense)}`,
     `sentence: ${generated.sentence}`,
     `english: ${generated.english}`
@@ -429,6 +442,7 @@ export function reviewerPrompt(id: string, seed: GenerationSeed, candidate: Extr
     `{\"id\":\"${id}\",\"decision\":\"accept\"}`,
     `{\"id\":\"${id}\",\"decision\":\"reject\",\"reason\":\"wrong_sense|unnatural|too_complex|translation_mismatch|zh_tw_style|unsafe_content\"}`,
     `word: ${seed.word}`,
+    `forms: ${JSON.stringify(seed.forms)}`,
     `targetSense: ${JSON.stringify(seed.targetSense)}`,
     `otherSenses: ${JSON.stringify(seed.otherSenses)}`,
     `candidate: ${JSON.stringify(candidate)}`
