@@ -7,8 +7,6 @@ import { dataReleaseUrl } from "./data-release";
 import { applyOverlay } from "./example-overlay";
 import type { EnrichmentService } from "./example-enrichment";
 
-const maxBatchSize = 100;
-
 export function createApp(
   db: LookupDb,
   options: { enrichment?: EnrichmentService; enrichmentToken?: string } = {}
@@ -74,10 +72,6 @@ export function createApp(
       return c.json({ error: "Request body must be { queries: string[], lang?: string }" }, 400);
     }
 
-    if (body.queries.length > maxBatchSize) {
-      return c.json({ error: `Batch size must be ${maxBatchSize} or less` }, 400);
-    }
-
     const lang = parseApiLang(body.lang ?? null);
     if (body.enrich && !isAuthorized(c.req.header("authorization"), options.enrichmentToken)) {
       return c.json({ error: "Enrichment requires a valid bearer token" }, 401);
@@ -109,7 +103,8 @@ function isBatchBody(body: unknown): body is { queries: string[]; lang?: string;
   const candidate = body as { queries?: unknown; lang?: unknown; enrich?: unknown };
   return (
     Array.isArray(candidate.queries) &&
-    candidate.queries.every((query) => typeof query === "string") &&
+    candidate.queries.length > 0 &&
+    candidate.queries.every((query) => typeof query === "string" && query.trim().length > 0) &&
     (candidate.lang === undefined || typeof candidate.lang === "string") &&
     (candidate.enrich === undefined || typeof candidate.enrich === "boolean")
   );

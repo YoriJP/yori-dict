@@ -2,8 +2,8 @@
 
 ## Current finding
 
-There is no live quality baseline yet. On 2026-08-04, this worktree had neither
-`GEMINI_API_KEY` nor `ANTHROPIC_API_KEY`, so no provider calls were made and no model-quality
+There is no live quality baseline yet. On 2026-08-04, this worktree had none of
+`GEMINI_API_KEY`, `GEMINI_ZH_TW_API_KEY`, or `ANTHROPIC_API_KEY`, so no provider calls were made and no model-quality
 rates are claimed. The harness was verified with deterministic model doubles, including a
 malformed reviewer that fails every attempted decision. Those checks prove scoring behavior,
 not Japanese quality.
@@ -18,6 +18,11 @@ shows a clear property-level improvement without worse abstention or reviewer ou
 The reviewer remains `(claude-haiku-4-5-20251001, none, anthropic)`. Do not use its decisions as
 a quality signal until calibration shows both its false-accept rate and exact reason-label rate.
 False accepts are the release risk; false rejects only leave an example slot empty.
+
+Traditional Chinese translation uses the independently pinned
+`(gemini-2.5-flash-lite, none, google)` triple for every generator candidate. The evaluation
+records its raw response and derives zh-CN from the checked zh-TW text through OpenCC, matching
+the production pipeline.
 
 ## What is measured
 
@@ -46,7 +51,7 @@ an accepted case. A rejection with the wrong reason is a failed exact label, not
 Run the evaluation manually with an unused run id:
 
 ```sh
-GEMINI_API_KEY=... ANTHROPIC_API_KEY=... \
+GEMINI_API_KEY=... GEMINI_ZH_TW_API_KEY=... ANTHROPIC_API_KEY=... \
   bun run examples:eval -- --run-id 2026-08-04-baseline
 ```
 

@@ -12,6 +12,7 @@ export type ModelProvenance = {
 export type EnrichmentAttempt = {
   candidateId: string;
   generator: ModelProvenance;
+  translator?: ModelProvenance;
   reviewer?: ModelProvenance;
   candidate?: PublicExample;
   rejectionReason?: string;
@@ -63,18 +64,24 @@ export function openExampleOverlay(path: string): ExampleOverlay {
        reason = excluded.reason,
        updated_at = excluded.updated_at`
   );
+  const decode = (row: {
+    sense_id: string;
+    status: OverlayRecord["status"];
+    example_json: string | null;
+    attempts_json: string;
+    reason: string | null;
+  }): OverlayRecord => ({
+    senseId: row.sense_id,
+    status: row.status,
+    ...(row.example_json ? { example: JSON.parse(row.example_json) as PublicExample } : {}),
+    attempts: JSON.parse(row.attempts_json) as EnrichmentAttempt[],
+    ...(row.reason ? { reason: row.reason } : {})
+  });
 
   return {
     read(senseId) {
       const row = read.get(senseId);
-      if (!row) return null;
-      return {
-        senseId: row.sense_id,
-        status: row.status,
-        ...(row.example_json ? { example: JSON.parse(row.example_json) as PublicExample } : {}),
-        attempts: JSON.parse(row.attempts_json) as EnrichmentAttempt[],
-        ...(row.reason ? { reason: row.reason } : {})
-      };
+      return row ? decode(row) : null;
     },
     write(record) {
       upsert.run(
@@ -96,13 +103,7 @@ export function openExampleOverlay(path: string): ExampleOverlay {
           reason: string | null;
         }, []>("select * from example_enrichments where status = 'accepted' order by sense_id")
         .all()
-        .map((row) => ({
-          senseId: row.sense_id,
-          status: row.status,
-          ...(row.example_json ? { example: JSON.parse(row.example_json) as PublicExample } : {}),
-          attempts: JSON.parse(row.attempts_json) as EnrichmentAttempt[],
-          ...(row.reason ? { reason: row.reason } : {})
-        }));
+        .map(decode);
     },
     close() {
       db.close();

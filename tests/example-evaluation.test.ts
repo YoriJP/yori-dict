@@ -4,6 +4,7 @@ import {
   generatorConfig,
   reviewerConfig,
   reviewReasonCodes,
+  translatorConfig,
   type ModelCall
 } from "../src/example-enrichment";
 import { runEvaluation, type EvaluationInputs } from "../scripts/evaluate-examples";
@@ -28,12 +29,13 @@ test("scores every repeated corpus attempt and every labelled reviewer mutation"
   expect(result.reviewerCalibration.outcomes).toHaveLength(12);
   expect(result.generatorCandidates).toEqual(inputs.generatorCandidates);
   expect(result.reviewerConfig).toEqual(inputs.reviewer);
+  expect(result.translatorConfig).toEqual(inputs.translator);
 });
 
 test("counts malformed reviewer responses as failures instead of dropping attempts", async () => {
   const inputs = await fixtureInputs();
   const malformedReviewer: ModelCall = async (input) =>
-    input.role === "generator" ? healthyModelCall(input) : "";
+    input.role === "reviewer" ? "" : healthyModelCall(input);
   const result = await runEvaluation(inputs, malformedReviewer);
 
   for (const candidate of result.generation) {
@@ -51,7 +53,7 @@ test("counts malformed reviewer responses as failures instead of dropping attemp
 test("does not hide a reviewer that rejects defects with the wrong reason", async () => {
   const inputs = await fixtureInputs();
   const oneReasonReviewer: ModelCall = async (input) => {
-    if (input.role === "generator") return healthyModelCall(input);
+    if (input.role !== "reviewer") return healthyModelCall(input);
     const id = input.prompt.match(/\{"id":"([^"]+)","decision":"accept"/)?.[1];
     if (!id) throw new Error("Reviewer prompt has no candidate id");
     return id.endsWith(":mutation")
@@ -77,6 +79,7 @@ test("fixed fixtures cover all slices, exact model triples, and one mutation per
   );
   expect(inputs.corpus.filter((item) => item.slice === "should-abstain").every((item) => item.expect === "abstain")).toBe(true);
   expect(inputs.generatorCandidates).toContainEqual(generatorConfig);
+  expect(inputs.translator).toEqual(translatorConfig);
   expect(inputs.reviewer).toEqual(reviewerConfig);
   expect(new Set(inputs.calibration.map((item) => item.expectedReason))).toEqual(new Set(reviewReasonCodes));
   expect(inputs.calibration.every((item) => Object.keys(item.mutation).includes("kind"))).toBe(true);
@@ -95,6 +98,7 @@ async function fixtureInputs(): Promise<EvaluationInputs> {
     corpus: corpus.cases as EvaluationInputs["corpus"],
     calibration: calibration.cases as EvaluationInputs["calibration"],
     generatorCandidates: configs.generatorCandidates as EvaluationInputs["generatorCandidates"],
+    translator: configs.translator as EvaluationInputs["translator"],
     reviewer: configs.reviewer as EvaluationInputs["reviewer"],
     sourceDigests: { corpus: "sha256:test", calibration: "sha256:test", configs: "sha256:test" },
     gitCommit: "test-commit"
@@ -102,6 +106,18 @@ async function fixtureInputs(): Promise<EvaluationInputs> {
 }
 
 const healthyModelCall: ModelCall = async (input) => {
+  if (input.role === "translator") {
+    const sentence = input.prompt.match(/^sentence: (.+)$/m)?.[1] ?? "";
+    const translations: Record<string, string> = {
+      "毎朝、学校まで歩いて行く。": "我每天早上走路去學校。",
+      "先生は辞書から例を引いて説明した。": "老師引用字典裡的例子說明。",
+      "その子犬はとてもかわいい。": "那隻小狗很可愛。",
+      "新しいソフトウェアを仕事で使う。": "我工作時使用新的軟體。"
+    };
+    const translation = translations[sentence];
+    if (!translation) throw new Error(`Unexpected translator sentence ${sentence}`);
+    return JSON.stringify({ translation });
+  }
   if (input.role === "generator") {
     const word = input.prompt.match(/^word: (.+)$/m)?.[1];
     switch (word) {
@@ -148,5 +164,6 @@ const healthyModelCall: ModelCall = async (input) => {
 };
 
 function candidate(sentence: string, en: string, zhTw: string): string {
-  return JSON.stringify({ sentence, translations: { en, "zh-tw": zhTw } });
+  void zhTw;
+  return JSON.stringify({ sentence, english: en });
 }

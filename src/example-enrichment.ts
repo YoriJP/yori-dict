@@ -1,6 +1,7 @@
 import { deinflect } from "./deinflect";
 import { findPrcTerms } from "../scripts/taiwan-terminology";
-import type { ExampleOverlay, EnrichmentAttempt, ModelProvenance } from "./example-overlay";
+import { Converter } from "opencc-js";
+import { applyOverlay, type ExampleOverlay, type EnrichmentAttempt, type ModelProvenance } from "./example-overlay";
 import type { PublicExample, PublicLookupItem, PublicSense } from "./types";
 
 export const generatorConfig = {
@@ -19,7 +20,15 @@ export const reviewerConfig = {
   requireParameters: true
 } as const;
 
-export type ModelRole = "generator" | "reviewer";
+export const translatorConfig = {
+  model: "gemini-2.5-flash-lite",
+  reasoningEffort: "none",
+  provider: "google",
+  allowFallbacks: false,
+  requireParameters: true
+} as const;
+
+export type ModelRole = "generator" | "translator" | "reviewer";
 export type ModelCall = (input: {
   role: ModelRole;
   model: string;
@@ -44,6 +53,10 @@ export type GenerationSeed = {
 
 export type Generated =
   | { kind: "candidate"; sentence: string; translations: Array<{ lang: string; text: string }> }
+  | { kind: "abstain"; reason: "archaic" | "too_technical" | "not_standalone" | "unclear_sense" };
+
+export type JapaneseGeneration =
+  | { kind: "candidate"; sentence: string; english: string }
   | { kind: "abstain"; reason: "archaic" | "too_technical" | "not_standalone" | "unclear_sense" };
 
 export type ReviewDecision =
@@ -102,7 +115,7 @@ export function createEnrichmentService(options: {
     overlay: options.overlay,
     async enrich(item) {
       await enrichMany([item]);
-      return applyAccepted(item, options.overlay);
+      return applyOverlay(item, options.overlay) ?? item;
     },
     enrichMany
   };
@@ -141,7 +154,11 @@ async function enrichSense(
 
   for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
     const candidateId = `${seed.senseId}:${attemptIndex + 1}`;
-    let generated: Generated;
+    const baseAttempt: EnrichmentAttempt = {
+      candidateId,
+      generator: provenance(generatorConfig)
+    };
+    let japanese: JapaneseGeneration;
     try {
       const raw = await callWithTimeout(
         modelCall,
@@ -157,20 +174,52 @@ async function enrichSense(
         },
         timeoutMs
       );
-      generated = parseGeneration(raw);
+      try {
+        japanese = parseGeneration(raw);
+      } catch {
+        priorRejection = "malformed_generator";
+        attempts.push({ ...baseAttempt, rejectionReason: priorRejection });
+        continue;
+      }
     } catch {
       return;
     }
 
-    const baseAttempt: EnrichmentAttempt = {
-      candidateId,
-      generator: provenance(generatorConfig)
-    };
-    if (generated.kind === "abstain") {
-      attempts.push({ ...baseAttempt, rejectionReason: generated.reason });
-      overlay.write({ senseId: seed.senseId, status: "abstained", attempts, reason: generated.reason });
+    if (japanese.kind === "abstain") {
+      attempts.push({ ...baseAttempt, rejectionReason: japanese.reason });
+      overlay.write({ senseId: seed.senseId, status: "abstained", attempts, reason: japanese.reason });
       return;
     }
+
+    const translatedAttempt = { ...baseAttempt, translator: provenance(translatorConfig) };
+    let zhTw: string;
+    try {
+      const raw = await callWithTimeout(
+        modelCall,
+        {
+          role: "translator",
+          model: translatorConfig.model,
+          provider: translatorConfig.provider,
+          reasoningEffort: translatorConfig.reasoningEffort,
+          allowFallbacks: translatorConfig.allowFallbacks,
+          requireParameters: translatorConfig.requireParameters,
+          prompt: translatorPrompt(seed, japanese),
+          signal: new AbortController().signal
+        },
+        timeoutMs
+      );
+      try {
+        zhTw = parseTranslation(raw);
+      } catch {
+        priorRejection = "malformed_translator";
+        attempts.push({ ...translatedAttempt, rejectionReason: priorRejection });
+        continue;
+      }
+    } catch {
+      return;
+    }
+
+    const generated = combineTranslations(japanese, zhTw);
 
     const example: PublicExample = {
       text: generated.sentence,
@@ -181,7 +230,7 @@ async function enrichSense(
     const filterReasons = filterCandidate(seed, generated);
     if (filterReasons.length > 0) {
       priorRejection = `deterministic_filter:${filterReasons.join(",")}`;
-      attempts.push({ ...baseAttempt, candidate: example, rejectionReason: priorRejection });
+      attempts.push({ ...translatedAttempt, candidate: example, rejectionReason: priorRejection });
       continue;
     }
 
@@ -201,12 +250,23 @@ async function enrichSense(
         },
         timeoutMs
       );
-      review = parseReview(raw, candidateId);
+      try {
+        review = parseReview(raw, candidateId);
+      } catch {
+        priorRejection = "malformed_reviewer";
+        attempts.push({
+          ...translatedAttempt,
+          reviewer: provenance(reviewerConfig),
+          candidate: example,
+          rejectionReason: priorRejection
+        });
+        continue;
+      }
     } catch {
       return;
     }
 
-    const reviewedAttempt = { ...baseAttempt, reviewer: provenance(reviewerConfig), candidate: example };
+    const reviewedAttempt = { ...translatedAttempt, reviewer: provenance(reviewerConfig), candidate: example };
     if (review.decision === "accept") {
       attempts.push(reviewedAttempt);
       overlay.write({ senseId: seed.senseId, status: "accepted", example, attempts });
@@ -224,7 +284,7 @@ async function enrichSense(
   });
 }
 
-export function parseGeneration(text: string): Generated {
+export function parseGeneration(text: string): JapaneseGeneration {
   const parsed = parseObject(text) as Record<string, unknown>;
   if (parsed.abstain === true) {
     if (typeof parsed.reason !== "string" || !abstainReasons.has(parsed.reason)) {
@@ -232,17 +292,38 @@ export function parseGeneration(text: string): Generated {
     }
     return { kind: "abstain", reason: parsed.reason as "archaic" | "too_technical" | "not_standalone" | "unclear_sense" };
   }
-  if (typeof parsed.sentence !== "string" || !parsed.translations || typeof parsed.translations !== "object") {
+  if (typeof parsed.sentence !== "string" || typeof parsed.english !== "string" || !parsed.english.trim()) {
     throw new Error("Generator returned an invalid candidate");
-  }
-  const translations = Object.entries(parsed.translations as Record<string, unknown>);
-  if (translations.length === 0 || !translations.every(([, value]) => typeof value === "string")) {
-    throw new Error("Generator returned invalid translations");
   }
   return {
     kind: "candidate",
     sentence: parsed.sentence,
-    translations: translations.map(([lang, value]) => ({ lang, text: value as string }))
+    english: parsed.english
+  };
+}
+
+export function parseTranslation(text: string): string {
+  const parsed = parseObject(text) as Record<string, unknown>;
+  if (typeof parsed.translation !== "string" || !parsed.translation.trim() || Object.keys(parsed).length !== 1) {
+    throw new Error("Translator returned an invalid translation");
+  }
+  return parsed.translation.trim();
+}
+
+const toZhCn = Converter({ from: "twp", to: "cn" });
+
+export function combineTranslations(
+  japanese: Extract<JapaneseGeneration, { kind: "candidate" }>,
+  zhTw: string
+): Extract<Generated, { kind: "candidate" }> {
+  return {
+    kind: "candidate",
+    sentence: japanese.sentence,
+    translations: [
+      { lang: "en", text: japanese.english },
+      { lang: "zh-tw", text: zhTw },
+      { lang: "zh-cn", text: toZhCn(zhTw) }
+    ]
   };
 }
 
@@ -289,11 +370,10 @@ export function filterCandidate(seed: GenerationSeed, candidate: Extract<Generat
 export function generatorPrompt(seed: GenerationSeed, rejection: string | null): string {
   return [
     "Write one Japanese example sentence for a learner's dictionary.",
-    "Return JSON only: {\"sentence\":\"...\",\"translations\":{\"en\":\"...\",\"zh-tw\":\"...\"}}",
+    "Return JSON only: {\"sentence\":\"...\",\"english\":\"...\"}",
     "Or abstain: {\"abstain\":true,\"reason\":\"archaic|too_technical|not_standalone|unclear_sense\"}",
     "The sentence must be natural modern Japanese, 10-30 characters, exactly one sentence, standalone, and use the target meaning rather than another sense.",
     "Use kana when tags include uk. Do not name real people, places, brands, or events.",
-    "Traditional Chinese must use Taiwanese vocabulary (軟體, 資訊, 影片, 螢幕).",
     `word: ${seed.word}`,
     `reading: ${seed.reading ?? ""}`,
     `partOfSpeech: ${JSON.stringify(seed.partOfSpeech)}`,
@@ -301,6 +381,21 @@ export function generatorPrompt(seed: GenerationSeed, rejection: string | null):
     `targetSense: ${JSON.stringify(seed.targetSense)}`,
     `otherSenses: ${JSON.stringify(seed.otherSenses)}`,
     ...(rejection ? [`The previous candidate was rejected for: ${rejection}. Produce a different candidate.`] : [])
+  ].join("\n");
+}
+
+export function translatorPrompt(
+  seed: GenerationSeed,
+  generated: Extract<JapaneseGeneration, { kind: "candidate" }>
+): string {
+  return [
+    "Translate this Japanese example sentence into Traditional Chinese used in Taiwan.",
+    "Return JSON only: {\"translation\":\"...\"}",
+    "Translate the sentence, not the dictionary gloss. Use Taiwanese vocabulary such as 軟體, 資訊, 影片, and 螢幕.",
+    `word: ${seed.word}`,
+    `targetSense: ${JSON.stringify(seed.targetSense)}`,
+    `sentence: ${generated.sentence}`,
+    `english: ${generated.english}`
   ].join("\n");
 }
 
@@ -335,19 +430,6 @@ function containsTarget(seed: GenerationSeed, sentence: string): boolean {
   return false;
 }
 
-function applyAccepted(item: PublicLookupItem, overlay: ExampleOverlay): PublicLookupItem {
-  return {
-    ...item,
-    senses: item.senses.map((sense) => {
-      if ((sense.examples?.length ?? 0) > 0) return sense;
-      const record = overlay.read(sense.id);
-      return record?.status === "accepted" && record.example
-        ? { ...sense, examples: [record.example] }
-        : sense;
-    })
-  };
-}
-
 async function mapConcurrent<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
   await Promise.all(
@@ -375,7 +457,7 @@ function createLimiter(concurrency: number): <T>(work: () => Promise<T>) => Prom
   };
 }
 
-async function callWithTimeout(
+export async function callWithTimeout(
   modelCall: ModelCall,
   input: Parameters<ModelCall>[0],
   timeoutMs: number
@@ -412,9 +494,9 @@ export const defaultModelCall: ModelCall = async (input) => {
   if (input.allowFallbacks || !input.requireParameters) {
     throw new Error("Model routing must disable fallbacks and require every request parameter");
   }
-  if (input.role === "generator") {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
+  if (input.role === "generator" || input.role === "translator") {
+    const apiKey = input.role === "translator" ? process.env.GEMINI_ZH_TW_API_KEY : process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error(`${input.role === "translator" ? "GEMINI_ZH_TW_API_KEY" : "GEMINI_API_KEY"} is not configured`);
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
       {

@@ -282,11 +282,14 @@ curl -H "Authorization: Bearer $YORI_ENRICHMENT_TOKEN" \
   'http://localhost:3000/v1/lookup?q=学校&enrich=true'
 ```
 
-Configure `YORI_ENRICHMENT_TOKEN`, `GEMINI_API_KEY`, and `ANTHROPIC_API_KEY`. The writable
+Configure `YORI_ENRICHMENT_TOKEN`, `GEMINI_API_KEY`, `GEMINI_ZH_TW_API_KEY`, and
+`ANTHROPIC_API_KEY`. The writable
 overlay defaults to `data/example-overlay.sqlite`; set `YORI_EXAMPLE_OVERLAY_PATH` to the
 mounted volume in production. `YORI_ENRICHMENT_CONCURRENCY` defaults to 4 and
-`YORI_MODEL_TIMEOUT_MS` to 15000. The generator is pinned to `gemini-2.5-flash` at low
-reasoning through Google, and the separate reviewer family is pinned to
+`YORI_MODEL_TIMEOUT_MS` to 15000. Japanese generation is pinned to `gemini-2.5-flash` at low
+reasoning. A separate Traditional Chinese translation call is pinned to
+`gemini-2.5-flash-lite` with no reasoning, and Simplified Chinese is derived from that output
+with OpenCC. The separate reviewer family is pinned to
 `claude-haiku-4-5-20251001` through Anthropic. Direct provider APIs do not provide fallback
 routing, so unsupported request parameters cannot be silently dropped by another provider.
 
@@ -306,7 +309,7 @@ and provider. `build:db` folds accepted rows into the read-only release database
 Run the fixed-corpus generator comparison and reviewer calibration on demand:
 
 ```sh
-GEMINI_API_KEY=... ANTHROPIC_API_KEY=... \
+GEMINI_API_KEY=... GEMINI_ZH_TW_API_KEY=... ANTHROPIC_API_KEY=... \
   bun run examples:eval -- --run-id 2026-08-04-baseline
 ```
 

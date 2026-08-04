@@ -4,14 +4,19 @@ import { mkdir, open } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   defaultModelCall,
+  callWithTimeout,
+  combineTranslations,
   filterCandidate,
   generatorConfig,
   generatorPrompt,
   parseGeneration,
+  parseTranslation,
   parseReview,
   reviewerConfig,
   reviewerPrompt,
   reviewReasonCodes,
+  translatorConfig,
+  translatorPrompt,
   type Generated,
   type GenerationSeed,
   type ModelCall,
@@ -54,6 +59,7 @@ type GenerationOutcome = {
   properties: string[];
   rawResponse: string | null;
   reviewerRawResponse: string | null;
+  translatorRawResponse: string | null;
   error: string | null;
 };
 type CalibrationOutcome = {
@@ -73,6 +79,7 @@ export type EvaluationInputs = {
   corpus: CorpusCase[];
   calibration: CalibrationCase[];
   generatorCandidates: ModelConfig[];
+  translator: ModelConfig;
   reviewer: ModelConfig;
   sourceDigests: Record<string, string>;
   gitCommit: string;
@@ -88,7 +95,15 @@ export async function runEvaluation(inputs: EvaluationInputs, modelCall: ModelCa
     for (let repeat = 1; repeat <= inputs.repeats; repeat += 1) {
       for (const corpusCase of inputs.corpus) {
         outcomes.push(
-          await scoreGenerationAttempt(corpusCase, repeat, config, inputs.reviewer, inputs.timeoutMs, modelCall)
+          await scoreGenerationAttempt(
+            corpusCase,
+            repeat,
+            config,
+            inputs.translator,
+            inputs.reviewer,
+            inputs.timeoutMs,
+            modelCall
+          )
         );
       }
     }
@@ -137,6 +152,7 @@ export async function runEvaluation(inputs: EvaluationInputs, modelCall: ModelCa
     timeoutMs: inputs.timeoutMs,
     generatorCandidates: inputs.generatorCandidates,
     reviewerConfig: inputs.reviewer,
+    translatorConfig: inputs.translator,
     corpus: inputs.corpus,
     calibration: inputs.calibration,
     generation,
@@ -157,12 +173,14 @@ async function scoreGenerationAttempt(
   corpusCase: CorpusCase,
   repeat: number,
   generator: ModelConfig,
+  translator: ModelConfig,
   reviewer: ModelConfig,
   timeoutMs: number,
   modelCall: ModelCall
 ): Promise<GenerationOutcome> {
   let rawResponse: string | null = null;
   let reviewerRawResponse: string | null = null;
+  let translatorRawResponse: string | null = null;
   try {
     rawResponse = await invoke(modelCall, "generator", generator, generatorPrompt(corpusCase.seed, null), timeoutMs);
     const generated = parseGeneration(rawResponse);
@@ -175,6 +193,7 @@ async function scoreGenerationAttempt(
         properties: [generated.kind === "abstain" ? "abstained" : "failed_to_abstain"],
         rawResponse,
         reviewerRawResponse,
+        translatorRawResponse,
         error: null
       };
     }
@@ -187,11 +206,20 @@ async function scoreGenerationAttempt(
         properties: [`unexpected_abstention:${generated.reason}`],
         rawResponse,
         reviewerRawResponse,
+        translatorRawResponse,
         error: null
       };
     }
 
-    const filterReasons = filterCandidate(corpusCase.seed, generated);
+    translatorRawResponse = await invoke(
+      modelCall,
+      "translator",
+      translator,
+      translatorPrompt(corpusCase.seed, generated),
+      timeoutMs
+    );
+    const candidate = combineTranslations(generated, parseTranslation(translatorRawResponse));
+    const filterReasons = filterCandidate(corpusCase.seed, candidate);
     if (filterReasons.length > 0) {
       return {
         caseId: corpusCase.id,
@@ -201,6 +229,7 @@ async function scoreGenerationAttempt(
         properties: filterReasons.map((reason) => `deterministic_filter:${reason}`),
         rawResponse,
         reviewerRawResponse,
+        translatorRawResponse,
         error: null
       };
     }
@@ -210,7 +239,7 @@ async function scoreGenerationAttempt(
       modelCall,
       "reviewer",
       reviewer,
-      reviewerPrompt(id, corpusCase.seed, generated),
+      reviewerPrompt(id, corpusCase.seed, candidate),
       timeoutMs
     );
     const review = parseReview(reviewerRawResponse, id);
@@ -222,6 +251,7 @@ async function scoreGenerationAttempt(
       properties: [review.decision === "accept" ? "reviewer_accepted" : `reviewer_rejected:${review.reason}`],
       rawResponse,
       reviewerRawResponse,
+      translatorRawResponse,
       error: null
     };
   } catch (error) {
@@ -233,6 +263,7 @@ async function scoreGenerationAttempt(
       properties: ["model_or_parse_failure"],
       rawResponse,
       reviewerRawResponse,
+      translatorRawResponse,
       error: errorMessage(error)
     };
   }
@@ -340,21 +371,11 @@ async function invoke(
   prompt: string,
   timeoutMs: number
 ): Promise<string> {
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout>;
-  try {
-    return await Promise.race([
-      modelCall({ role, ...config, prompt, signal: controller.signal }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          reject(new Error(`Model call timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
-      })
-    ]);
-  } finally {
-    clearTimeout(timer!);
-  }
+  return callWithTimeout(
+    modelCall,
+    { role, ...config, prompt, signal: new AbortController().signal },
+    timeoutMs
+  );
 }
 
 function applyMutation(candidate: Candidate, mutation: CalibrationCase["mutation"]): Candidate {
@@ -397,12 +418,15 @@ function validateInputs(inputs: EvaluationInputs): void {
   if (inputs.generatorCandidates.length < 2) throw new Error("At least two generator triples are required");
   const candidateKeys = inputs.generatorCandidates.map(configKey);
   if (new Set(candidateKeys).size !== candidateKeys.length) throw new Error("Generator triples must be unique");
-  for (const config of [...inputs.generatorCandidates, inputs.reviewer]) validateConfig(config);
+  for (const config of [...inputs.generatorCandidates, inputs.translator, inputs.reviewer]) validateConfig(config);
   if (!inputs.generatorCandidates.some((config) => sameConfig(config, generatorConfig))) {
     throw new Error("Generator candidates must include the pinned production configuration");
   }
   if (!sameConfig(inputs.reviewer, reviewerConfig)) {
     throw new Error("Reviewer calibration must use the pinned production configuration");
+  }
+  if (!sameConfig(inputs.translator, translatorConfig)) {
+    throw new Error("Translation must use the pinned production configuration");
   }
   const coveredReasons = new Set(inputs.calibration.map((item) => item.expectedReason));
   for (const reason of reviewReasonCodes) {
@@ -448,6 +472,7 @@ async function loadInputs(args: ReturnType<typeof parseArgs>): Promise<Evaluatio
   const configsFixture = JSON.parse(configsText) as {
     schemaVersion?: number;
     generatorCandidates?: ModelConfig[];
+    translator?: ModelConfig;
     reviewer?: ModelConfig;
   };
   if (corpusFixture.schemaVersion !== 1 || !Array.isArray(corpusFixture.cases)) throw new Error("Invalid corpus fixture");
@@ -457,6 +482,7 @@ async function loadInputs(args: ReturnType<typeof parseArgs>): Promise<Evaluatio
   if (
     configsFixture.schemaVersion !== 1 ||
     !Array.isArray(configsFixture.generatorCandidates) ||
+    !configsFixture.translator ||
     !configsFixture.reviewer
   ) {
     throw new Error("Invalid model config fixture");
@@ -468,6 +494,7 @@ async function loadInputs(args: ReturnType<typeof parseArgs>): Promise<Evaluatio
     corpus: corpusFixture.cases,
     calibration: calibrationFixture.cases,
     generatorCandidates: configsFixture.generatorCandidates,
+    translator: configsFixture.translator,
     reviewer: configsFixture.reviewer,
     sourceDigests: {
       [args.corpusPath]: digest(corpusText),
@@ -494,8 +521,12 @@ function assertLiveRuntime(inputs: EvaluationInputs): void {
   if (inputs.reviewer.provider !== "anthropic") {
     throw new Error(`Live runner does not support reviewer provider ${inputs.reviewer.provider}`);
   }
+  if (inputs.translator.provider !== "google") {
+    throw new Error(`Live runner does not support translator provider ${inputs.translator.provider}`);
+  }
   const missing = [];
   if (!process.env.GEMINI_API_KEY) missing.push("GEMINI_API_KEY");
+  if (!process.env.GEMINI_ZH_TW_API_KEY) missing.push("GEMINI_ZH_TW_API_KEY");
   if (!process.env.ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY");
   if (missing.length > 0) throw new Error(`Live evaluation requires ${missing.join(" and ")}`);
 }
