@@ -201,7 +201,41 @@ test("malformed output and timeout return the entry without failing the request"
   const timeout = await setup(() => new Promise<string>(() => {}), { timeoutMs: 5 });
   const timeoutResponse = await authorised(timeout.app, "学校");
   expect(timeoutResponse.status).toBe(200);
-  expect((await timeoutResponse.json()).item.senses[0]).not.toHaveProperty("examples");
+  const timeoutBody = await timeoutResponse.json();
+  expect(timeoutBody.item.senses[0]).not.toHaveProperty("examples");
+  const timeoutRecord = timeout.overlay.read(timeoutBody.item.senses[0].id);
+  expect(timeoutRecord?.status).toBe("error");
+  expect(timeoutRecord?.reason).toBe("generator_timeout");
+  expect(timeoutRecord?.attempts[0].generator.provider).toBe("google");
+  expect(timeoutRecord?.attempts[0].rejectionReason).toBe("generator_timeout");
+});
+
+test("translator timeout persists the generated candidate and remains retryable", async () => {
+  let translatorCalls = 0;
+  const runtime = await setup(async (input) => {
+    if (input.role === "translator") {
+      translatorCalls += 1;
+      if (translatorCalls === 1) return new Promise<string>(() => {});
+    }
+    return validResponse(input.role, input.prompt);
+  }, { timeoutMs: 5 });
+
+  const first = await authorised(runtime.app, "学校");
+  const firstBody = await first.json();
+  expect(first.status).toBe(200);
+  expect(firstBody.item.senses[0]).not.toHaveProperty("examples");
+  const failed = runtime.overlay.read(firstBody.item.senses[0].id);
+  expect(failed?.status).toBe("error");
+  expect(failed?.reason).toBe("translator_timeout");
+  expect(failed?.example?.translations).toEqual([{ lang: "en", text: "We talked about 学校." }]);
+  expect(failed?.attempts[0].generator.provider).toBe("google");
+  expect(failed?.attempts[0].translator?.reasoningEffort).toBe("none");
+  expect(failed?.attempts[0].rejectionReason).toBe("translator_timeout");
+
+  const retry = await authorised(runtime.app, "学校");
+  expect((await retry.json()).item.senses[0].examples[0].source).toBe("generated");
+  expect(runtime.overlay.read(firstBody.item.senses[0].id)?.attempts).toHaveLength(2);
+  expect(translatorCalls).toBe(2);
 });
 
 test("malformed reviewer output retries once and records the terminal drop", async () => {

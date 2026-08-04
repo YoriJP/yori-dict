@@ -183,7 +183,10 @@ async function enrichSense(
         attempts.push({ ...baseAttempt, rejectionReason: priorRejection });
         continue;
       }
-    } catch {
+    } catch (error) {
+      const reason = transportReason("generator", error);
+      attempts.push({ ...baseAttempt, rejectionReason: reason });
+      overlay.write({ senseId: seed.senseId, status: "error", attempts, reason });
       return;
     }
 
@@ -217,7 +220,16 @@ async function enrichSense(
         attempts.push({ ...translatedAttempt, rejectionReason: priorRejection });
         continue;
       }
-    } catch {
+    } catch (error) {
+      const reason = transportReason("translator", error);
+      const partialExample: PublicExample = {
+        text: japanese.sentence,
+        translations: [{ lang: "en", text: japanese.english }],
+        source: "generated",
+        reviewStatus: "checked"
+      };
+      attempts.push({ ...translatedAttempt, candidate: partialExample, rejectionReason: reason });
+      overlay.write({ senseId: seed.senseId, status: "error", example: partialExample, attempts, reason });
       return;
     }
 
