@@ -82,6 +82,8 @@ export const reviewReasonCodes = [
   "unsafe_content"
 ] as const;
 const reviewReasons = new Set<string>(reviewReasonCodes);
+const japaneseWordSegmenter = new Intl.Segmenter("ja-JP", { granularity: "word" });
+const inflectionBoundaries = new Set(["は", "が", "を", "に", "へ", "と", "で", "も", "や", "か", "から", "まで", "より"]);
 
 export function createEnrichmentService(options: {
   overlay: ExampleOverlay;
@@ -470,15 +472,32 @@ function containsTarget(seed: GenerationSeed, sentence: string): boolean {
       .filter((form) => !seed.tags.includes("uk") || form.kind === "kana")
       .map((form) => form.text)
   );
-  if (Array.from(allowedForms).some((form) => sentence.includes(form))) return true;
-  const chars = Array.from(sentence.replace(/[。！？!?]/g, ""));
+  const segments = Array.from(japaneseWordSegmenter.segment(sentence));
+  if (segments.some((segment) => segment.isWordLike && allowedForms.has(segment.segment))) return true;
+
+  const chars = Array.from(sentence);
+  const starts = new Set([0]);
+  for (const segment of segments) {
+    if (!segment.isWordLike || inflectionBoundaries.has(segment.segment)) {
+      starts.add(Array.from(sentence.slice(0, segment.index + segment.segment.length)).length);
+    }
+  }
   for (let start = 0; start < chars.length; start += 1) {
     for (let end = start + 1; end <= Math.min(chars.length, start + 12); end += 1) {
       const token = chars.slice(start, end).join("");
-      if (deinflect(token).some((candidate) => allowedForms.has(candidate.text))) return true;
+      if (starts.has(start) && allowedForms.has(token)) return true;
+      if (deinflect(token).some((candidate) =>
+        allowedForms.has(candidate.text) && isStandaloneInflection(chars, start, end, candidate.text)
+      )) return true;
     }
   }
   return false;
+}
+
+function isStandaloneInflection(chars: string[], start: number, end: number, baseForm: string): boolean {
+  const normalized = [...chars.slice(0, start), ...Array.from(baseForm), ...chars.slice(end)].join("");
+  return Array.from(japaneseWordSegmenter.segment(normalized))
+    .some((segment) => segment.isWordLike && segment.segment === baseForm);
 }
 
 async function mapConcurrent<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {

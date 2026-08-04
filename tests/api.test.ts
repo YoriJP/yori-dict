@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createApp } from "../src/app";
+import { dataReleaseUrl } from "../src/data-release";
 import { openLookupDb, type LookupDb } from "../src/db";
 
 const testDbPath = "/tmp/yori-dict-api-test.sqlite";
@@ -59,7 +60,9 @@ test("serves OpenAPI YAML from the OpenAPI route", async () => {
   const res = await app.request("/openapi.yaml");
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("application/yaml");
-  expect(await res.text()).toStartWith("openapi: 3.1.0");
+  const body = await res.text();
+  expect(body).toStartWith("openapi: 3.1.0");
+  expect(body).toContain(`dataRelease: ${dataReleaseUrl}`);
 });
 
 test("returns metadata", async () => {

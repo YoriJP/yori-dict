@@ -93,6 +93,27 @@ test("deterministic filter accepts a conjugated target and rejects PRC terminolo
   ).toContain("zh_tw_style");
 });
 
+test("deterministic filter does not match an inflected target inside another word", () => {
+  const seed: GenerationSeed = {
+    senseId: "sense",
+    word: "切る",
+    reading: "きる",
+    forms: [{ text: "切る", kind: "kanji" }, { text: "きる", kind: "kana" }],
+    partOfSpeech: ["v5r"],
+    tags: [],
+    targetSense: ["to cut"],
+    otherSenses: []
+  };
+  expect(filterCandidate(seed, {
+    kind: "candidate",
+    sentence: "彼は大切な友達を裏切った。",
+    translations: [
+      { lang: "en", text: "He betrayed an important friend." },
+      { lang: "zh-tw", text: "他背叛了重要的朋友。" }
+    ]
+  })).toContain("word_absent");
+});
+
 test("enrichment respects the forms that apply to each sense", () => {
   const overlay: ExampleOverlay = {
     read: () => null,

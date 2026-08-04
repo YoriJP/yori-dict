@@ -37,6 +37,7 @@ test("allows reviewed Taiwanese terminology overlap cases", () => {
     "木質接口",
     "餐廳今天換了新菜單",
     "從前提導出結論",
+    "從前提導出結論後，把檔案收好。",
     "新制度的導入需要時間",
     "觀察整場比賽的全局"
   ]) {

@@ -5,7 +5,7 @@ info:
   description: Japanese dictionary lookup API built from JMdict-simplified with multilingual lookup support.
   license:
     name: MIT for code; CC BY-SA 4.0 for dictionary data
-    url: https://github.com/anilahsu/yori-dict/blob/main/DATA_SOURCES.md
+    url: https://github.com/YoriJP/yori-dict/blob/main/DATA_SOURCES.md
 servers:
   - url: https://{host}
     description: Railway deployment
@@ -35,7 +35,7 @@ paths:
                 batchLookup: /v1/lookup/batch
                 docs: /doc
                 openapi: /openapi.yaml
-                dataRelease: https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01
+                dataRelease: https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.2
   /doc:
     get:
       summary: API documentation

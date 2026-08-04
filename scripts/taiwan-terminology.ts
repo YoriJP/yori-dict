@@ -89,8 +89,9 @@ export function findPrcTerms(text: string): TaiwanTerminologyMatch[] {
         segment.index === index &&
         (segment.index + segment.segment.length === end || policy.matchPrefix === true);
 
+      const localContext = clauseContaining(text, index, end);
       const hasRequiredContext =
-        !policy.requiredContext || policy.requiredContext.some((context) => text.includes(context));
+        !policy.requiredContext || policy.requiredContext.some((context) => localContext.includes(context));
       if (isBoundaryMatch && hasRequiredContext && !isAllowedPhrase(text, index, end, term)) {
         matches.push({ term, replacement: policy.replacement, index });
       }
@@ -100,6 +101,15 @@ export function findPrcTerms(text: string): TaiwanTerminologyMatch[] {
   }
 
   return matches.sort((left, right) => left.index - right.index || right.term.length - left.term.length);
+}
+
+function clauseContaining(text: string, start: number, end: number): string {
+  const boundaries = /[，,。！？!?；;\n]/;
+  let clauseStart = start;
+  while (clauseStart > 0 && !boundaries.test(text[clauseStart - 1] ?? "")) clauseStart -= 1;
+  let clauseEnd = end;
+  while (clauseEnd < text.length && !boundaries.test(text[clauseEnd] ?? "")) clauseEnd += 1;
+  return text.slice(clauseStart, clauseEnd);
 }
 
 function buildTermPolicies(): Map<string, TermPolicy> {
