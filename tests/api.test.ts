@@ -65,6 +65,8 @@ test("returns metadata", async () => {
     license: "CC-BY-SA-4.0",
     url: "sources/ai-glosses/ko.jsonl"
   });
+  expect(body.tags.uk).toBe("word usually written using kana alone");
+  expect(body.tags.vt).toBe("transitive verb");
 });
 
 test("looks up an exact Japanese headword", async () => {
@@ -99,6 +101,44 @@ test("preserves form tags and sense applicability", async () => {
     kanji: ["遇う"],
     kana: ["*"]
   });
+});
+
+test("returns sense annotations when JMdict has them", async () => {
+  const res = await app.request("/v1/lookup?q=%E7%B6%BA%E9%BA%97");
+  const body = await res.json();
+  const sense = body.item.senses[0];
+  expect(sense.misc).toEqual(["uk"]);
+  expect(sense.info).toEqual(["also written as 奇麗"]);
+  expect(sense.antonym).toEqual([["汚い", "きたない", 1]]);
+  expect(sense.glosses[1].type).toBe("figurative");
+});
+
+test("returns loanword origin and field tags", async () => {
+  const res = await app.request("/v1/lookup?q=%E3%83%91%E3%82%BD%E3%82%B3%E3%83%B3");
+  const body = await res.json();
+  const sense = body.item.senses[0];
+  expect(sense.field).toEqual(["comp"]);
+  expect(sense.related).toEqual([["パーソナルコンピューター"]]);
+  expect(sense.languageSource).toEqual([
+    { lang: "eng", full: false, wasei: true, text: "personal computer" }
+  ]);
+});
+
+test("returns dialect tags", async () => {
+  const res = await app.request("/v1/lookup?q=%E3%81%82%E3%81%8B%E3%82%93");
+  const body = await res.json();
+  expect(body.item.senses[0].dialect).toEqual(["ksb"]);
+  expect(body.item.senses[0].misc).toEqual(["uk", "col"]);
+});
+
+test("omits empty sense annotations", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
+  const body = await res.json();
+  const sense = body.item.senses[0];
+  expect(sense).not.toHaveProperty("misc");
+  expect(sense).not.toHaveProperty("field");
+  expect(sense).not.toHaveProperty("languageSource");
+  expect(sense.glosses[0]).not.toHaveProperty("type");
 });
 
 test("looks up by reading", async () => {

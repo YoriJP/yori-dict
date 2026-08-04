@@ -25,6 +25,8 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - English and German glosses from JMdict.
 - Reviewed AI-assisted Traditional Chinese, Simplified Chinese, and Korean glosses.
 - Requested-language responses: no automatic English fallback.
+- Sense annotations from JMdict: usage tags, field of application, dialect, notes,
+  cross-references, and loanword origin.
 
 Current coverage and limitations:
 
@@ -68,6 +70,37 @@ en, de, zh-tw, zh-cn, ko
 ```
 
 `lang` defaults to `en`.
+
+## Sense Annotations
+
+Each sense carries the annotations JMdict provides. These fields are omitted when
+JMdict has no values for them, so most senses stay small:
+
+| Field | Meaning | Senses with values |
+| --- | --- | ---: |
+| `misc` | Usage tags, such as `uk` (usually written in kana) or `col` | 6.8% |
+| `field` | Field of application, such as `comp`, `med`, `finc` | 5.0% |
+| `related` | Cross-references to related entries | 5.1% |
+| `info` | Free-text notes about the sense | 1.0% |
+| `languageSource` | Loanword origin, including a `wasei` flag for wasei-eigo | 0.9% |
+| `antonym` | Cross-references to antonyms | 0.2% |
+| `dialect` | Dialect tags, such as `ksb` (Kansai-ben) | 0.1% |
+
+Glosses may also carry `type` (`literal`, `figurative`, `explanation`, or
+`trademark`).
+
+Tag codes in `misc`, `field`, `dialect`, and `partOfSpeech` are short JMdict
+identifiers. `/v1/meta` returns a `tags` object mapping every code to a
+description, so clients can render them without a hardcoded table:
+
+```sh
+curl 'https://yori-dict-production.up.railway.app/v1/meta' | jq '.tags.uk'
+# "word usually written using kana alone"
+```
+
+Cross-references in `related` and `antonym` are arrays in one of the
+JMdict-simplified forms: `[word]`, `[word, senseIndex]`, `[word, reading]`, or
+`[word, reading, senseIndex]`.
 
 ## SQLite Download
 

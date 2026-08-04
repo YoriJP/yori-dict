@@ -8,7 +8,14 @@
     "v1": "Ichidan verb",
     "vt": "transitive verb",
     "n": "noun",
-    "adj-i": "i-adjective"
+    "adj-i": "i-adjective",
+    "adj-na": "na-adjective",
+    "exp": "expression",
+    "abbr": "abbreviation",
+    "col": "colloquialism",
+    "comp": "computing",
+    "ksb": "Kansai-ben",
+    "uk": "word usually written using kana alone"
   },
   "words": [
     {
@@ -283,6 +290,83 @@
           "languageSource": [],
           "gloss": [
             { "lang": "eng", "gender": null, "type": null, "text": "about" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2000003",
+      "kanji": [
+        { "text": "綺麗", "common": true, "tags": [] }
+      ],
+      "kana": [
+        { "text": "きれい", "common": true, "tags": [], "appliesToKanji": ["*"] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["adj-na"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [["汚い", "きたない", 1]],
+          "field": [],
+          "dialect": [],
+          "misc": ["uk"],
+          "info": ["also written as 奇麗"],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "pretty" },
+            { "lang": "eng", "gender": null, "type": "figurative", "text": "clean" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2000004",
+      "kanji": [],
+      "kana": [
+        { "text": "パソコン", "common": true, "tags": [], "appliesToKanji": [] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["n"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [["パーソナルコンピューター"]],
+          "antonym": [],
+          "field": ["comp"],
+          "dialect": [],
+          "misc": ["abbr"],
+          "info": [],
+          "languageSource": [
+            { "lang": "eng", "full": false, "wasei": true, "text": "personal computer" }
+          ],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "personal computer" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2000005",
+      "kanji": [],
+      "kana": [
+        { "text": "あかん", "common": false, "tags": [], "appliesToKanji": [] }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": ["exp"],
+          "appliesToKanji": ["*"],
+          "appliesToKana": ["*"],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": ["ksb"],
+          "misc": ["uk", "col"],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            { "lang": "eng", "gender": null, "type": null, "text": "useless" }
           ]
         }
       ]

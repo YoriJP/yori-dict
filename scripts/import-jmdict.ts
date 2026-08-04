@@ -97,7 +97,14 @@ function createSchema(db: Database) {
       position integer not null,
       applies_to_kanji text not null,
       applies_to_kana text not null,
-      part_of_speech text not null
+      part_of_speech text not null,
+      misc text not null,
+      field text not null,
+      dialect text not null,
+      info text not null,
+      related text not null,
+      antonym text not null,
+      language_source text not null
     );
 
     create table glosses (
@@ -105,7 +112,8 @@ function createSchema(db: Database) {
       lang text not null,
       text text not null,
       source text not null check (source in ('jmdict', 'ai-assisted')),
-      review_status text not null check (review_status in ('source', 'checked'))
+      review_status text not null check (review_status in ('source', 'checked')),
+      type text
     );
 
     create table lookup_terms (
@@ -126,6 +134,7 @@ function insertMetadata(db: Database, source: JmdictFile) {
   if (source.version) insert.run("jmdictSimplifiedVersion", source.version);
   if (source.dictDate) insert.run("dictDate", source.dictDate);
   if (source.languages) insert.run("sourceLanguages", JSON.stringify(source.languages));
+  if (source.tags) insert.run("tags", JSON.stringify(source.tags));
 }
 
 function insertWords(db: Database, words: JmdictWord[]) {
@@ -135,11 +144,13 @@ function insertWords(db: Database, words: JmdictWord[]) {
   );
   const insertSense = db.prepare(
     `insert into senses
-      (id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech)
-     values (?, ?, ?, ?, ?, ?)`
+      (id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech,
+       misc, field, dialect, info, related, antonym, language_source)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const insertGloss = db.prepare(
-    "insert into glosses (sense_id, lang, text, source, review_status) values (?, ?, ?, 'jmdict', 'source')"
+    `insert into glosses (sense_id, lang, text, source, review_status, type)
+     values (?, ?, ?, 'jmdict', 'source', ?)`
   );
   const insertLookup = db.prepare(
     "insert into lookup_terms (term, entry_id, match_kind) values (?, ?, ?)"
@@ -175,13 +186,20 @@ function insertWords(db: Database, words: JmdictWord[]) {
           index + 1,
           JSON.stringify(sense.appliesToKanji),
           JSON.stringify(sense.appliesToKana),
-          JSON.stringify(sense.partOfSpeech)
+          JSON.stringify(sense.partOfSpeech),
+          JSON.stringify(sense.misc ?? []),
+          JSON.stringify(sense.field ?? []),
+          JSON.stringify(sense.dialect ?? []),
+          JSON.stringify(sense.info ?? []),
+          JSON.stringify(sense.related ?? []),
+          JSON.stringify(sense.antonym ?? []),
+          JSON.stringify(sense.languageSource ?? [])
         );
 
         for (const gloss of sense.gloss) {
           const apiLang = toApiLang(gloss.lang);
           if (!apiLang) continue;
-          insertGloss.run(senseId, apiLang, gloss.text);
+          insertGloss.run(senseId, apiLang, gloss.text, gloss.type ?? null);
         }
       });
     }
