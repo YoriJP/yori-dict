@@ -303,6 +303,21 @@ bun run build:db
 The committed JSONL retains every generation attempt and its exact model, reasoning effort,
 and provider. `build:db` folds accepted rows into the read-only release database.
 
+Run the fixed-corpus generator comparison and reviewer calibration on demand:
+
+```sh
+GEMINI_API_KEY=... ANTHROPIC_API_KEY=... \
+  bun run examples:eval -- --run-id 2026-08-04-baseline
+```
+
+The command runs each generation case three times for both pinned candidate triples, then
+calibrates the pinned reviewer against accepted examples and one-defect mutations. It writes
+one immutable result to `data/example-evaluation/<run-id>/result.json` and refuses to replace
+an existing run. The result embeds the corpus, mutations, exact configs, input hashes, raw
+responses, and separate false-accept and false-reject denominators. These calls spend provider
+credits and intentionally do not run in CI. See [the evaluation findings](docs/example-evaluation.md)
+before interpreting a run.
+
 ## API Shape
 
 See [openapi.yaml](openapi.yaml) for the full OpenAPI description.

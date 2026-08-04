@@ -60,14 +60,15 @@ export type EnrichmentService = {
 };
 
 const abstainReasons = new Set(["archaic", "too_technical", "not_standalone", "unclear_sense"]);
-const reviewReasons = new Set([
+export const reviewReasonCodes = [
   "wrong_sense",
   "unnatural",
   "too_complex",
   "translation_mismatch",
   "zh_tw_style",
   "unsafe_content"
-]);
+] as const;
+const reviewReasons = new Set<string>(reviewReasonCodes);
 
 export function createEnrichmentService(options: {
   overlay: ExampleOverlay;

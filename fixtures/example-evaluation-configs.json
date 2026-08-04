@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "generatorCandidates": [
+    {
+      "model": "gemini-2.5-flash",
+      "reasoningEffort": "low",
+      "provider": "google",
+      "allowFallbacks": false,
+      "requireParameters": true
+    },
+    {
+      "model": "gemini-2.5-pro",
+      "reasoningEffort": "low",
+      "provider": "google",
+      "allowFallbacks": false,
+      "requireParameters": true
+    }
+  ],
+  "reviewer": {
+    "model": "claude-haiku-4-5-20251001",
+    "reasoningEffort": "none",
+    "provider": "anthropic",
+    "allowFallbacks": false,
+    "requireParameters": true
+  }
+}
