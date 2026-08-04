@@ -15,6 +15,7 @@
     "ai:summary": "bun run scripts/summarize-ai-batch.ts",
     "ai:validate": "bun run scripts/validate-ai-glosses.ts",
     "build:db": "bun run import:jmdict:full -- --ai-glosses sources/ai-glosses/zh-tw.jsonl --ai-glosses sources/ai-glosses/zh-cn.jsonl --ai-glosses sources/ai-glosses/ko.jsonl",
+    "data:download": "bun run scripts/download-data-release.ts",
     "dev": "bun run src/index.ts",
     "download:jmdict": "bun run scripts/download-jmdict.ts --out-dir data/raw",
     "import:jmdict": "bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out data/yori.sqlite",

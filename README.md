@@ -15,7 +15,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 - Public API: <https://yori-dict-production.up.railway.app>
 - API docs: <https://yori-dict-production.up.railway.app/doc>
 - Raw OpenAPI spec: <https://yori-dict-production.up.railway.app/openapi.yaml>
-- SQLite data release: <https://github.com/anilahsu/yori-dict/releases/tag/data-2026-07-01>
+- SQLite data release: <https://github.com/YoriJP/yori-dict/releases/tag/data-2026-07-01>
 
 ## What Yori Dict Supports
 
@@ -107,8 +107,8 @@ JMdict-simplified forms: `[word]`, `[word, senseIndex]`, `[word, reading]`, or
 Download and verify the current SQLite database:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz.sha256
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.sqlite.gz.sha256
 shasum -a 256 -c yori-dict-2026-07-01.sqlite.gz.sha256
 gunzip yori-dict-2026-07-01.sqlite.gz
 ```
@@ -116,7 +116,7 @@ gunzip yori-dict-2026-07-01.sqlite.gz
 Release manifest:
 
 ```sh
-curl -LO https://github.com/anilahsu/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.json
+curl -LO https://github.com/YoriJP/yori-dict/releases/download/data-2026-07-01/yori-dict-2026-07-01.json
 ```
 
 The `data-2026-07-01` release contains:
@@ -138,8 +138,7 @@ The `data-2026-07-01` release contains:
 
 ```sh
 bun install
-bun run download:jmdict
-bun run build:db
+bun run data:download
 bun run dev
 ```
 
@@ -189,9 +188,10 @@ sources/ai-glosses/zh-cn.jsonl
 sources/ai-glosses/ko.jsonl
 ```
 
-## Release
+## Data Release
 
-Prepare a release SQLite artifact:
+Rebuilding from source remains available independently of service deploys. Prepare a release
+SQLite artifact with the existing validation and packaging pipeline:
 
 ```sh
 bun run download:jmdict
@@ -211,6 +211,19 @@ releases/yori-dict-<artifactVersion>.json
 Upload the `.sqlite.gz`, `.sha256`, and `.json` files as GitHub release assets.
 Users can decompress the SQLite file and use it directly.
 
+After publishing the `data-<version>` GitHub release, pin the service to it by updating only
+`version` and `sha256` in [`data-release.json`](data-release.json). Copy the SHA-256 from the
+published `.sqlite.gz.sha256` file, then verify the complete public download path locally:
+
+```sh
+bun run data:download
+```
+
+Commit the `data-release.json` diff normally. This changes the deployed data without requiring
+an application-code change. The deploy downloads the same `.sqlite.gz` asset offered to public
+users, verifies it against the committed checksum before installing it, and only then replaces the
+current database. A mismatch stops the build and leaves any existing database untouched.
+
 ## Railway
 
 Railway build and deploy settings are defined in [railway.json](railway.json).
@@ -220,8 +233,7 @@ Build command:
 
 ```sh
 bun install
-bun run download:jmdict
-bun run build:db
+bun run data:download
 ```
 
 Start command:
@@ -230,7 +242,8 @@ Start command:
 bun run start
 ```
 
-The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`.
+The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`. Railway obtains that database
+from the release pinned in `data-release.json`; deploys do not contact JMdict upstream.
 
 ## API Shape
 
