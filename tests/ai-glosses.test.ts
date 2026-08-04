@@ -2,6 +2,40 @@ import { expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import { openLookupDb } from "../src/db";
 import { candidateFromResponse, type AiSeed, type Candidate } from "../scripts/ai-common";
+import { findPrcTerms } from "../scripts/taiwan-terminology";
+
+test("flags reviewed PRC terminology with Taiwanese replacements", () => {
+  expect(["軟件", "信息", "視頻", "屏幕"].map((text) => findPrcTerms(text))).toEqual([
+    [{ term: "軟件", replacement: "軟體", index: 0 }],
+    [{ term: "信息", replacement: "資訊", index: 0 }],
+    [{ term: "視頻", replacement: "影片", index: 0 }],
+    [{ term: "屏幕", replacement: "螢幕", index: 0 }]
+  ]);
+  expect(findPrcTerms("初中生")).toEqual([{ term: "初中", replacement: "國中", index: 0 }]);
+  expect(["用戶", "智能終端機", "幼兒園", "網絡", "菜單"].map((text) => findPrcTerms(text))).toEqual([
+    [{ term: "用戶", replacement: "使用者", index: 0 }],
+    [{ term: "智能", replacement: "智慧", index: 0 }],
+    [{ term: "幼兒園", replacement: "幼稚園", index: 0 }],
+    [{ term: "網絡", replacement: "網路", index: 0 }],
+    [{ term: "菜單", replacement: "選單", index: 0 }]
+  ]);
+});
+
+test("allows reviewed Taiwanese terminology overlap cases", () => {
+  for (const text of [
+    "聚集成群",
+    "假離線程式",
+    "和平進程",
+    "演算法",
+    "數據機",
+    "不變量",
+    "多變量分析",
+    "智能障礙",
+    "木質接口"
+  ]) {
+    expect(findPrcTerms(text)).toEqual([]);
+  }
+});
 
 test("imports AI gloss source rows into lookup responses", async () => {
   const dbPath = tempPath("ai-gloss-import.sqlite");
@@ -407,11 +441,15 @@ test("validates filtered AI gloss source files", async () => {
   await Bun.write(validPath, `${JSON.stringify(validRow)}\n`);
   await Bun.$`bun run scripts/validate-ai-glosses.ts --db ${dbPath} --input ${validPath}`;
 
-  await Bun.write(invalidPath, `${JSON.stringify(validRow)}\n${JSON.stringify({ ...validRow, glosses: ["eat"] })}\n`);
+  await Bun.write(
+    invalidPath,
+    `${JSON.stringify(validRow)}\n${JSON.stringify({ ...validRow, glosses: ["eat"] })}\n${JSON.stringify({ ...validRow, glosses: ["軟件"] })}\n`
+  );
   const result = await Bun.$`bun run scripts/validate-ai-glosses.ts --db ${dbPath} --input ${invalidPath}`.nothrow();
   expect(result.exitCode).toBe(1);
   expect(result.stderr.toString()).toContain("duplicate source row for yori:s_jmdict_1358280_1:zh-tw");
   expect(result.stderr.toString()).toContain("Chinese gloss has no Han text: eat");
+  expect(result.stderr.toString()).toContain("Traditional Chinese gloss uses PRC term 軟件; use 軟體: 軟件");
 });
 
 test("reports AI gloss coverage", async () => {

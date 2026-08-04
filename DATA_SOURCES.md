@@ -41,6 +41,14 @@ Simplified Chinese glosses are derived from the reviewed Traditional Chinese
 source with OpenCC phrase conversion, then validated as a separate `zh-cn`
 source file.
 
+Traditional Chinese validation also rejects a reviewed policy of PRC-specific
+terms. The policy derives replacements from OpenCC's `TWPhrases` mapping and
+adds the audited `初中` and `幼兒園` gaps. OpenCC is deliberately not applied as a
+mapping-wide rejection list: it also maps valid, context-dependent Taiwanese
+words such as `進程`, and naive substring matching corrupts words such as
+`聚集成群`. The check therefore uses word boundaries plus reviewed phrase
+exceptions. The executable policy lives in `scripts/taiwan-terminology.ts`.
+
 ## Tatoeba Example Sentences
 
 Sourced sense examples come from Tatoeba through the `jmdict-examples-eng`

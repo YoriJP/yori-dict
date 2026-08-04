@@ -1,4 +1,5 @@
 import type { ApiLang } from "../src/types";
+import { findPrcTerms } from "./taiwan-terminology";
 
 export type AiGlossSource = {
   senseId: string;
@@ -50,6 +51,11 @@ export function validateGlosses(input: GlossValidationInput): string[] {
       }
       if (input.sourceGlosses && isOverlyGenericChineseGloss(gloss, input.sourceGlosses)) {
         reasons.push(`Chinese gloss is too generic for this sense: ${gloss}`);
+      }
+      if (input.lang === "zh-tw") {
+        for (const match of findPrcTerms(gloss)) {
+          reasons.push(`Traditional Chinese gloss uses PRC term ${match.term}; use ${match.replacement}: ${gloss}`);
+        }
       }
     }
     if (input.lang === "ko") {
