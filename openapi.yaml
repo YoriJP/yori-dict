@@ -137,10 +137,28 @@ paths:
         - name: enrich
           in: query
           required: false
-          description: Set to true to fill missing examples. Requires bearer authentication.
+          description: Resolve missing Japanese entries and fill missing examples. Requires bearer authentication.
           schema:
             type: boolean
             default: false
+        - name: lemma
+          in: query
+          required: false
+          description: Consumer-supplied lemma hint used only during authenticated enrichment.
+          schema:
+            type: string
+        - name: reading
+          in: query
+          required: false
+          description: Consumer-supplied Japanese reading hint used only during authenticated enrichment.
+          schema:
+            type: string
+        - name: context
+          in: query
+          required: false
+          description: Sentence containing the candidate, used only for enrichment eligibility and disambiguation.
+          schema:
+            type: string
       responses:
         "200":
           description: Best lookup result, or null if no entry matches.
@@ -195,7 +213,7 @@ paths:
                     error: Request body must be valid JSON
                 invalidShape:
                   value:
-                    error: "Request body must be { queries: string[], lang?: string }"
+                    error: Request body must include a non-empty queries array
         "401":
           description: Enrichment was requested without the configured bearer token.
           content:
@@ -285,14 +303,29 @@ components:
           type: array
           minItems: 1
           items:
-            type: string
-            minLength: 1
+            oneOf:
+              - type: string
+                minLength: 1
+              - $ref: "#/components/schemas/EnrichmentCandidate"
         lang:
           $ref: "#/components/schemas/ApiLang"
         enrich:
           type: boolean
           default: false
-          description: Fill every missing sense example in this request. Requires bearer authentication.
+          description: Resolve missing entries and fill missing examples. Requires bearer authentication.
+    EnrichmentCandidate:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+        lemma:
+          type: string
+        reading:
+          type: string
+        context:
+          type: string
     BatchLookupResponse:
       type: object
       required: [results]
@@ -326,7 +359,7 @@ components:
           type: boolean
         source:
           type: string
-          const: jmdict
+          enum: [jmdict, generated]
         sourceId:
           type: string
           example: "1358280"
@@ -476,6 +509,15 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/Gloss"
+        evidenceIds:
+          type: array
+          description: Licensed source evidence identifiers retained by a generated canonical sense.
+          items:
+            type: string
+        provenance:
+          type: string
+          description: Whether a generated canonical sense is source-backed or added from established model knowledge.
+          enum: [source, generated]
     Gloss:
       type: object
       required: [text, source, reviewStatus]
@@ -484,7 +526,7 @@ components:
           type: string
         source:
           type: string
-          enum: [jmdict, ai-assisted]
+          enum: [jmdict, ai-assisted, generated]
         reviewStatus:
           type: string
           enum: [source, checked]

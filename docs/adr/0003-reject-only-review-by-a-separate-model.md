@@ -1,5 +1,7 @@
 # Generated content is reviewed by a separate model that only accepts or rejects
 
+> Superseded by [ADR-0008](0008-programmatic-generation-and-conservative-review.md). Reject-only separate-family review remains, but semantic regeneration and the Claude runner do not.
+
 Gloss review is already automated. `ai:review:run` sends a bounded bundle to Claude with repository tools disabled, caps turns and spend, validates the returned JSONL, rejects issue rows for senses that were not in the bundle, and checkpoints per offset so stale results cannot look current. Generated examples reuse that runner. What changes is the contract it asks for, in two ways.
 
 The reviewer is told to flag suspicious rows, so an empty response means both "every row is fine" and "nothing was really examined". **Silence is not a decision**, and it is indistinguishable from a reviewer that has stopped working. For examples the reviewer returns an explicit verdict per candidate: `accept`, or `reject` with a reason code from a fixed list.

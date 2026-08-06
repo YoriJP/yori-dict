@@ -29,6 +29,7 @@ licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
   cross-references, and loanword origin.
 - Human-written Tatoeba examples attached to individual senses.
 - Reviewed generated examples staged by authorised enrichment lookups.
+- Source-grounded generated Japanese entries staged by authorised enrichment lookups.
 - Unofficial JLPT-band estimates joined by JMdict source ID.
 - An inflection path explaining how a conjugated lookup reached its dictionary form.
 
@@ -297,12 +298,36 @@ Batch request body:
 Lookup returns glosses only for the requested language. It does not fall back to
 English when that language has no glosses.
 
+## Authenticated On-Demand Enrichment
+
+Ordinary lookup never calls a model. With a configured `YORI_ENRICHMENT_TOKEN`,
+an authorised caller can ask the same endpoint to resolve a missing Japanese
+entry or complete missing sense examples:
+
+```sh
+curl 'http://localhost:3000/v1/lookup?q=取り組んで&lemma=取り組む&reading=とりくむ&context=改革に取り組んでいる。&enrich=true' \
+  -H 'authorization: Bearer <token>'
+```
+
+The service searches the released dictionary, the writable overlay, and indexed
+licensed source evidence before generation. It uses the official OpenRouter SDK
+with GPT-5.6 Luna for eligibility and authoring and Gemini 3 Flash Preview for
+reject-only review. Calls request Flex first; transient on-demand failures may
+fall back to standard once.
+
+Configure `OPENROUTER_API_KEY`, `YORI_ENRICHMENT_TOKEN`, and comma-separated
+`YORI_JA_SOURCE_EVIDENCE_PATHS`. `YORI_ENRICHMENT_OVERLAY_PATH` defaults to the
+legacy-compatible `data/example-overlay.sqlite`. Export accepted staging data with
+`bun run enrichment:export`; run the paid regression corpus only with
+`bun run enrichment:eval -- --run`.
+
 ## AI-Assisted Gloss Pipeline
 
 Some target-language glosses are generated with AI because JMdict does not
-provide complete coverage for every language Yori Dict wants to support. AI is
-used only as a translation aid for existing JMdict senses. It does not create
-new dictionary entries or new senses.
+provide complete coverage for every language Yori Dict wants to support. This
+batch translation pipeline only adds glosses to existing JMdict senses. The
+separate authenticated on-demand path can create source-grounded Japanese
+entries and clearly marked generated senses.
 
 Each generated row starts from one JMdict sense:
 

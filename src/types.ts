@@ -90,7 +90,7 @@ export type PublicLookupItem = {
   word: string;
   reading: string | null;
   common: boolean;
-  source: "jmdict";
+  source: "jmdict" | "generated";
   sourceId: string;
   headwordLanguage: "ja";
   estimatedLevel?: EstimatedLevel;
@@ -101,7 +101,7 @@ export type PublicLookupItem = {
 
 export type PublicEntry = {
   id: string;
-  source: "jmdict";
+  source: "jmdict" | "generated";
   sourceId: string;
   headwordLanguage: "ja";
   estimatedLevel?: EstimatedLevel;
@@ -138,6 +138,10 @@ export type PublicSense = {
   languageSource?: PublicLanguageSource[];
   examples?: PublicExample[];
   glosses: PublicGloss[];
+  evidenceIds?: string[];
+  provenance?: "source" | "generated";
+  pronunciations?: string[];
+  pragmaticFunctions?: string[];
 };
 
 export type EstimatedLevel = "N1" | "N2" | "N3" | "N4" | "N5";
@@ -166,7 +170,8 @@ export type PublicLanguageSource = {
 
 export type PublicGloss = {
   text: string;
-  source: "jmdict" | "ai-assisted";
+  source: "jmdict" | "ai-assisted" | "generated";
   reviewStatus: "source" | "checked";
   type?: string;
+  lang?: ApiLang;
 };

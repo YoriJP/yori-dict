@@ -74,6 +74,20 @@ word-presence, translation, and Taiwanese-terminology checks before a separate m
 may accept it. The committed row retains generation and review provenance and is folded into
 the next SQLite release. These additions are distributed under CC BY-SA 4.0.
 
+## Source-Grounded Generated Entries
+
+Authenticated on-demand lookup may stage a new canonical Japanese entry when
+released data and indexed licensed sources do not already provide one. The
+authoring prompt receives source evidence where available, deterministic checks
+require every cited source meaning to remain represented, and a separate model
+family performs reject-only review. Any additional model-known sense is marked
+`generated` and cannot claim a source evidence ID.
+
+`bun run enrichment:export` writes deterministic Japanese JSONL, SQLite, and
+Yomitan v3 artifacts from accepted overlay rows. The export includes concise
+generation provenance; these project-authored additions are distributed under
+CC BY-SA 4.0.
+
 ## Estimated Levels
 
 Estimated levels come from `stephenmk/yomitan-jlpt-vocab`, pinned by commit in
