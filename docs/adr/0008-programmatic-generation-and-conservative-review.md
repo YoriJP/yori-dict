@@ -2,7 +2,7 @@
 
 Claude CLI orchestration is difficult to scale, observe, and use on demand. Yori Dict uses the official `@openrouter/sdk` behind its small `ModelGateway` port, with pinned model snapshots, reasoning effort, serving provider, and prompt version. The broader AI SDK abstraction is not used because this module needs one gateway and two fixed models, not a provider framework.
 
-The initial tested pairing for Japanese-to-Taiwan-Chinese enrichment is GPT-5.6 Luna at minimal effort for eligibility and source-grounded generation, followed by Gemini 3 Flash Preview at minimal effort for review. The reviewer is a different model family and never rewrites a candidate. English generation uses the same module, but its final model choice remains gated on the hard-English comparison rather than assumed from the Taiwan test.
+The selected pairing for both Japanese and English enrichment is GPT-5.6 Luna at minimal effort for eligibility and source-grounded generation, followed by Gemini 3 Flash Preview at minimal effort for review. The reviewer is a different model family and never rewrites a candidate. Each dictionary keeps independent prompts, evidence, validation, and reviewer calibration.
 
 Review is deliberately asymmetric: a false rejection leaves a recoverable coverage gap, while a false acceptance pollutes public dictionary data. Any material issue in the review output rejects the candidate even if an overall boolean says it is publishable. Missing, malformed, or incomplete verdicts fail closed.
 

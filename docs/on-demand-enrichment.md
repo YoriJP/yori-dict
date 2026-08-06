@@ -66,7 +66,7 @@ The overlay is staging. `bun run enrichment:export` writes deterministic JSONL, 
 
 All model calls request Flex first. On-demand transient failures fall back to standard once; bulk calls make at most three Flex attempts. The SDK retry mechanism is disabled so this policy has one owner.
 
-Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid Japanese OpenRouter regression command. `bun run english:eval -- --run` is the independent English blind generator bake-off and reviewer calibration; false acceptance is release-blocking.
+Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid Japanese OpenRouter regression command. `bun run english:eval -- --run` independently calibrates the English Gemini reviewer; false acceptance is release-blocking.
 
 ## Out of scope
 

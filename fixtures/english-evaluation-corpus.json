@@ -1,14 +1,4 @@
 {
-  "generation": [
-    { "id": "polysemy-sanction", "headword": "sanction", "focus": "opposite verb senses and noun senses; formal register" },
-    { "id": "heteronym-lead", "headword": "lead", "focus": "/liːd/ versus /lɛd/; verb and metal senses" },
-    { "id": "heteronym-record", "headword": "record", "focus": "noun and verb stress; distinct parts of speech" },
-    { "id": "contronym-cleave", "headword": "cleave", "focus": "split apart versus adhere closely" },
-    { "id": "usage-literally", "headword": "literally", "focus": "literal and informal intensifier usage without collapsing labels" },
-    { "id": "regional-table", "headword": "table", "focus": "US versus UK parliamentary verb senses" },
-    { "id": "pragmatic-quite", "headword": "quite", "focus": "degree differences across regions and contexts" },
-    { "id": "multiword-kick-bucket", "headword": "kick the bucket", "focus": "idiom label and non-literal definition" }
-  ],
   "reviewer": [
     { "id": "valid", "expected": "accept", "defect": null },
     { "id": "omission", "expected": "reject", "defect": "omission" },

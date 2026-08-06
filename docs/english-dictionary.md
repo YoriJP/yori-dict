@@ -42,19 +42,18 @@ Both use OpenRouter, minimal reasoning, and Flex first. On-demand transient fail
 fall back to Standard once; bulk calls retry Flex at most three times. Review is fail
 closed, concurrent work is bounded, and identical requests share one in-flight run.
 
-## Paid evaluation
+## Paid reviewer calibration
 
 The credential-free suite tests production behavior with scripted model responses. The
-live bake-off is deliberately separate:
+live reviewer calibration is deliberately separate:
 
 ```sh
 bun run english:eval -- --run
 ```
 
-It compares Luna and Gemini on polysemy, heteronyms, labels, sense structure, and examples
-under blind candidate IDs, scored by pinned Claude Sonnet 4.6. A different winning generator
-from the production pin blocks release. It also calibrates the English reviewer against valid entries
-and seeded omissions, invented senses, wrong pronunciations, merged senses, circular
+Luna is the selected entry author and Gemini is the reject-only reviewer. The paid command
+calibrates that reviewer against valid entries and seeded omissions, invented senses,
+wrong pronunciations, merged senses, circular
 definitions, unsupported labels, and misleading examples. False acceptance and false
 rejection are reported separately; any false acceptance blocks release. Live results are
 written under ignored `data/english-evaluation/` and require `OPENROUTER_API_KEY`.
