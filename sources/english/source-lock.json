@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "releaseCreatedAt": "2026-08-06T00:00:00.000Z",
+  "sources": [
+    {
+      "source": "open-english-wordnet",
+      "version": "2025",
+      "file": "sources/english/raw/english-wordnet-2025-json.zip",
+      "url": "https://en-word.net/static/english-wordnet-2025-json.zip",
+      "sha256": "7d749f6e2c39e6970e4997839dcf6e42fd281f3c2fae0171d2192bae8cfa4b51",
+      "license": "CC-BY-4.0",
+      "attribution": "Open English WordNet contributors"
+    },
+    {
+      "source": "wiktionary",
+      "edition": "simple",
+      "version": "2026-07-06",
+      "file": "sources/english/raw/simple-extract-2026-07-06.jsonl.gz",
+      "url": "https://kaikki.org/dictionary/downloads/simple/simple-extract.jsonl.gz",
+      "sha256": "015b01ed41b578053f0cdd58ac563b003f106478f6eac89fe9a1c1d71ec84f92",
+      "license": "CC-BY-SA-4.0 AND GFDL-1.1-or-later",
+      "attribution": "Simple English Wiktionary contributors; extracted with Wiktextract"
+    }
+  ]
+}

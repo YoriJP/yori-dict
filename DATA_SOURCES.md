@@ -88,6 +88,39 @@ Yomitan v3 artifacts from accepted overlay rows. The export includes concise
 generation provenance; these project-authored additions are distributed under
 CC BY-SA 4.0.
 
+## Independent English Dictionary
+
+The English dictionary uses two independently reviewed, redistribution-compatible sources:
+
+- Open English WordNet 2025 is distributed under CC BY 4.0. It supplies broad,
+  structured synsets and human-authored examples. Releases must credit the Open English
+  WordNet contributors and retain its version and synset identifiers.
+- The Simple English Wiktionary extract dated 2026-07-06 is distributed under the
+  Wiktionary terms, CC BY-SA 4.0 and GFDL 1.1 or later. It adds learner-readable
+  definitions, pronunciations, usage labels, and examples. Releases must credit Simple
+  English Wiktionary contributors and Wiktextract and provide the same-license terms.
+
+These terms permit redistribution and modification with attribution; the Wiktionary
+share-alike requirement determines the combined English artifact license. The accepted
+source versions, URLs, archive checksums, licenses, and attribution text are committed in
+`sources/english/source-lock.json`. The checksummed source archives are committed beside
+that lock so an English release never changes because an upstream URL moved.
+
+Imported records remain stored as unchanged structured JSON across the English SQLite
+`source_records` and deduplicated `source_payloads` tables.
+Canonical entries carry separate source evidence IDs and stable `yori:en:*` identities;
+they do not adopt either source's identity. The English SQLite, JSONL, manifest, and
+Yomitan v3 artifacts are distributed under CC BY-SA 4.0 and must retain both source
+attributions.
+
+Sources:
+
+- https://github.com/globalwordnet/english-wordnet
+- https://en-word.net/
+- https://kaikki.org/dictionary/rawdata.html
+- https://simple.wiktionary.org/wiki/Wiktionary:Copyrights
+- https://github.com/tatuylonen/wiktextract
+
 ## Estimated Levels
 
 Estimated levels come from `stephenmk/yomitan-jlpt-vocab`, pinned by commit in

@@ -1,6 +1,6 @@
 # On-demand dictionary enrichment
 
-The Japanese implementation is exposed through one `OnDemandDictionary.resolve` operation. Public lookup remains model-free; authenticated lookup may use the staged enrichment path described here.
+Japanese and English implementations use one `DictionaryResolver.resolve` contract. Public lookup remains model-free; authenticated lookup may use the staged enrichment path described here. Their schemas, source policies, repositories, and releases remain independent.
 
 ## Interface
 
@@ -59,7 +59,7 @@ The overlay is staging. `bun run enrichment:export` writes deterministic JSONL, 
 
 All model calls request Flex first. On-demand transient failures fall back to standard once; bulk calls make at most three Flex attempts. The SDK retry mechanism is disabled so this policy has one owner.
 
-Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid OpenRouter regression command; it exercises eligibility, source-grounded entry authoring and review, and example authoring and review against the hard-term corpus.
+Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid Japanese OpenRouter regression command. `bun run english:eval -- --run` is the independent English blind generator bake-off and reviewer calibration; false acceptance is release-blocking.
 
 ## Out of scope
 

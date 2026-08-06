@@ -1,6 +1,6 @@
 # Yori Dict
 
-Open Japanese dictionary API and SQLite database with multilingual lookup support.
+Open Japanese and English dictionary data with a hosted Japanese lookup API.
 
 Yori Dict is built from JMdict-simplified and adds reviewed AI-assisted glosses
 for languages where open Japanese dictionary coverage is still incomplete. The
@@ -9,6 +9,11 @@ form and get a compact dictionary response.
 
 Code is licensed under MIT. Dictionary data and SQLite release files are
 licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
+
+Japanese and English are independent data products. They keep separate source inventories,
+schemas, versions, release artifacts, and quality gates. The hosted API currently serves
+the Japanese product; English is consumable through its SQLite, canonical JSONL, and
+Yomitan v3 release artifacts. See [docs/english-dictionary.md](docs/english-dictionary.md).
 
 ## Links
 
@@ -217,6 +222,16 @@ sources/ai-glosses/zh-tw.jsonl
 sources/ai-glosses/zh-cn.jsonl
 sources/ai-glosses/ko.jsonl
 ```
+
+Build the independent English dictionary from its committed, checksummed source archives:
+
+```sh
+bun run english:build -- --version 2026.08.1
+```
+
+This writes English SQLite, canonical JSONL, manifest, and Yomitan v3 artifacts under
+`releases/english/`. The English build and release version do not rebuild or change the
+Japanese dictionary.
 
 ## Data Release
 

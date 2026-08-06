@@ -16,6 +16,8 @@
     "ai:validate": "bun run scripts/validate-ai-glosses.ts",
     "enrichment:export": "bun run scripts/export-on-demand.ts",
     "enrichment:eval": "bun run scripts/evaluate-on-demand.ts",
+    "english:build": "bun run scripts/build-english-dictionary.ts",
+    "english:eval": "bun run scripts/evaluate-english.ts",
     "build:db": "bun run import:jmdict:full -- --examples data/raw/jmdict-examples-eng.json --jlpt-vocab data/raw/jlpt-vocab --ai-glosses sources/ai-glosses/zh-tw.jsonl --ai-glosses sources/ai-glosses/zh-cn.jsonl --ai-glosses sources/ai-glosses/ko.jsonl --ai-examples sources/ai-examples/generated.jsonl",
     "data:download": "bun run scripts/download-data-release.ts",
     "dev": "bun run src/index.ts",
