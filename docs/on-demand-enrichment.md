@@ -25,6 +25,11 @@ type OnDemandDictionary = {
 
 The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced. Operational detail belongs in attempt records and logs, not in the caller interface.
 
+Build-time consumers may send `X-Yori-Request-Id`. Structured lookup logs and
+private model attempt records retain that trace id, so a Yori News vocabulary
+request can be followed through lookup, enrichment, review, and failure without
+publishing prompts or model traces.
+
 ## Resolution flow
 
 1. Reject only obvious invalid requests: empty or multiline text, control characters, markup, URLs, or excessive length.
@@ -54,6 +59,8 @@ The overlay is staging. `bun run enrichment:export` writes deterministic JSONL, 
 - `OPENROUTER_API_KEY` authenticates the official `@openrouter/sdk` client.
 - `YORI_ENRICHMENT_TOKEN` protects `enrich=true` lookup requests.
 - `YORI_ENRICHMENT_OVERLAY_PATH` selects the writable staging SQLite database.
+- `YORI_ENGLISH_DB_PATH` selects the independent English release and
+  `YORI_ENGLISH_ENRICHMENT_OVERLAY_PATH` selects its staging overlay.
 - `YORI_JA_SOURCE_EVIDENCE_PATHS` is a comma-separated list of indexed source-evidence JSONL files.
 - `YORI_ENRICHMENT_CONCURRENCY` and `YORI_MODEL_TIMEOUT_MS` bound model work.
 

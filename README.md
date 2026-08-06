@@ -1,19 +1,19 @@
 # Yori Dict
 
-Open Japanese and English dictionary data with a hosted Japanese lookup API.
+Open Japanese and English dictionary data with a hosted lookup API.
 
-Yori Dict is built from JMdict-simplified and adds reviewed AI-assisted glosses
-for languages where open Japanese dictionary coverage is still incomplete. The
-API is designed for frontend lookup: send a Japanese word, reading, or inflected
-form and get a compact dictionary response.
+The Japanese dictionary is built from JMdict-simplified and adds reviewed
+generated glosses for languages where open coverage is still incomplete. The
+API is designed for build-time consumers: select the Japanese or English
+dictionary, send lexical context, and get that dictionary's native entry schema.
 
 Code is licensed under MIT. Dictionary data and SQLite release files are
 licensed under CC BY-SA 4.0. See [DATA_SOURCES.md](DATA_SOURCES.md).
 
 Japanese and English are independent data products. They keep separate source inventories,
-schemas, versions, release artifacts, and quality gates. The hosted API currently serves
-the Japanese product; English is consumable through its SQLite, canonical JSONL, and
-Yomitan v3 release artifacts. See [docs/english-dictionary.md](docs/english-dictionary.md).
+schemas, versions, release artifacts, and quality gates. The hosted API serves both without
+coercing English into the Japanese schema. English is also consumable through its SQLite,
+canonical JSONL, and Yomitan v3 artifacts. See [docs/english-dictionary.md](docs/english-dictionary.md).
 
 ## Links
 
@@ -25,10 +25,11 @@ Yomitan v3 release artifacts. See [docs/english-dictionary.md](docs/english-dict
 ## What Yori Dict Supports
 
 - Japanese lookup by kanji form, kana reading, or basic inflected form.
+- English lookup through the independent English release.
 - Single lookup and batch lookup API endpoints.
 - SQLite data release for direct local use.
 - English and German glosses from JMdict.
-- Reviewed AI-assisted Traditional Chinese, Simplified Chinese, and Korean glosses.
+- Reviewed generated Traditional Chinese, Simplified Chinese, and Korean glosses.
 - Requested-language responses: no automatic English fallback.
 - Sense annotations from JMdict: usage tags, field of application, dialect, notes,
   cross-references, and loanword origin.
@@ -73,6 +74,16 @@ Batch lookup:
 curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
   -H 'content-type: application/json' \
   --data '{"queries":["食べました","学校","教室"],"lang":"ko"}'
+```
+
+English batch lookup selects its independent dictionary. Contextual candidates
+allow authenticated callers to enrich genuine gaps while ordinary lookup stays
+model-free:
+
+```sh
+curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
+  -H 'content-type: application/json' \
+  --data '{"dictionary":"en","queries":[{"query":"banks","lemma":"bank","context":"Several banks lowered rates."}],"lang":"en"}'
 ```
 
 Supported `lang` values:
@@ -155,7 +166,7 @@ The `data-2026-08-04.3` release contains:
 | Entries | 217,294 |
 | Senses | 675,094 |
 | Glosses | 1,187,469 |
-| AI-assisted glosses | 413,463 |
+| Generated glosses (legacy records) | 413,463 |
 | Sourced examples | 31,992 |
 | Entries with estimated levels | 7,747 |
 | Traditional Chinese senses | 77,863 |
@@ -169,7 +180,7 @@ The `data-2026-08-04.3` release contains:
 
 ```sh
 bun install
-bun run data:download
+bun run data:prepare
 bun run dev
 ```
 
@@ -208,14 +219,14 @@ data/yori.sqlite
 
 Both are local generated files and are not committed.
 
-`download:jmdict` defaults to the JMdict-simplified release that the reviewed AI
-gloss sources were built against: `3.6.2+20260601171836`. To intentionally
+`download:jmdict` defaults to the JMdict-simplified release that the legacy generated
+gloss rows were built against: `3.6.2+20260601171836`. To intentionally
 refresh to a different upstream release, pass `--tag` or set
-`JMDICT_SIMPLIFIED_TAG`, then revalidate and review affected AI gloss rows.
+`JMDICT_SIMPLIFIED_TAG`, then revalidate affected legacy rows.
 The JLPT source is also pinned by commit in `scripts/download-jmdict.ts`; pass
 `--jlpt-commit` only when intentionally refreshing it.
 
-Reviewed AI gloss sources are committed under:
+Bounded legacy generated gloss sources remain committed for release compatibility under:
 
 ```txt
 sources/ai-glosses/zh-tw.jsonl
@@ -287,8 +298,11 @@ Start command:
 bun run start
 ```
 
-The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`. Railway obtains that database
-from the release pinned in `data-release.json`; deploys do not contact JMdict upstream.
+The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`, and
+`YORI_ENGLISH_DB_PATH`, defaulting to the independently versioned English build
+artifact. Railway obtains Japanese data from `data-release.json` and builds
+English from the committed, checksummed source archives; deploys do not contact
+dictionary upstreams.
 
 ## API Shape
 
@@ -298,6 +312,7 @@ See [openapi.yaml](openapi.yaml) for the full OpenAPI description.
 GET /health
 GET /v1/meta
 GET /v1/lookup?q=食べる&lang=zh-tw
+GET /v1/lookup?q=bank&dictionary=en
 POST /v1/lookup/batch
 ```
 
@@ -305,6 +320,7 @@ Batch request body:
 
 ```json
 {
+  "dictionary": "ja",
   "queries": ["食べました", "学校"],
   "lang": "zh-tw"
 }
@@ -316,8 +332,8 @@ English when that language has no glosses.
 ## Authenticated On-Demand Enrichment
 
 Ordinary lookup never calls a model. With a configured `YORI_ENRICHMENT_TOKEN`,
-an authorised caller can ask the same endpoint to resolve a missing Japanese
-entry or complete missing sense examples:
+an authorised caller can ask the same endpoint to resolve a missing Japanese or
+English entry or complete missing sense examples:
 
 ```sh
 curl 'http://localhost:3000/v1/lookup?q=取り組んで&lemma=取り組む&reading=とりくむ&context=改革に取り組んでいる。&enrich=true' \
@@ -332,173 +348,22 @@ fall back to standard once.
 
 Configure `OPENROUTER_API_KEY`, `YORI_ENRICHMENT_TOKEN`, and comma-separated
 `YORI_JA_SOURCE_EVIDENCE_PATHS`. `YORI_ENRICHMENT_OVERLAY_PATH` defaults to the
-legacy-compatible `data/example-overlay.sqlite`. Export accepted staging data with
+legacy-compatible `data/example-overlay.sqlite`; English uses
+`YORI_ENGLISH_ENRICHMENT_OVERLAY_PATH`. Export accepted staging data with
 `bun run enrichment:export`; run the paid regression corpus only with
 `bun run enrichment:eval -- --run`.
 
-## AI-Assisted Gloss Pipeline
+## Legacy Generated Glosses
 
-Some target-language glosses are generated with AI because JMdict does not
-provide complete coverage for every language Yori Dict wants to support. This
-batch translation pipeline only adds glosses to existing JMdict senses. The
-separate authenticated on-demand path can create source-grounded Japanese
-entries and clearly marked generated senses.
+Existing Japanese releases still import the committed files under
+`sources/ai-glosses/`. Their SQLite rows keep the historical `ai-assisted`
+storage value so old releases remain reproducible. Public lookup maps that value
+to the current `generated` provenance term.
 
-Each generated row starts from one JMdict sense:
-
-```txt
-Japanese word + reading + part of speech + English source glosses
-```
-
-The current generator uses `gemini-3-flash-preview` with thinking level `low`.
-The prompt asks for short dictionary glosses in the target language and JSON
-only:
-
-```txt
-Translate one JMdict Japanese sense into <target language> dictionary glosses.
-Return JSON only with this shape: {"glosses":["..."]}.
-Do not add examples.
-Do not add a new sense.
-Preserve the meaning of the English source glosses.
-```
-
-The raw AI result is not imported directly. It goes through this pipeline:
-
-```txt
-JMdict sense -> AI candidate -> mechanical filter -> CLI/agent review -> committed source -> SQLite build
-```
-
-Simplified Chinese is different: it is generated from the reviewed
-Traditional Chinese source with OpenCC phrase conversion:
-
-```sh
-bun run zh-cn:convert
-```
-
-The generated `sources/ai-glosses/zh-cn.jsonl` file is validated and committed
-as its own source file.
-
-`ai:filter` performs deterministic checks before a row can enter `sources/`:
-
-- the `senseId` must exist in the current JMdict SQLite database
-- the target language must match the requested language
-- the sense must not already have glosses in that language
-- duplicate source rows are rejected
-- empty, duplicated, too long, or sentence-like glosses are rejected
-- Chinese glosses must contain Han text and avoid suspicious Latin text
-- Korean glosses must contain Hangul and must not contain Japanese kana
-
-Rows rejected by the filter stay under ignored `data/ai-candidates/` files for
-inspection or later retry. Filtered rows are still treated as untrusted until
-they are reviewed.
-
-`ai:review` writes a bounded JSONL review bundle. Each row contains the AI
-glosses plus the original JMdict context:
-
-```txt
-senseId, word, reading, part of speech, English glosses, AI glosses
-```
-
-The reviewer is asked to flag only suspicious rows as JSONL issues. Typical
-issues are wrong sense, overly broad gloss, hallucinated word, malformed target
-language, or a gloss that belongs to a neighboring sense. Flagged rows are
-edited or removed before commit.
-
-Committed AI-assisted gloss rows use:
-
-```json
-{"source":"ai-assisted","model":"gemini-3-flash-preview"}
-```
-
-When imported into SQLite, they are marked as `ai-assisted` and `checked`. This
-means the row passed deterministic validation and CLI/agent review. It does not
-mean it is perfect or native-speaker certified. If you find a bad gloss, please
-open an issue with the word, language, and expected correction.
-
-## Maintainer AI Commands
-
-Export English JMdict senses that are missing a target language:
-
-```sh
-bun run ai:seeds -- --lang ko --limit 20
-```
-
-Generate local AI candidates from those seeds:
-
-```sh
-GEMINI_API_KEY=... bun run ai:generate -- --limit 20
-```
-
-Use the Batch API for larger offline runs:
-
-```sh
-bun run ai:batch -- submit --input data/ai-seeds/ko-seeds.jsonl --out data/ai-candidates/ko-candidates.jsonl
-```
-
-The submit command writes a manifest under `data/ai-batches/`. When the batch
-finishes, collect the results with the manifest path printed by submit:
-
-```sh
-bun run ai:batch -- collect --manifest data/ai-batches/<run>/manifest.json
-```
-
-Filter generated candidates into a committed source file:
-
-```sh
-bun run ai:filter -- --lang ko --input data/ai-candidates/ko-candidates.jsonl --out sources/ai-glosses/ko.jsonl --append
-```
-
-Validate and rebuild SQLite:
-
-```sh
-bun run ai:validate -- --lang ko --input sources/ai-glosses/ko.jsonl
-bun run build:db
-```
-
-Prepare a review bundle:
-
-```sh
-bun run ai:review -- --lang ko --limit 500 --offset 100
-```
-
-Run the same bounded bundle through Claude:
-
-```sh
-bun run ai:review:run -- --lang ko --limit 500 --offset 100
-```
-
-The runner sends the prepared rows through stdin, keeps repository tools
-disabled, defaults to low effort, one turn, and a USD 1.00 budget, and writes
-validated JSONL issues plus raw output and diagnostic logs under
-`data/ai-review/<lang>/offset-<offset>/`. Filtered runs add a `common-only/` or
-`non-common-only/` scope directory before the offset. When using a custom
-`--source` or `--db`, pass explicit `--out` and `--issues` paths if its artifacts
-must coexist with the default input. Override the execution limits when needed:
-
-```sh
-bun run ai:review:run -- --lang ko --limit 500 --offset 100 --model sonnet --effort low --max-turns 1 --max-budget-usd 1.00
-```
-
-Each bundle is capped at 500 rows. Bundle-only mode prints the next offset after
-preparing the bundle; run mode prints it only after Claude output is validated.
-Review output contains JSONL issues only; an empty output means no issues were
-flagged. The runner rejects malformed output and issue rows whose `senseId` was
-not present in the prepared bundle.
-Each offset keeps its own bundle, issues, raw output, and diagnostic logs. Run
-mode clears that checkpoint's validated issues before preparing a new bundle,
-and bundle-only regeneration clears existing issues after replacing the bundle,
-so stale results cannot look current.
-
-If a batch result has failures, export only those failed seeds for a rerun:
-
-```sh
-bun run ai:summary -- --manifest data/ai-batches/<run>/manifest.json
-bun run ai:retry-seeds -- --manifest data/ai-batches/<run>/manifest.json --out data/ai-seeds/failed-seeds.jsonl
-bun run ai:batch -- submit --input data/ai-seeds/failed-seeds.jsonl
-```
-
-Generated files under `data/` are ignored. Filtered and reviewed gloss source
-files under `sources/` are committed.
+The old per-sense translation, semantic regeneration, and Claude CLI review
+commands have been removed. New gaps go through authenticated source-grounded
+canonical entry resolution and reject-only review behind
+`OnDemandDictionary.resolve`; callers never read or merge the staging overlay.
 
 ## Help And Contributions
 

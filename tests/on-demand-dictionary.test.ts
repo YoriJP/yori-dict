@@ -124,7 +124,7 @@ test("resolve authors a source-grounded entry before completing its examples", a
   ]);
   const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
 
-  const entry = await dictionary.resolve(request("未知語"));
+  const entry = await dictionary.resolve({ ...request("未知語"), traceId: "news-ja-request" });
   if (!entry) throw new Error("Expected an authored entry");
 
   expect(gateway.calls.map(({ role }) => role)).toEqual([
@@ -149,6 +149,7 @@ test("resolve authors a source-grounded entry before completing its examples", a
   expect(repository.entries.get("未知語")).toEqual(entry);
   expect(repository.attempts).toHaveLength(4);
   expect(repository.attempts[0]).toMatchObject({
+    traceId: "news-ja-request",
     candidateId: entry.id,
     prompt: expect.stringContaining("source_evidence"),
     response: expect.stringContaining("未知語")

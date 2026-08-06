@@ -2,20 +2,34 @@ import { Hono } from "hono";
 import { Scalar } from "@scalar/hono-api-reference";
 import { parseApiLang } from "./lang";
 import type { LookupDb } from "./db";
-import type { ApiLang, BatchLookupResponse, PublicLookupItem } from "./types";
+import type { ApiLang, PublicLookupItem } from "./types";
+import type { EnglishEntry } from "./english-types";
 import { dataReleaseUrl } from "./data-release";
-import type { OnDemandDictionary, ResolveRequest } from "./on-demand-dictionary";
+import type {
+  EnglishOnDemandDictionary,
+  OnDemandDictionary,
+  ResolveRequest,
+  TargetDictionary
+} from "./on-demand-dictionary";
+
+type AppOptions = {
+  onDemand?: OnDemandDictionary;
+  englishLookup?: (query: string) => EnglishEntry | null;
+  englishOnDemand?: EnglishOnDemandDictionary;
+  enrichmentToken?: string;
+  logger?: (event: Record<string, unknown>) => void;
+};
 
 export function createApp(
   db: LookupDb,
-  options: { onDemand?: OnDemandDictionary; enrichmentToken?: string } = {}
+  options: AppOptions = {}
 ) {
   const app = new Hono();
 
   app.get("/", (c) =>
     c.json({
       name: "Yori Dict",
-      description: "Open Japanese dictionary API and SQLite database with multilingual lookup support.",
+      description: "Open Japanese and English dictionary lookup backed by independent data releases.",
       health: "/health",
       meta: "/v1/meta",
       lookup: "/v1/lookup?q=食べました&lang=zh-tw",
@@ -45,18 +59,33 @@ export function createApp(
     }
 
     const lang = parseApiLang(c.req.query("lang") ?? null);
+    const dictionary = parseDictionary(c.req.query("dictionary"));
+    if (!dictionary) return c.json({ error: "Unsupported dictionary" }, 400);
     const wantsEnrichment = c.req.query("enrich") === "true";
     if (wantsEnrichment && !isAuthorized(c.req.header("authorization"), options.enrichmentToken)) {
       return c.json({ error: "Enrichment requires a valid bearer token" }, 401);
     }
-    const enriched = wantsEnrichment && options.onDemand
-      ? await options.onDemand.resolve(resolveRequest(query, {
+    const resolver = dictionary === "en" ? options.englishOnDemand : options.onDemand;
+    const enriched = wantsEnrichment && resolver
+      ? await resolver.resolve(resolveRequest(query, dictionary, {
           lemma: c.req.query("lemma"),
           reading: c.req.query("reading"),
           sentence: c.req.query("context")
-        })).catch(() => null)
+        }, undefined, c.req.header("x-yori-request-id"))).catch(() => null)
       : null;
-    return c.json({ item: enriched ? entryForLanguage(enriched, lang ?? "en") : db.lookup(query, lang).item });
+    if (dictionary === "en") {
+      const lemma = c.req.query("lemma")?.trim();
+      const item = enriched
+        ?? options.englishLookup?.(query)
+        ?? (lemma && lemma !== query ? options.englishLookup?.(lemma) : null)
+        ?? null;
+      logLookup(options, c.req.header("x-yori-request-id"), dictionary, query, wantsEnrichment, item);
+      return c.json({ item });
+    }
+    const japaneseEntry = enriched as PublicLookupItem | null;
+    const item = japaneseEntry ? entryForLanguage(japaneseEntry, lang ?? "en") : db.lookup(query, lang).item;
+    logLookup(options, c.req.header("x-yori-request-id"), dictionary, query, wantsEnrichment, item);
+    return c.json({ item });
   });
 
   app.post("/v1/lookup/batch", async (c) => {
@@ -72,22 +101,34 @@ export function createApp(
     }
 
     const lang = parseApiLang(body.lang ?? null);
+    const dictionary = body.dictionary ?? "ja";
     if (body.enrich && !isAuthorized(c.req.header("authorization"), options.enrichmentToken)) {
       return c.json({ error: "Enrichment requires a valid bearer token" }, 401);
     }
-    const response: BatchLookupResponse = {
+    const response = {
       results: await Promise.all(body.queries.map(async (candidate) => {
         const request = typeof candidate === "string"
-          ? resolveRequest(candidate, {}, "bulk")
-          : resolveRequest(candidate.query, {
+          ? resolveRequest(candidate, dictionary, {}, "bulk", c.req.header("x-yori-request-id"))
+          : resolveRequest(candidate.query, dictionary, {
               lemma: candidate.lemma,
               reading: candidate.reading,
               sentence: candidate.context
-            }, "bulk");
-        const enriched = body.enrich && options.onDemand
-          ? await options.onDemand.resolve(request).catch(() => null)
+            }, "bulk", c.req.header("x-yori-request-id"));
+        const resolver = dictionary === "en" ? options.englishOnDemand : options.onDemand;
+        const enriched = body.enrich && resolver
+          ? await resolver.resolve(request).catch(() => null)
           : null;
-        const resolved = enriched ?? db.lookup(request.query, lang).item;
+        if (dictionary === "en") {
+          const lemma = request.context?.lemma;
+          const item = enriched
+            ?? options.englishLookup?.(request.query)
+            ?? (lemma && lemma !== request.query ? options.englishLookup?.(lemma) : null)
+            ?? null;
+          logLookup(options, c.req.header("x-yori-request-id"), dictionary, request.query, body.enrich === true, item);
+          return { input: request.query, item };
+        }
+        const resolved = enriched as PublicLookupItem | null ?? db.lookup(request.query, lang).item;
+        logLookup(options, c.req.header("x-yori-request-id"), dictionary, request.query, body.enrich === true, resolved);
         return {
           input: request.query,
           item: resolved?.source === "generated" ? entryForLanguage(resolved, lang ?? "en") : resolved
@@ -115,13 +156,19 @@ function entryForLanguage(entry: PublicLookupItem, lang: ApiLang): PublicLookupI
 
 type BatchCandidate = string | { query: string; lemma?: string; reading?: string; context?: string };
 
-function isBatchBody(body: unknown): body is { queries: BatchCandidate[]; lang?: string; enrich?: boolean } {
+function isBatchBody(body: unknown): body is {
+  queries: BatchCandidate[];
+  dictionary?: TargetDictionary;
+  lang?: string;
+  enrich?: boolean;
+} {
   if (!body || typeof body !== "object") return false;
-  const candidate = body as { queries?: unknown; lang?: unknown; enrich?: unknown };
+  const candidate = body as { queries?: unknown; dictionary?: unknown; lang?: unknown; enrich?: unknown };
   return (
     Array.isArray(candidate.queries) &&
     candidate.queries.length > 0 &&
     candidate.queries.every(isBatchCandidate) &&
+    (candidate.dictionary === undefined || candidate.dictionary === "ja" || candidate.dictionary === "en") &&
     (candidate.lang === undefined || typeof candidate.lang === "string") &&
     (candidate.enrich === undefined || typeof candidate.enrich === "boolean")
   );
@@ -140,20 +187,47 @@ function isBatchCandidate(value: unknown): value is BatchCandidate {
 
 function resolveRequest(
   query: string,
+  targetDictionary: TargetDictionary,
   context: { lemma?: string; reading?: string; sentence?: string } = {},
-  mode?: ResolveRequest["mode"]
+  mode?: ResolveRequest["mode"],
+  traceId?: string
 ): ResolveRequest {
   const compact = Object.fromEntries(
     Object.entries(context).filter(([, value]) => typeof value === "string" && value.trim().length > 0)
   ) as NonNullable<ResolveRequest["context"]>;
   return {
     query,
-    targetDictionary: "ja",
+    targetDictionary,
+    ...(traceId ? { traceId } : {}),
     ...(mode ? { mode } : {}),
     ...(Object.keys(compact).length > 0 ? { context: compact } : {})
   };
 }
 
+function parseDictionary(value: string | undefined): TargetDictionary | null {
+  if (value === undefined || value === "ja") return "ja";
+  return value === "en" ? "en" : null;
+}
+
 function isAuthorized(header: string | undefined, token: string | undefined): boolean {
   return Boolean(token && header === `Bearer ${token}`);
+}
+
+function logLookup(
+  options: AppOptions,
+  traceId: string | undefined,
+  dictionary: TargetDictionary,
+  query: string,
+  enrichmentRequested: boolean,
+  item: PublicLookupItem | EnglishEntry | null
+): void {
+  options.logger?.({
+    event: "dictionary_lookup",
+    traceId: traceId || crypto.randomUUID(),
+    dictionary,
+    query,
+    enrichmentRequested,
+    outcome: item ? "resolved" : "missing",
+    entryId: item?.id ?? null
+  });
 }

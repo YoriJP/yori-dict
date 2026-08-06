@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "RAILPACK",
-    "buildCommand": "bun run data:download"
+    "buildCommand": "bun run data:prepare"
   },
   "deploy": {
     "startCommand": "bun run start",

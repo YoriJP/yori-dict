@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import type { LookupDb } from "../src/db";
-import type { OnDemandDictionary, ResolveRequest } from "../src/on-demand-dictionary";
+import type {
+  EnglishOnDemandDictionary,
+  OnDemandDictionary,
+  ResolveRequest
+} from "../src/on-demand-dictionary";
+import type { EnglishEntry } from "../src/english-types";
 import type { PublicLookupItem } from "../src/types";
 
 test("public lookup stays model-free while authenticated enrichment delegates through resolve", async () => {
@@ -96,6 +101,91 @@ test("batch enrichment falls back to released lookup when resolution fails", asy
   expect((await response.json()).results[0].item.word).toBe("未知語");
 });
 
+test("English batch lookup uses the independent dictionary and authenticated resolver", async () => {
+  const calls: ResolveRequest[] = [];
+  const events: Record<string, unknown>[] = [];
+  const lookupQueries: string[] = [];
+  const entry = englishEntry();
+  const englishOnDemand: EnglishOnDemandDictionary = {
+    async resolve(request) {
+      calls.push(request);
+      return entry;
+    }
+  };
+  const app = createApp(emptyDb(), {
+    enrichmentToken: "secret",
+    englishLookup: (query) => {
+      lookupQueries.push(query);
+      return ["bank", "news"].includes(query.toLowerCase()) ? entry : null;
+    },
+    englishOnDemand,
+    logger: (event) => events.push(event)
+  });
+
+  const publicResponse = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-yori-request-id": "news-request-1" },
+    body: JSON.stringify({
+      dictionary: "en",
+      queries: [{ query: "banks", lemma: "bank", context: "Several banks closed." }]
+    })
+  });
+  expect(publicResponse.status).toBe(200);
+  expect((await publicResponse.json()).results[0].item).toEqual(entry);
+  expect(calls).toHaveLength(0);
+  expect(events[0]).toMatchObject({
+    event: "dictionary_lookup",
+    traceId: "news-request-1",
+    dictionary: "en",
+    query: "banks",
+    enrichmentRequested: false,
+    outcome: "resolved",
+    entryId: entry.id
+  });
+
+  const surfaceFirst = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      dictionary: "en",
+      queries: [{ query: "news", lemma: "new", context: "News travels quickly." }]
+    })
+  });
+  expect((await surfaceFirst.json()).results[0].item).toEqual(entry);
+  expect(lookupQueries.slice(-1)).toEqual(["news"]);
+
+  const unauthorized = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dictionary: "en", enrich: true, queries: ["florp"] })
+  });
+  expect(unauthorized.status).toBe(401);
+  expect(calls).toHaveLength(0);
+
+  const enriched = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer secret",
+      "x-yori-request-id": "news-request-2"
+    },
+    body: JSON.stringify({
+      dictionary: "en",
+      enrich: true,
+      queries: [{ query: "florp", lemma: "florp", context: "The florp moved quickly." }]
+    })
+  });
+  expect(enriched.status).toBe(200);
+  expect((await enriched.json()).results[0].item).toEqual(entry);
+  expect(calls).toEqual([{
+    query: "florp",
+    targetDictionary: "en",
+    mode: "bulk",
+    traceId: "news-request-2",
+    context: { lemma: "florp", sentence: "The florp moved quickly." }
+  }]);
+});
+
 function emptyDb(): LookupDb {
   return {
     lookup() {
@@ -130,5 +220,29 @@ function generatedEntry(): PublicLookupItem {
         ]
       }
     ]
+  };
+}
+
+function englishEntry(): EnglishEntry {
+  return {
+    id: "yori:en:e_bank",
+    dictionary: "en",
+    headword: "bank",
+    pronunciations: [],
+    senses: [{
+      id: "yori:en:s_bank_1",
+      position: 1,
+      partOfSpeech: "noun",
+      definition: "a financial institution",
+      registers: [],
+      regions: [],
+      domains: ["finance"],
+      dated: false,
+      usage: [],
+      examples: [],
+      evidenceIds: ["open-english-wordnet:bank:1"],
+      provenance: "source"
+    }],
+    sources: []
   };
 }

@@ -22,9 +22,9 @@ Source:
 - https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project
 - https://www.edrdg.org/edrdg/licence.html
 
-## AI-Assisted Glosses
+## Legacy Generated Glosses
 
-The current reviewed AI-assisted gloss sources are committed at:
+Older Japanese releases include reviewed generated gloss sources committed at:
 
 ```txt
 sources/ai-glosses/zh-tw.jsonl
@@ -32,16 +32,20 @@ sources/ai-glosses/zh-cn.jsonl
 sources/ai-glosses/ko.jsonl
 ```
 
-AI-assisted glosses are generated from JMdict sense data and reviewed inside
-this project before they are committed under `sources/ai-glosses/`. They are
+These bounded legacy rows were generated from JMdict sense data and reviewed
+before they were committed under `sources/ai-glosses/`. They are
 distributed under CC BY-SA 4.0 for compatibility with the JMdict-derived data
-they extend.
+they extend. Public responses map their historical stored `ai-assisted` source
+value to `generated`. New missing entries and examples go through the
+authenticated on-demand resolver; the removed batch gloss pipeline is not a
+current authoring path.
 
-Simplified Chinese glosses are derived from the reviewed Traditional Chinese
-source with OpenCC phrase conversion, then validated as a separate `zh-cn`
-source file.
+The committed Simplified Chinese legacy glosses were derived from the reviewed
+Traditional Chinese source with OpenCC phrase conversion and validated as a
+separate `zh-cn` source file. That conversion path is retained only in release
+history, not as an active command.
 
-Traditional Chinese validation also rejects a reviewed policy of PRC-specific
+On-demand Traditional Chinese validation also rejects a reviewed policy of PRC-specific
 terms. The policy derives replacements from OpenCC's `TWPhrases` mapping and
 adds the audited `初中` gap. OpenCC is deliberately not applied as a
 mapping-wide rejection list: it also maps valid, context-dependent Taiwanese

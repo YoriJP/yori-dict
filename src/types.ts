@@ -170,7 +170,7 @@ export type PublicLanguageSource = {
 
 export type PublicGloss = {
   text: string;
-  source: "jmdict" | "ai-assisted" | "generated";
+  source: "jmdict" | "generated";
   reviewStatus: "source" | "checked";
   type?: string;
   lang?: ApiLang;

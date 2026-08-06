@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Converter } from "opencc-js";
 import { findPrcTerms } from "../scripts/taiwan-terminology";
 import { deinflect } from "./deinflect";
@@ -7,9 +8,12 @@ import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./englis
 
 export type TargetDictionary = "ja" | "en";
 
+const traceContext = new AsyncLocalStorage<string | undefined>();
+
 export type ResolveRequest = {
   query: string;
   targetDictionary: TargetDictionary;
+  traceId?: string;
   mode?: "on-demand" | "bulk";
   context?: {
     sentence?: string;
@@ -76,6 +80,7 @@ export class ModelGatewayError extends Error {
 }
 
 export type AttemptRecord = {
+  traceId?: string;
   candidateId?: string;
   role: ModelRole;
   promptVersion: string;
@@ -152,6 +157,7 @@ export function createOnDemandDictionary(options: {
 
   return {
     async resolve(request) {
+      return traceContext.run(request.traceId, async () => {
       const released = options.repository.findReleased(request.query, request.targetDictionary);
       const overlay = options.repository.findOverlay(request.query, request.targetDictionary);
       const existing = mergeEntries(released, overlay);
@@ -164,6 +170,7 @@ export function createOnDemandDictionary(options: {
         .finally(() => entryInFlight.delete(key));
       entryInFlight.set(key, task);
       return task;
+      });
     }
   };
 }
@@ -514,6 +521,7 @@ async function callAndRecord(
       });
       const attempt: AttemptRecord = {
         ...config,
+        traceId: traceContext.getStore(),
         candidateId,
         model: response.model,
         provider: response.provider,
@@ -532,6 +540,7 @@ async function callAndRecord(
       const kind = error instanceof ModelGatewayError ? error.kind : "permanent";
       options.repository.recordAttempt({
         ...config,
+        traceId: traceContext.getStore(),
         candidateId,
         requestedServiceTier,
         durationMs: Math.max(0, performance.now() - started),
@@ -984,9 +993,15 @@ export function createEnglishOnDemandDictionary(options: {
   };
   return {
     async resolve(request) {
+      return traceContext.run(request.traceId, async () => {
       if (request.targetDictionary !== "en") return null;
-      const query = normalizeEnglishHeadword(request.context?.lemma || request.query);
-      const existing = options.repository.findOverlay(query) ?? options.repository.findReleased(query);
+      const surface = normalizeEnglishHeadword(request.query);
+      const lemma = request.context?.lemma ? normalizeEnglishHeadword(request.context.lemma) : "";
+      const existing = options.repository.findOverlay(surface)
+        ?? options.repository.findReleased(surface)
+        ?? (lemma && lemma !== surface
+          ? options.repository.findOverlay(lemma) ?? options.repository.findReleased(lemma)
+          : null);
       if (existing && existing.senses.every((sense) => sense.examples.length > 0)) return existing;
       if (invalidEnglishRequest(request)) return null;
       const key = englishRequestKey(request);
@@ -997,6 +1012,7 @@ export function createEnglishOnDemandDictionary(options: {
         .finally(() => inFlight.delete(key));
       inFlight.set(key, task);
       return task;
+      });
     }
   };
 }

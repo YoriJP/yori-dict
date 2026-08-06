@@ -116,17 +116,17 @@ export function openLookupDb(path: string): LookupDb {
             url: "https://github.com/stephenmk/yomitan-jlpt-vocab"
           },
           {
-            name: "Yori AI-assisted zh-TW glosses",
+            name: "Yori generated zh-TW glosses (legacy records)",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/zh-tw.jsonl"
           },
           {
-            name: "Yori AI-assisted zh-CN glosses",
+            name: "Yori generated zh-CN glosses (legacy records)",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/zh-cn.jsonl"
           },
           {
-            name: "Yori AI-assisted Korean glosses",
+            name: "Yori generated Korean glosses (legacy records)",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/ko.jsonl"
           },
@@ -345,7 +345,7 @@ function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[
     .all(senseId, lang)
     .map((row) => ({
       text: row.text ?? "",
-      source: row.source ?? "jmdict",
+      source: row.source === "ai-assisted" ? "generated" : row.source ?? "jmdict",
       reviewStatus: row.review_status ?? "source",
       ...(row.type ? { type: row.type } : {})
     }));
