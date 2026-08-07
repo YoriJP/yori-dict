@@ -10,6 +10,7 @@ The caller supplies a lookup candidate, not a trusted entry:
 type ResolveRequest = {
   query: string;
   targetDictionary: "ja" | "en";
+  lang: ApiLang;
   mode?: "on-demand" | "bulk";
   context?: {
     sentence?: string;
@@ -23,12 +24,18 @@ type OnDemandDictionary = {
 };
 ```
 
-The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced. Operational detail belongs in attempt records and logs, not in the caller interface.
+`lang` is the requested explanation language. It scopes the request key, the canonical entry key, the example key, the in-flight deduplication key, and every persisted terminal outcome, so work for one language never blocks or answers for another. Enrichment runs only for languages a dictionary can author today: Japanese authors en, zh-tw, and zh-cn; English authors en. Any other requested language resolves to `null` without a model call.
+
+The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call, and the HTTP layer answers with an error. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted meanings and the example stays missing and retryable.
 
 Build-time consumers may send `X-Yori-Request-Id`. Structured lookup logs and
 private model attempt records retain that trace id, so a Yori News vocabulary
 request can be followed through lookup, enrichment, review, and failure without
 publishing prompts or model traces.
+
+## Lookup contract
+
+Public lookup and owner-authorized enrichment are one route family at v1. `GET /v1/lookup` and `POST /v1/lookup/batch` both require an explicit `dictionary` and `lang`; an unsupported pair is a 400. Single lookup returns the entry or `null`; batch returns `entries` with one entry or `null` per submitted query, in order, without repeating the queries. Ordinary lookup is always model-free, including on a miss. `enrich=true` requires the owner bearer token and is checked before any model call; a token alone does not trigger generation. Database, persistence, configuration, and provider failures return 500 rather than `null`, and one failed batch item fails the whole batch.
 
 ## Resolution flow
 
@@ -46,7 +53,8 @@ publishing prompts or model traces.
 ## Failure policy
 
 - `SKIP`, deterministic rejection, semantic rejection, and malformed content are terminal.
-- Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008.
+- Terminal outcomes are stored per explanation language, so a rejection in one language leaves another language free to run.
+- Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008. An exhausted retry is an operational failure, not a terminal outcome, and stays retryable.
 - Concurrent requests for the same canonical headword or sense share one in-flight operation.
 - A failed or rejected candidate is observable but never becomes dictionary data.
 

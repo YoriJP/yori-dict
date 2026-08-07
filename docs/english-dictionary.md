@@ -24,6 +24,13 @@ filtered source evidence produced separately by `bun run english:evidence`. See
 [English multilingual source pipeline](english-source-pipeline.md); that evidence is an
 import artifact and never a release table.
 
+English lookup uses the same v1 contract as Japanese: `dictionary=en` with an explicit
+`lang`. English content is currently authored in English only, so `lang=en` is the one
+supported pair; another language is a request error rather than an English answer in
+disguise. The response uses the shared base entry shape — id, dictionary, lang, headword,
+headwords, meanings, sources — where each meaning's definition is its gloss, and English
+keeps its pronunciations.
+
 The published English schema keeps pronunciations and sense-level part of speech,
 register, region, domain, dated status, usage, examples, evidence IDs, and provenance
 structured. Reconciliation merges evidence only when definition and all those sense

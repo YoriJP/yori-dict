@@ -567,7 +567,9 @@ test("a transient Flex failure falls back once to standard while permanent failu
 
   const permanentRepository = new MemoryRepository();
   const permanentGateway = new ScriptedGateway([new ModelGatewayError("authentication", "bad key")]);
-  await createJapaneseOnDemandDictionary({ repository: permanentRepository, modelGateway: permanentGateway }).resolve(request("稀語"));
+  await expect(
+    createJapaneseOnDemandDictionary({ repository: permanentRepository, modelGateway: permanentGateway }).resolve(request("稀語"))
+  ).rejects.toThrow("bad key");
   expect(permanentGateway.calls).toHaveLength(1);
 
   const bulkRepository = new MemoryRepository();
@@ -622,17 +624,17 @@ test("cross-mode canonical work is serialized and retries in the waiting caller'
   ]);
   const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
-  const [onDemand, bulk] = await Promise.all([
+  const [onDemand, bulk] = await Promise.allSettled([
     dictionary.resolve(request("稀語")),
     dictionary.resolve({ ...request("稀語"), mode: "bulk" })
   ]);
-  expect(onDemand).toBeNull();
-  expect(bulk?.word).toBe("稀語");
+  expect(onDemand).toMatchObject({ status: "rejected" });
+  expect(bulk).toMatchObject({ status: "fulfilled", value: { word: "稀語" } });
   expect(gateway.calls.filter(({ role }) => role === "entry-author").map(({ requestedServiceTier }) => requestedServiceTier))
     .toEqual(["flex", "standard", "flex"]);
 });
 
-test("exhausted transient eligibility failures remain retryable on a later resolve", async () => {
+test("exhausted transient eligibility failures fail the request and remain retryable later", async () => {
   const repository = new MemoryRepository();
   const gateway = new ScriptedGateway([
     new ModelGatewayError("transient", "provider overloaded"),
@@ -641,7 +643,7 @@ test("exhausted transient eligibility failures remain retryable on a later resol
   ]);
   const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
-  expect(await dictionary.resolve(request("稀語"))).toBeNull();
+  await expect(dictionary.resolve(request("稀語"))).rejects.toThrow("provider overloaded");
   expect(await dictionary.resolve(request("稀語"))).toBeNull();
   expect(gateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual([
     "flex", "standard", "flex"
@@ -737,7 +739,7 @@ test("invalid concurrency and timeout configuration fails during startup", () =>
 });
 
 function request(query: string, context?: ResolveRequest["context"]): ResolveRequest {
-  return { query, targetDictionary: "ja", ...(context ? { context } : {}) };
+  return { query, targetDictionary: "ja", lang: "en", ...(context ? { context } : {}) };
 }
 
 function existingEntry(): PublicLookupItem {

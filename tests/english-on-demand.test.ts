@@ -18,7 +18,7 @@ test("English resolve returns released data without calling a model", async () =
   const gateway = new ScriptedGateway([]);
   const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
-  expect(await dictionary.resolve({ query: "BANK", targetDictionary: "en" })).toEqual(entry);
+  expect(await dictionary.resolve({ query: "BANK", targetDictionary: "en", lang: "en" })).toEqual(entry);
   expect(gateway.calls).toEqual([]);
 });
 
@@ -40,7 +40,7 @@ test("English resolve completes missing examples on released senses", async () =
   ]);
   const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
-  const completed = await dictionary.resolve({ query: "bank", targetDictionary: "en" });
+  const completed = await dictionary.resolve({ query: "bank", targetDictionary: "en", lang: "en" });
   expect(completed?.senses[0].examples).toEqual([{
     text: "She deposited her salary at the bank.", source: "generated", reviewStatus: "checked"
   }]);
@@ -57,7 +57,7 @@ test("generated English examples require a complete lexical match", async () => 
   ]);
 
   const completed = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
-    .resolve({ query: "art", targetDictionary: "en" });
+    .resolve({ query: "art", targetDictionary: "en", lang: "en" });
   expect(completed?.senses[0].examples).toEqual([]);
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author"]);
 });
@@ -68,7 +68,7 @@ test("English resolve rejects obvious non-lexical candidates before model eligib
   const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   for (const query of ["https://example.com", "<b>word</b>", "123.45", "two\nlines", "東京"]) {
-    expect(await dictionary.resolve({ query, targetDictionary: "en" })).toBeNull();
+    expect(await dictionary.resolve({ query, targetDictionary: "en", lang: "en" })).toBeNull();
   }
   expect(gateway.calls).toEqual([]);
 });
@@ -93,7 +93,7 @@ test("English resolve authors, reviews, persists, and completes source-grounded 
   ]);
   const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
-  const entry = await dictionary.resolve({ query: "lead", targetDictionary: "en" });
+  const entry = await dictionary.resolve({ query: "lead", targetDictionary: "en", lang: "en" });
   expect(entry).toMatchObject({
     dictionary: "en",
     headword: "lead",
@@ -132,8 +132,8 @@ test("English review fails closed and concurrent requests share one in-flight au
   const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   const [first, second] = await Promise.all([
-    dictionary.resolve({ query: "lead", targetDictionary: "en" }),
-    dictionary.resolve({ query: "lead", targetDictionary: "en" })
+    dictionary.resolve({ query: "lead", targetDictionary: "en", lang: "en" }),
+    dictionary.resolve({ query: "lead", targetDictionary: "en", lang: "en" })
   ]);
   expect(first).toBeNull();
   expect(second).toBeNull();
@@ -156,7 +156,7 @@ test("English source-backed senses cannot gain invented labels", async () => {
   ]);
 
   const entry = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
-    .resolve({ query: "lead", targetDictionary: "en" });
+    .resolve({ query: "lead", targetDictionary: "en", lang: "en" });
   expect(entry).toBeNull();
   expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
 });
@@ -176,7 +176,7 @@ test("model work emits one aggregate outcome and cost summary", async () => {
     modelGateway: gateway,
     models: englishModels,
     logger: (summary) => summaries.push(summary)
-  }).resolve({ query: "bank", targetDictionary: "en", traceId: "trace-summary" });
+  }).resolve({ query: "bank", targetDictionary: "en", lang: "en", traceId: "trace-summary" });
 
   expect(summaries).toEqual([{
     event: "model_run_summary",
@@ -205,7 +205,7 @@ test("English transient retries match the shared on-demand and bulk policy", asy
   };
   const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
-  expect(await dictionary.resolve({ query: "florp", targetDictionary: "en" })).toBeNull();
+  expect(await dictionary.resolve({ query: "florp", targetDictionary: "en", lang: "en" })).toBeNull();
   expect(gateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "standard"]);
   expect(repository.attempts.map(({ outcome }) => outcome)).toEqual(["transient", "skipped"]);
 });
@@ -229,7 +229,7 @@ test("English generated provenance records the successful fallback tier", async 
     }
   };
   const entry = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
-    .resolve({ query: "florp", targetDictionary: "en" });
+    .resolve({ query: "florp", targetDictionary: "en", lang: "en" });
 
   expect(entry?.senses[0].generation).toMatchObject({
     model: englishModels.author,

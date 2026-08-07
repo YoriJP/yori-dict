@@ -89,7 +89,7 @@ async function evaluateProductionPath(test: EligibilityCase, gateway: ReturnType
   };
   const repository = new EvaluationRepository(source);
   const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, timeoutMs: 60_000 });
-  const entry = await dictionary.resolve({ query: test.candidate, targetDictionary: "ja" });
+  const entry = await dictionary.resolve({ query: test.candidate, targetDictionary: "ja", lang: "en" });
   return Boolean(
     entry
     && entry.word === test.expected

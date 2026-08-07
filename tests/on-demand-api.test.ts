@@ -22,32 +22,55 @@ test("public lookup stays model-free while authenticated enrichment delegates th
   };
   const app = createApp(emptyDb(), { onDemand: japaneseResolver(onDemand), enrichmentToken: "secret" });
 
-  expect((await app.request("/v1/lookup?q=%E6%9C%AA%E7%9F%A5%E8%AA%9E")).status).toBe(200);
+  expect((await app.request("/v1/lookup?q=%E6%9C%AA%E7%9F%A5%E8%AA%9E&dictionary=ja&lang=en")).status).toBe(200);
   expect(calls).toHaveLength(0);
-  expect((await app.request("/v1/lookup?q=%E6%9C%AA%E7%9F%A5%E8%AA%9E&enrich=true")).status).toBe(401);
+  expect((await app.request("/v1/lookup?q=%E6%9C%AA%E7%9F%A5%E8%AA%9E&dictionary=ja&lang=en&enrich=true")).status).toBe(401);
   expect(calls).toHaveLength(0);
 
   const response = await app.request(
-    "/v1/lookup?q=%E6%9C%AA%E7%9F%A5%E8%AA%9E&enrich=true&lemma=%E6%9C%AA%E7%9F%A5%E8%AA%9E&reading=%E3%81%BF%E3%81%A1%E3%81%94&context=%E6%9C%AA%E7%9F%A5%E8%AA%9E%E3%82%92%E8%AA%BF%E3%81%B9%E3%81%9F%E3%80%82",
+    "/v1/lookup?q=%E6%9C%AA%E7%9F%A5%E8%AA%9E&dictionary=ja&lang=en&enrich=true&lemma=%E6%9C%AA%E7%9F%A5%E8%AA%9E&reading=%E3%81%BF%E3%81%A1%E3%81%94&context=%E6%9C%AA%E7%9F%A5%E8%AA%9E%E3%82%92%E8%AA%BF%E3%81%B9%E3%81%9F%E3%80%82",
     { headers: { authorization: "Bearer secret" } }
   );
   expect(response.status).toBe(200);
-  const body = await response.json();
-  expect(body.item.word).toBe("未知語");
-  expect(body.item.senses[0].glosses).toEqual([
+  const entry = await response.json();
+  expect(entry.headword).toBe("未知語");
+  expect(entry.meanings[0].glosses).toEqual([
     { text: "unknown term", source: "generated", reviewStatus: "checked" }
   ]);
   expect(calls).toEqual([
     {
       query: "未知語",
       targetDictionary: "ja",
+      lang: "en",
       traceId: expect.any(String),
       context: { lemma: "未知語", reading: "みちご", sentence: "未知語を調べた。" }
     }
   ]);
 });
 
-test("batch enrichment accepts contextual candidates while preserving string queries", async () => {
+test("the requested explanation language reaches the internal resolve request", async () => {
+  const calls: ResolveRequest[] = [];
+  const onDemand: JapaneseOnDemandDictionary = {
+    async resolve(request) {
+      calls.push(request);
+      return null;
+    }
+  };
+  const app = createApp(emptyDb(), { onDemand: japaneseResolver(onDemand), enrichmentToken: "secret" });
+
+  await app.request("/v1/lookup?q=%E5%AD%A6%E6%A0%A1&dictionary=ja&lang=zh-tw&enrich=true", {
+    headers: { authorization: "Bearer secret" }
+  });
+  await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer secret" },
+    body: JSON.stringify({ dictionary: "ja", lang: "ko", enrich: true, queries: ["学校"] })
+  });
+
+  expect(calls.map(({ lang }) => lang)).toEqual(["zh-tw", "ko"]);
+});
+
+test("batch enrichment accepts contextual candidates while preserving order", async () => {
   const calls: ResolveRequest[] = [];
   const onDemand: JapaneseOnDemandDictionary = {
     async resolve(request) {
@@ -60,6 +83,8 @@ test("batch enrichment accepts contextual candidates while preserving string que
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer secret" },
     body: JSON.stringify({
+      dictionary: "ja",
+      lang: "en",
       enrich: true,
       queries: [
         "未知語",
@@ -70,23 +95,23 @@ test("batch enrichment accepts contextual candidates while preserving string que
 
   expect(response.status).toBe(200);
   expect(calls).toEqual([
-    { query: "未知語", targetDictionary: "ja", mode: "bulk", traceId: expect.any(String) },
+    { query: "未知語", targetDictionary: "ja", lang: "en", mode: "bulk", traceId: expect.any(String) },
     {
       query: "取り組んで",
       targetDictionary: "ja",
+      lang: "en",
       mode: "bulk",
       traceId: expect.any(String),
       context: { lemma: "取り組む", reading: "とりくむ", sentence: "改革に取り組んでいる。" }
     }
   ]);
   expect(calls[1].traceId).toBe(calls[0].traceId);
-  expect((await response.json()).results.map((result: { input: string }) => result.input)).toEqual([
-    "未知語",
-    "取り組んで"
-  ]);
+  const { entries } = await response.json();
+  expect(entries).toHaveLength(2);
+  expect(entries.map((entry: { headword: string }) => entry.headword)).toEqual(["未知語", "未知語"]);
 });
 
-test("batch enrichment falls back to released lookup when resolution fails", async () => {
+test("a failed batch enrichment fails the request instead of reporting a miss", async () => {
   const released = generatedEntry();
   released.source = "jmdict";
   const db = emptyDb();
@@ -99,11 +124,11 @@ test("batch enrichment falls back to released lookup when resolution fails", asy
   const response = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer secret" },
-    body: JSON.stringify({ enrich: true, queries: ["学校"] })
+    body: JSON.stringify({ dictionary: "ja", lang: "en", enrich: true, queries: ["学校"] })
   });
 
-  expect(response.status).toBe(200);
-  expect((await response.json()).results[0].item.word).toBe("未知語");
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: "Lookup is temporarily unavailable" });
 });
 
 test("English batch lookup uses the independent dictionary and authenticated resolver", async () => {
@@ -132,16 +157,23 @@ test("English batch lookup uses the independent dictionary and authenticated res
     headers: { "content-type": "application/json", "x-yori-request-id": "news-request-1" },
     body: JSON.stringify({
       dictionary: "en",
+      lang: "en",
       queries: [{ query: "banks", lemma: "bank", context: "Several banks closed." }]
     })
   });
   expect(publicResponse.status).toBe(200);
-  expect((await publicResponse.json()).results[0].item).toEqual(entry);
+  expect((await publicResponse.json()).entries[0]).toMatchObject({
+    id: entry.id,
+    dictionary: "en",
+    lang: "en",
+    headword: "bank"
+  });
   expect(calls).toHaveLength(0);
   expect(events[0]).toMatchObject({
     event: "dictionary_lookup",
     traceId: "news-request-1",
     dictionary: "en",
+    lang: "en",
     query: "banks",
     enrichmentRequested: false,
     outcome: "resolved",
@@ -153,16 +185,17 @@ test("English batch lookup uses the independent dictionary and authenticated res
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       dictionary: "en",
+      lang: "en",
       queries: [{ query: "news", lemma: "new", context: "News travels quickly." }]
     })
   });
-  expect((await surfaceFirst.json()).results[0].item).toEqual(entry);
+  expect((await surfaceFirst.json()).entries[0].headword).toBe("bank");
   expect(lookupQueries.slice(-1)).toEqual(["news"]);
 
   const unauthorized = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ dictionary: "en", enrich: true, queries: ["florp"] })
+    body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["florp"] })
   });
   expect(unauthorized.status).toBe(401);
   expect(calls).toHaveLength(0);
@@ -176,15 +209,17 @@ test("English batch lookup uses the independent dictionary and authenticated res
     },
     body: JSON.stringify({
       dictionary: "en",
+      lang: "en",
       enrich: true,
       queries: [{ query: "florp", lemma: "florp", context: "The florp moved quickly." }]
     })
   });
   expect(enriched.status).toBe(200);
-  expect((await enriched.json()).results[0].item).toEqual(entry);
+  expect((await enriched.json()).entries[0].headword).toBe("bank");
   expect(calls).toEqual([{
     query: "florp",
     targetDictionary: "en",
+    lang: "en",
     mode: "bulk",
     traceId: "news-request-2",
     context: { lemma: "florp", sentence: "The florp moved quickly." }

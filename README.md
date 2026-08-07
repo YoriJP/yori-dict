@@ -15,16 +15,17 @@ downloadable SQLite database.
 | Japanese | Hosted API and SQLite release | Kanji, kana, word-level deinflection, multilingual glosses, sense annotations, examples, unofficial estimated JLPT bands, and inflection paths |
 | English | Hosted API | Definitions, pronunciations, parts of speech, usage labels, examples, and source provenance |
 
-Japanese gloss languages:
+Explanation languages:
 
 ```txt
-en, de, zh-tw, zh-cn, ko
+ja: en, de, zh-tw, zh-cn, ko
+en: en
 ```
 
-English and German glosses come from JMdict. Traditional Chinese, Simplified
-Chinese, and Korean coverage is partial and includes reviewed generated
-glosses. A Japanese lookup returns only senses with glosses in the requested
-language; it does not fall back to English.
+English and German Japanese glosses come from JMdict. Traditional Chinese,
+Simplified Chinese, and Korean coverage is partial and includes reviewed
+generated glosses. A lookup returns only the meanings written in the requested
+language; it never falls back to another language.
 
 ## API Quick Start
 
@@ -33,13 +34,13 @@ Public API: <https://yori-dict-production.up.railway.app>
 Look up an inflected Japanese word:
 
 ```sh
-curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&lang=zh-tw'
+curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&dictionary=ja&lang=zh-tw'
 ```
 
 Look up an English word:
 
 ```sh
-curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=bank&dictionary=en'
+curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=bank&dictionary=en&lang=en'
 ```
 
 Look up several Japanese words in one request:
@@ -47,12 +48,18 @@ Look up several Japanese words in one request:
 ```sh
 curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
   -H 'content-type: application/json' \
-  --data '{"dictionary":"ja","queries":["食べました","学校","教室"],"lang":"ko"}'
+  --data '{"dictionary":"ja","lang":"ko","queries":["食べました","学校","教室"]}'
 ```
 
-`dictionary` accepts `ja` or `en` and defaults to `ja`. For Japanese lookup,
-`lang` defaults to `en`. Deinflection helps match individual Japanese words; it
-is not sentence parsing.
+Every lookup must name one `dictionary` (`ja` or `en`) and one `lang`. Neither
+has a default, and an unsupported pair is a request error. Single lookup
+returns the entry or `null`. Batch lookup returns `entries`: one entry or
+`null` per query, in the submitted order and length, without repeating the
+queries. `null` means no acceptable content exists; database and provider
+failures stay errors. Both dictionaries share one base entry shape — id,
+dictionary, lang, headword, headwords, meanings, sources — while Japanese keeps
+its readings and inflection path and English keeps its pronunciations.
+Deinflection helps match individual Japanese words; it is not sentence parsing.
 
 For the complete request and response schemas, use the
 [interactive API documentation](https://yori-dict-production.up.railway.app/doc)

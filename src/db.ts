@@ -75,7 +75,8 @@ type ExampleRow = {
 };
 
 export type LookupDb = {
-  lookup(query: string, requestedLang: ApiLang | null): LookupResponse;
+  /** Returns only meanings glossed in `lang`; it never falls back to another language. */
+  lookup(query: string, lang: ApiLang): LookupResponse;
   meta(): {
     apiVersion: "v1";
     dictionaryVersion: string | null;
@@ -90,8 +91,8 @@ export function openLookupDb(path: string): LookupDb {
   const db = new Database(path, { readonly: true });
 
   return {
-    lookup(query, requestedLang) {
-      return lookup(db, query, requestedLang);
+    lookup(query, lang) {
+      return lookup(db, query, lang);
     },
     meta() {
       return {
@@ -181,9 +182,8 @@ export function visitLookupItems(path: string, visit: (entry: PublicLookupItem) 
   }
 }
 
-function lookup(db: Database, query: string, requestedLang: ApiLang | null): LookupResponse {
+function lookup(db: Database, query: string, lang: ApiLang): LookupResponse {
   const normalizedQuery = normalizeQuery(query);
-  const lang = requestedLang ?? "en";
   const candidates: LookupCandidate[] = [];
 
   const exactEntryIds = findEntryIds(db, normalizedQuery);
@@ -247,7 +247,9 @@ function readBestItem(
   if (!best) return null;
 
   const entry = readEntries(db, [best.entryIds[0]], lang)[0];
-  if (!entry) return null;
+  // An entry with no sense glossed in the requested language is a miss for that
+  // language, not an entry to answer with another language's meanings.
+  if (!entry || entry.senses.length === 0) return null;
 
   return toLookupItem(entry, best.inflectionPath);
 }
