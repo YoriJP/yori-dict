@@ -19,6 +19,11 @@ with `bun run english:release -- --version 2026.08.1`. Repeating a release with 
 version and canonical data produces byte-identical data artifacts. `openEnglishDictionary`
 reads the SQLite artifact directly; normal lookup is case-normalized and never calls a model.
 
+Japanese and Taiwanese Chinese explanations for English headwords are authored from
+filtered source evidence produced separately by `bun run english:evidence`. See
+[English multilingual source pipeline](english-source-pipeline.md); that evidence is an
+import artifact and never a release table.
+
 The published English schema keeps pronunciations and sense-level part of speech,
 register, region, domain, dated status, usage, examples, evidence IDs, and provenance
 structured. Reconciliation merges evidence only when definition and all those sense

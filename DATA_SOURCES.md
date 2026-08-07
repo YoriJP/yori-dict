@@ -125,6 +125,51 @@ Sources:
 - https://simple.wiktionary.org/wiki/Wiktionary:Copyrights
 - https://github.com/tatuylonen/wiktextract
 
+## English Multilingual Source Evidence
+
+Japanese and Taiwanese Chinese explanations for English headwords are authored from
+filtered source evidence, not published directly from it. `bun run english:evidence`
+streams the full English Wiktionary Wiktextract archive and writes a bounded filtered
+artifact plus a manifest under `sources/english/evidence/`. Both remain import artifacts
+outside canonical release tables. `docs/english-source-pipeline.md` describes the rules.
+
+The complete archive is never committed. It was about 2.65 GiB compressed when
+researched, and the pipeline reads it from the ignored resumable cache pinned in
+`sources/english/wiktionary-full-lock.json`. The manifest records the archive's URL, dump
+date, compressed checksum and size, HTTP metadata when available, license, attribution,
+and the filter tool version, so the evidence stays reproducible and attributable.
+
+The full English Wiktionary extract is distributed under the Wiktionary terms, CC BY-SA
+4.0 and GFDL 1.1 or later, and credits English Wiktionary contributors and Wiktextract.
+Its translation records are authoring and review evidence: they describe a Japanese or
+Chinese word under an English meaning, not an independently written Japanese or Chinese
+dictionary entry.
+
+Two mapped sources supply stronger evidence:
+
+- Japanese WordNet, credited to NICT and distributed under its BSD-style license, is
+  admitted only through validated Princeton WordNet/ILI mappings. Accepted rows retain
+  the ILI id, PWN synset, mapping source, and mapping version. The project is old and
+  warns that translated definitions and examples may contain errors.
+- Taiwan government terminology, published under the Open Government Data License,
+  Taiwan 1.0, is authoritative only inside its stated domains. Each row retains its
+  agency, dataset, domain, version, attribution, and exact English/Chinese term pair.
+
+`zh-tw` is assigned only where Taiwan terminology corroborates the exact term. Traditional
+characters alone are not Taiwanese localization. Reverse JMdict, CC-CEDICT, and Simplified
+Chinese WordNet records may support review but never become canonical through string or
+reverse-gloss matching. NTU Chinese Wordnet is not imported without a separately
+documented permission grant.
+
+Sources:
+
+- https://kaikki.org/dictionary/downloads/en/
+- https://en.wiktionary.org/wiki/Wiktionary:Copyrights
+- https://bond-lab.github.io/wnja/
+- https://github.com/globalwordnet/cili
+- https://terms.naer.edu.tw/
+- https://data.gov.tw/license
+
 ## Estimated Levels
 
 Estimated levels come from `stephenmk/yomitan-jlpt-vocab`, pinned by commit in
