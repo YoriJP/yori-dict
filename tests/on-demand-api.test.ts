@@ -39,6 +39,7 @@ test("public lookup stays model-free while authenticated enrichment delegates th
     {
       query: "未知語",
       targetDictionary: "ja",
+      traceId: expect.any(String),
       context: { lemma: "未知語", reading: "みちご", sentence: "未知語を調べた。" }
     }
   ]);
@@ -67,14 +68,16 @@ test("batch enrichment accepts contextual candidates while preserving string que
 
   expect(response.status).toBe(200);
   expect(calls).toEqual([
-    { query: "未知語", targetDictionary: "ja", mode: "bulk" },
+    { query: "未知語", targetDictionary: "ja", mode: "bulk", traceId: expect.any(String) },
     {
       query: "取り組んで",
       targetDictionary: "ja",
       mode: "bulk",
+      traceId: expect.any(String),
       context: { lemma: "取り組む", reading: "とりくむ", sentence: "改革に取り組んでいる。" }
     }
   ]);
+  expect(calls[1].traceId).toBe(calls[0].traceId);
   expect((await response.json()).results.map((result: { input: string }) => result.input)).toEqual([
     "未知語",
     "取り組んで"

@@ -1,6 +1,4 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 import type { LookupDb } from "./db";
 import type {
   AttemptRecord,
@@ -8,7 +6,7 @@ import type {
   SourceEvidence,
   TargetDictionary
 } from "./on-demand-dictionary";
-import type { ApiLang, PublicExample, PublicLookupItem } from "./types";
+import type { PublicExample, PublicLookupItem, PublicSense } from "./types";
 
 export type PersistentEnrichmentRepository = EnrichmentRepository & {
   acceptedEntries(): PublicLookupItem[];
@@ -18,224 +16,194 @@ export type PersistentEnrichmentRepository = EnrichmentRepository & {
 
 export function openEnrichmentRepository(
   path: string,
-  releasedDb: LookupDb,
+  lookupDb: LookupDb,
   sourceLookup: (query: string, targetDictionary: TargetDictionary) => SourceEvidence[] = () => []
 ): PersistentEnrichmentRepository {
-  mkdirSync(dirname(path), { recursive: true });
-  const db = new Database(path, { create: true });
-  ensureSchema(db);
+  const db = new Database(path);
+  db.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
 
-  const readEntry = db.prepare<{ entry_json: string }, [string, string]>(
-    `select e.entry_json
-       from on_demand_lookup_terms t
-       join on_demand_entries e on e.entry_id = t.entry_id
-      where t.dictionary = ? and t.term = ?
-      order by e.entry_id
-      limit 1`
-  );
-  const readExamples = db.prepare<{ sense_id: string; example_json: string }, [string]>(
-    `select sense_id, example_json from on_demand_examples where entry_id = ? order by sense_id`
-  );
-  const readExample = db.prepare<{ example_json: string }, [string]>(
-    `select example_json from on_demand_examples where sense_id = ?`
-  );
-  const upsertEntry = db.prepare(
-    `insert into on_demand_entries (entry_id, dictionary, headword, entry_json, accepted_at)
-     values (?, 'ja', ?, ?, ?)
-     on conflict(entry_id) do update set headword = excluded.headword, entry_json = excluded.entry_json`
-  );
-  const deleteTerms = db.prepare(`delete from on_demand_lookup_terms where entry_id = ?`);
-  const insertTerm = db.prepare(
-    `insert or ignore into on_demand_lookup_terms (dictionary, term, entry_id) values ('ja', ?, ?)`
-  );
-  const upsertSense = db.prepare(
-    `insert into on_demand_senses (sense_id, entry_id) values (?, ?)
-     on conflict(sense_id) do update set entry_id = excluded.entry_id`
-  );
-  const findEntryForSense = db.prepare<{ entry_id: string }, [string]>(
-    `select entry_id from on_demand_senses where sense_id = ?`
-  );
-  const upsertExample = db.prepare(
-    `insert into on_demand_examples (sense_id, entry_id, example_json)
-     values (?, ?, ?)
-     on conflict(sense_id) do update set entry_id = excluded.entry_id, example_json = excluded.example_json`
-  );
-  const insertAttempt = db.prepare(`insert into on_demand_attempts (attempt_json) values (?)`);
-  const readTerminal = db.prepare<{ outcome: string }, [string]>(
-    `select outcome from on_demand_terminal_outcomes where outcome_key = ?`
-  );
-  const upsertTerminal = db.prepare(
-    `insert into on_demand_terminal_outcomes (outcome_key, outcome) values (?, ?)
-     on conflict(outcome_key) do update set outcome = excluded.outcome`
-  );
+  const saveEntryRow = db.prepare(`
+    insert into entries (id, source, source_id, headword_language, estimated_level)
+    values (?, ?, ?, 'ja', ?)
+    on conflict(id) do update set
+      source = excluded.source,
+      source_id = excluded.source_id,
+      headword_language = excluded.headword_language,
+      estimated_level = excluded.estimated_level
+  `);
+  const saveForm = db.prepare(`
+    insert into forms (entry_id, text, reading, kind, common, tags) values (?, ?, ?, ?, ?, ?)
+  `);
+  const saveLookupTerm = db.prepare(`
+    insert into lookup_terms (term, entry_id, match_kind) values (?, ?, ?)
+  `);
+  const saveSense = db.prepare(`
+    insert into senses (
+      id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech,
+      misc, field, dialect, info, related, antonym, language_source
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const saveGloss = db.prepare(`
+    insert into glosses (sense_id, lang, text, source, review_status, type)
+    values (?, ?, ?, ?, ?, ?)
+  `);
+  const saveExampleRow = db.prepare(`
+    insert into examples (
+      sense_id, position, text, translations, source, source_name, source_id, review_status
+    ) values (?, 1, ?, ?, 'generated', null, null, 'checked')
+    on conflict(sense_id, position) do update set
+      text = excluded.text,
+      translations = excluded.translations,
+      source = excluded.source,
+      source_name = excluded.source_name,
+      source_id = excluded.source_id,
+      review_status = excluded.review_status
+  `);
+  const saveAttempt = db.prepare(`
+    insert into model_attempts (dictionary, attempt_json, created_at) values ('ja', ?, ?)
+  `);
+  const saveGeneratedRecord = db.prepare(`
+    insert into japanese_generated_records (entry_id, entry_json, accepted_at) values (?, ?, ?)
+    on conflict(entry_id) do update set entry_json = excluded.entry_json, accepted_at = excluded.accepted_at
+  `);
+  const readTerminal = db.query<{ outcome: string }, [string]>(`
+    select outcome from terminal_outcomes where dictionary = 'ja' and outcome_key = ?
+  `);
+  const saveTerminal = db.prepare(`
+    insert into terminal_outcomes (dictionary, outcome_key, outcome) values ('ja', ?, ?)
+    on conflict(dictionary, outcome_key) do update set outcome = excluded.outcome
+  `);
 
-  function withExamples(entry: PublicLookupItem): PublicLookupItem {
-    const examples = new Map(
-      readExamples.all(entry.id).map((row) => [row.sense_id, JSON.parse(row.example_json) as PublicExample])
-    );
-    return {
-      ...entry,
-      senses: entry.senses.map((sense) => {
-        const example = examples.get(sense.id) ?? readExample.get(sense.id)?.example_json;
-        if (!example) return sense;
-        const parsed = typeof example === "string" ? (JSON.parse(example) as PublicExample) : example;
-        return { ...sense, examples: [parsed] };
-      })
-    };
-  }
-
-  function generatedEntry(query: string, targetDictionary: TargetDictionary): PublicLookupItem | null {
-    const row = readEntry.get(targetDictionary, query);
-    return row ? withExamples(JSON.parse(row.entry_json) as PublicLookupItem) : null;
+  function find(query: string): PublicLookupItem | null {
+    return lookupDb.lookup(query, "en").item;
   }
 
   return {
-    findReleased(query, targetDictionary) {
-      return targetDictionary === "ja" ? releasedDb.lookup(query, "en").item : null;
-    },
-    findOverlay(query, targetDictionary) {
-      const generated = generatedEntry(query, targetDictionary);
-      if (generated) return generated;
-      if (targetDictionary !== "ja") return null;
-      const released = releasedDb.lookup(query, "en").item;
-      return released ? withExamples(released) : null;
+    find(query, targetDictionary) {
+      return targetDictionary === "ja" ? find(query) : null;
     },
     findSources(query, targetDictionary) {
       return sourceLookup(query, targetDictionary);
     },
     saveEntry(entry) {
       db.transaction(() => {
-        upsertEntry.run(entry.id, entry.word, JSON.stringify(entry), new Date().toISOString());
-        deleteTerms.run(entry.id);
-        const terms = new Set([
-          entry.word,
-          ...(entry.reading ? [entry.reading] : []),
-          ...entry.headwords.flatMap((headword) => [headword.text, ...(headword.reading ? [headword.reading] : [])])
-        ]);
-        for (const term of terms) insertTerm.run(term, entry.id);
-        for (const sense of entry.senses) upsertSense.run(sense.id, entry.id);
+        const senseIds = db.query<{ id: string }, [string]>("select id from senses where entry_id = ?")
+          .all(entry.id).map((row) => row.id);
+        for (const senseId of senseIds) {
+          db.prepare("delete from glosses where sense_id = ?").run(senseId);
+          db.prepare("delete from examples where sense_id = ?").run(senseId);
+        }
+        db.prepare("delete from senses where entry_id = ?").run(entry.id);
+        db.prepare("delete from forms where entry_id = ?").run(entry.id);
+        db.prepare("delete from lookup_terms where entry_id = ?").run(entry.id);
+
+        saveEntryRow.run(entry.id, entry.source, entry.sourceId, entry.estimatedLevel ?? null);
+        if (entry.source === "generated") {
+          saveGeneratedRecord.run(entry.id, JSON.stringify(entry), new Date().toISOString());
+        }
+        for (const headword of entry.headwords) {
+          saveForm.run(
+            entry.id,
+            headword.text,
+            headword.reading,
+            headword.kind,
+            headword.common ? 1 : 0,
+            JSON.stringify(headword.tags)
+          );
+          saveLookupTerm.run(headword.text, entry.id, headword.kind === "kana" ? "reading" : "kanji");
+          if (headword.reading && headword.reading !== headword.text) {
+            saveLookupTerm.run(headword.reading, entry.id, "reading");
+          }
+        }
+        for (const sense of entry.senses) saveJapaneseSense(entry.id, sense);
       })();
     },
     saveExample(senseId, example) {
-      const entryId = findEntryForSense.get(senseId)?.entry_id ?? `released:${senseId}`;
-      upsertExample.run(senseId, entryId, JSON.stringify(example));
+      saveExampleRow.run(senseId, example.text, JSON.stringify(example.translations));
     },
     recordAttempt(attempt) {
-      insertAttempt.run(JSON.stringify(attempt));
+      saveAttempt.run(JSON.stringify(attempt), new Date().toISOString());
     },
     terminalOutcome(key) {
       return readTerminal.get(key)?.outcome ?? null;
     },
     saveTerminalOutcome(key, outcome) {
-      upsertTerminal.run(key, outcome);
+      saveTerminal.run(key, outcome);
     },
     knownLabels() {
-      return new Set(Object.keys(releasedDb.meta().tags));
+      return new Set(Object.keys(lookupDb.meta().tags));
     },
     acceptedEntries() {
-      return db
-        .query<{ entry_json: string }, []>(`select entry_json from on_demand_entries order by dictionary, headword, entry_id`)
-        .all()
-        .map((row) => withExamples(JSON.parse(row.entry_json) as PublicLookupItem));
+      return db.query<{ entry_json: string }, []>(`
+        select entry_json from japanese_generated_records order by entry_id
+      `).all().map((row) => withCanonicalExamples(JSON.parse(row.entry_json) as PublicLookupItem));
     },
     attemptRecords() {
-      return db
-        .query<{ attempt_json: string }, []>(`select attempt_json from on_demand_attempts order by id`)
-        .all()
-        .map((row) => JSON.parse(row.attempt_json) as AttemptRecord);
+      return db.query<{ attempt_json: string }, []>(`
+        select attempt_json from model_attempts where dictionary = 'ja' order by id
+      `).all().map((row) => JSON.parse(row.attempt_json) as AttemptRecord);
     },
     close() {
       db.close();
     }
   };
-}
 
-export function createOverlayLookupDb(
-  releasedDb: LookupDb,
-  repository: PersistentEnrichmentRepository
-): LookupDb {
-  return {
-    lookup(query, requestedLang) {
-      const released = releasedDb.lookup(query, requestedLang).item;
-      const overlay = repository.findOverlay(query, "ja");
-      if (!overlay) return { item: released };
-      if (overlay.source === "generated") return { item: publicEntryForLanguage(overlay, requestedLang ?? "en") };
-      if (!released || released.id !== overlay.id) return { item: released };
-      const examples = new Map(overlay.senses.map((sense) => [sense.id, sense.examples]));
-      return {
-        item: {
-          ...released,
-          senses: released.senses.map((sense) => {
-            const staged = examples.get(sense.id);
-            return staged ? { ...sense, examples: staged } : sense;
-          })
-        }
-      };
-    },
-    meta() {
-      return releasedDb.meta();
-    },
-    close() {
-      releasedDb.close();
+  function saveJapaneseSense(entryId: string, sense: PublicSense): void {
+    saveSense.run(
+      sense.id,
+      entryId,
+      sense.position,
+      JSON.stringify(sense.appliesTo.kanji),
+      JSON.stringify(sense.appliesTo.kana),
+      JSON.stringify(sense.partOfSpeech),
+      JSON.stringify(sense.misc ?? []),
+      JSON.stringify(sense.field ?? []),
+      JSON.stringify(sense.dialect ?? []),
+      JSON.stringify(sense.info ?? []),
+      JSON.stringify(sense.related ?? []),
+      JSON.stringify(sense.antonym ?? []),
+      JSON.stringify(sense.languageSource ?? [])
+    );
+    for (const gloss of sense.glosses) {
+      saveGloss.run(
+        sense.id,
+        gloss.lang ?? "en",
+        gloss.text,
+        gloss.source === "generated" ? "ai-assisted" : "jmdict",
+        gloss.reviewStatus,
+        gloss.type ?? null
+      );
     }
-  };
-}
+    for (const example of sense.examples ?? []) {
+      saveExampleRow.run(sense.id, example.text, JSON.stringify(example.translations));
+    }
+  }
 
-function publicEntryForLanguage(entry: PublicLookupItem, lang: ApiLang): PublicLookupItem {
-  return {
-    ...entry,
-    senses: entry.senses.flatMap((sense) => {
-      const glosses = sense.glosses
-        .filter((gloss) => !gloss.lang || gloss.lang === lang)
-        .map(({ lang: _lang, ...gloss }) => gloss);
-      return glosses.length > 0 ? [{ ...sense, glosses }] : [];
-    })
-  };
-}
-
-function ensureSchema(db: Database): void {
-  db.exec(`
-    create table if not exists on_demand_entries (
-      entry_id text primary key,
-      dictionary text not null,
-      headword text not null,
-      entry_json text not null,
-      accepted_at text not null
-    );
-    create table if not exists on_demand_lookup_terms (
-      dictionary text not null,
-      term text not null,
-      entry_id text not null,
-      primary key (dictionary, term, entry_id)
-    );
-    create index if not exists on_demand_lookup_terms_term on on_demand_lookup_terms(dictionary, term);
-    create table if not exists on_demand_senses (
-      sense_id text primary key,
-      entry_id text not null
-    );
-    create table if not exists on_demand_examples (
-      sense_id text primary key,
-      entry_id text not null,
-      example_json text not null
-    );
-    create table if not exists on_demand_attempts (
-      id integer primary key autoincrement,
-      attempt_json text not null
-    );
-    create table if not exists on_demand_terminal_outcomes (
-      outcome_key text primary key,
-      outcome text not null
-    );
-  `);
-  const legacyOverlay = db
-    .query<{ name: string }, []>("select name from sqlite_master where type = 'table' and name = 'example_enrichments'")
-    .get();
-  if (legacyOverlay) {
-    db.exec(`
-      insert or ignore into on_demand_examples (sense_id, entry_id, example_json)
-      select sense_id, 'released:' || sense_id, example_json
-        from example_enrichments
-       where status = 'accepted' and example_json is not null
+  function withCanonicalExamples(entry: PublicLookupItem): PublicLookupItem {
+    const readExamples = db.query<{
+      text: string;
+      translations: string;
+      source: "sourced" | "generated";
+      source_name: string | null;
+      source_id: string | null;
+      review_status: "source" | "checked";
+    }, [string]>(`
+      select text, translations, source, source_name, source_id, review_status
+        from examples where sense_id = ? order by position
     `);
+    return {
+      ...entry,
+      senses: entry.senses.map((sense) => ({
+        ...sense,
+        examples: readExamples.all(sense.id).map((example) => ({
+          text: example.text,
+          translations: JSON.parse(example.translations),
+          source: example.source,
+          ...(example.source_name ? { sourceName: example.source_name } : {}),
+          ...(example.source_id ? { sourceId: example.source_id } : {}),
+          reviewStatus: example.review_status
+        }))
+      }))
+    };
   }
 }

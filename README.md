@@ -267,29 +267,30 @@ releases/yori-dict-<artifactVersion>.json
 Upload the `.sqlite.gz`, `.sha256`, and `.json` files as GitHub release assets.
 Users can decompress the SQLite file and use it directly.
 
-After publishing the `data-<version>` GitHub release, pin the service to it by updating only
-`version` and `sha256` in [`data-release.json`](data-release.json). Copy the SHA-256 from the
-published `.sqlite.gz.sha256` file, then verify the complete public download path locally:
+After publishing the `data-<version>` GitHub release, update `version` and `sha256` in
+[`data-release.json`](data-release.json). It is the bootstrap pin for a fresh production database
+and remains the public-download verification contract:
 
 ```sh
 bun run data:download
 ```
 
-Commit the `data-release.json` diff normally. This changes the deployed data without requiring
-an application-code change. The deploy downloads the same `.sqlite.gz` asset offered to public
-users, verifies it against the committed checksum before installing it, and only then replaces the
-current database. A mismatch stops the build and leaves any existing database untouched.
+An existing production database is never replaced during application deployment. Import a
+validated source release explicitly with `bun run db:import -- --japanese <release.sqlite>` or
+`--english <release.sqlite>`. Accepted generated content is preserved.
 
 ## Railway
 
 Railway build and deploy settings are defined in [railway.json](railway.json).
 Use Railway's GitHub integration to autodeploy this repository.
 
+Attach one volume at `/data` and set `YORI_DB_PATH=/data/yori.sqlite`.
+
 Build command:
 
 ```sh
 bun install
-bun run data:download
+bun run typecheck
 ```
 
 Start command:
@@ -298,11 +299,10 @@ Start command:
 bun run start
 ```
 
-The server reads `YORI_DB_PATH`, defaulting to `data/yori.sqlite`, and
-`YORI_ENGLISH_DB_PATH`, defaulting to the independently versioned English build
-artifact. Railway obtains Japanese data from `data-release.json` and builds
-English from the committed, checksummed source archives; deploys do not contact
-dictionary upstreams.
+The start command mounts the volume, applies pending Drizzle migrations, and opens the existing
+database. Only a missing database is bootstrapped from the pinned Japanese release and committed,
+checksummed English sources. Later deployments neither rebuild nor download dictionary data.
+Japanese and English releases remain independent outputs of the shared canonical working store.
 
 ## API Shape
 
@@ -340,16 +340,17 @@ curl 'http://localhost:3000/v1/lookup?q=取り組んで&lemma=取り組む&readi
   -H 'authorization: Bearer <token>'
 ```
 
-The service searches the released dictionary, the writable overlay, and indexed
-licensed source evidence before generation. It uses the official OpenRouter SDK
-with GPT-5.6 Luna for eligibility and authoring and Gemini 3 Flash Preview for
-reject-only review. Calls request Flex first; transient on-demand failures may
+The service searches the canonical dictionary and indexed licensed source evidence before
+generation. Japanese enrichment uses GPT-5.6 Luna
+for eligibility and authoring and Gemini 3 Flash Preview for reject-only review.
+English enrichment stays disabled until both `YORI_ENGLISH_AUTHOR_MODEL` and
+`YORI_ENGLISH_REVIEW_MODEL` select a configuration that passed the comparative
+English evaluation. Calls request Flex first; transient on-demand failures may
 fall back to standard once.
 
-Configure `OPENROUTER_API_KEY`, `YORI_ENRICHMENT_TOKEN`, and comma-separated
-`YORI_JA_SOURCE_EVIDENCE_PATHS`. `YORI_ENRICHMENT_OVERLAY_PATH` defaults to the
-legacy-compatible `data/example-overlay.sqlite`; English uses
-`YORI_ENGLISH_ENRICHMENT_OVERLAY_PATH`. Export accepted staging data with
+Configure `OPENROUTER_API_KEY`, `YORI_ENRICHMENT_TOKEN`, `YORI_DB_PATH`, and comma-separated
+`YORI_JA_SOURCE_EVIDENCE_PATHS`. `YORI_ENRICHMENT_CONCURRENCY` is one
+global limit shared by both dictionaries. Export accepted generated data with
 `bun run enrichment:export`; run the paid regression corpus only with
 `bun run enrichment:eval -- --run`.
 
@@ -362,8 +363,8 @@ to the current `generated` provenance term.
 
 The old per-sense translation, semantic regeneration, and Claude CLI review
 commands have been removed. New gaps go through authenticated source-grounded
-canonical entry resolution and reject-only review behind
-`OnDemandDictionary.resolve`; callers never read or merge the staging overlay.
+canonical entry resolution and one-word reject-only review behind
+`OnDemandDictionary.resolve`; callers know nothing about persistence or migrations.
 
 ## Help And Contributions
 

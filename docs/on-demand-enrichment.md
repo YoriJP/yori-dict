@@ -1,6 +1,6 @@
 # On-demand dictionary enrichment
 
-Japanese and English implementations use one `DictionaryResolver.resolve` contract. Public lookup remains model-free; authenticated lookup may use the staged enrichment path described here. Their schemas, source policies, repositories, and releases remain independent.
+Japanese and English implementations use one `DictionaryResolver.resolve` contract. Public lookup remains model-free; authenticated lookup may enrich the canonical production database. Their schemas, source policies, and releases remain independent even though they share one SQLite file.
 
 ## Interface
 
@@ -34,14 +34,14 @@ publishing prompts or model traces.
 
 1. Reject only obvious invalid requests: empty or multiline text, control characters, markup, URLs, or excessive length.
 2. Normalize the query and use any lemma and reading supplied by the consumer.
-3. Search the released dictionary, enrichment overlay, and indexed licensed sources.
+3. Search the canonical dictionary and indexed licensed sources.
 4. If all miss, ask Luna for one canonical headword or `SKIP`, using the occurrence context for disambiguation.
 5. When Luna changes the headword, repeat source discovery once before generating.
 6. Build a source-evidence bundle and ask Luna to author the canonical entry. Source evidence is minimum coverage, not a literal translation template.
 7. Run deterministic schema, script, provenance, label, and Taiwan-terminology checks.
-8. Ask Gemini for a reject-only review. Any issue or incomplete verdict rejects the entry.
-9. Persist accepted entries in the overlay, then generate and review one example for each sense that still lacks one.
-10. Return the merged entry. Example failure produces a thinner entry, not a failed lookup.
+8. Ask Gemini for a reject-only review that returns exactly `ACCEPT` or `REJECT`. Any other output fails closed.
+9. Persist accepted entries in the canonical database, then generate and review one example for each sense that still lacks one.
+10. Return the canonical entry. Example failure produces a thinner entry, not a failed lookup.
 
 ## Failure policy
 
@@ -50,23 +50,30 @@ publishing prompts or model traces.
 - Concurrent requests for the same canonical headword or sense share one in-flight operation.
 - A failed or rejected candidate is observable but never becomes dictionary data.
 
-## Release path
+## Production data and release path
 
-The overlay is staging. `bun run enrichment:export` writes deterministic JSONL, SQLite, and Yomitan v3 artifacts with generation provenance. Those artifacts can be validated and committed as project data before they are folded into the next independent Japanese dictionary release.
+`YORI_DB_PATH` selects the single persistent SQLite database. Drizzle migrations change its schema during startup; they never seed or replace content. `bun run db:import -- --japanese <sqlite>` and `--english <sqlite>` explicitly import refreshed source releases while preserving accepted generated content. `bun run enrichment:export` writes deterministic generated JSONL, SQLite, and Yomitan v3 artifacts with public provenance. Japanese and English publication remain independent snapshot operations.
 
 ## Runtime configuration
 
 - `OPENROUTER_API_KEY` authenticates the official `@openrouter/sdk` client.
 - `YORI_ENRICHMENT_TOKEN` protects `enrich=true` lookup requests.
-- `YORI_ENRICHMENT_OVERLAY_PATH` selects the writable staging SQLite database.
-- `YORI_ENGLISH_DB_PATH` selects the independent English release and
-  `YORI_ENGLISH_ENRICHMENT_OVERLAY_PATH` selects its staging overlay.
+- `YORI_DB_PATH` selects the canonical production SQLite database; Railway uses `/data/yori.sqlite`.
+- `YORI_ENGLISH_DICTIONARY_VERSION` selects the English source version used only when a new database is bootstrapped.
+- `YORI_ENGLISH_AUTHOR_MODEL` and `YORI_ENGLISH_REVIEW_MODEL` explicitly enable the
+  English configuration selected by the blind comparison; English enrichment remains off
+  when either is absent.
 - `YORI_JA_SOURCE_EVIDENCE_PATHS` is a comma-separated list of indexed source-evidence JSONL files.
-- `YORI_ENRICHMENT_CONCURRENCY` and `YORI_MODEL_TIMEOUT_MS` bound model work.
+- `YORI_ENRICHMENT_CONCURRENCY` globally bounds combined Japanese and English model work;
+  `YORI_MODEL_TIMEOUT_MS` bounds each attempt.
 
 All model calls request Flex first. On-demand transient failures fall back to standard once; bulk calls make at most three Flex attempts. The SDK retry mechanism is disabled so this policy has one owner.
 
-Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid Japanese OpenRouter regression command. `bun run english:eval -- --run` independently calibrates the English Gemini reviewer; false acceptance is release-blocking.
+Each resolve operation that reaches a model emits one `model_run_summary` event with attempt
+counts by outcome, input and output tokens, and provider-reported USD cost. It shares the
+lookup trace id and does not require a separate dashboard.
+
+Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid Japanese OpenRouter regression command. `bun run english:eval -- --run` requires at least two author and two reviewer model flags, compares author output blindly, and calibrates each reviewer; false acceptance is release-blocking.
 
 ## Out of scope
 

@@ -18,7 +18,7 @@ import { apiLanguages } from "./lang";
 
 type EntryRow = {
   id: string;
-  source: "jmdict";
+  source: "jmdict" | "generated";
   source_id: string;
   headword_language?: "ja";
   estimated_level?: PublicEntry["estimatedLevel"] | null;

@@ -10,14 +10,24 @@ import {
 } from "../src/on-demand-dictionary";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "../src/english-types";
 
+const englishModels = { author: "test/english-author", reviewer: "test/english-reviewer" };
+
 test("English resolve returns released data without calling a model", async () => {
   const entry = releasedEntry();
   const repository = new MemoryEnglishRepository({ released: [["bank", entry]] });
   const gateway = new ScriptedGateway([]);
-  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   expect(await dictionary.resolve({ query: "BANK", targetDictionary: "en" })).toEqual(entry);
   expect(gateway.calls).toEqual([]);
+});
+
+test("English enrichment requires an explicitly selected author and reviewer", () => {
+  expect(() => createEnglishOnDemandDictionary({
+    repository: new MemoryEnglishRepository(),
+    modelGateway: new ScriptedGateway([]),
+    models: { author: "", reviewer: "" }
+  })).toThrow("must be configured explicitly");
 });
 
 test("English resolve completes and stages missing examples on released senses", async () => {
@@ -28,7 +38,7 @@ test("English resolve completes and stages missing examples on released senses",
     JSON.stringify({ sentence: "She deposited her salary at the bank." }),
     reviewAccepted
   ]);
-  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   const completed = await dictionary.resolve({ query: "bank", targetDictionary: "en" });
   expect(completed?.senses[0].examples).toEqual([{
@@ -37,10 +47,25 @@ test("English resolve completes and stages missing examples on released senses",
   expect(repository.entry).toEqual(completed);
 });
 
+test("generated English examples require a complete lexical match", async () => {
+  const entry = releasedEntry();
+  entry.headword = "art";
+  entry.senses[0].examples = [];
+  const repository = new MemoryEnglishRepository({ released: [["art", entry]] });
+  const gateway = new ScriptedGateway([
+    JSON.stringify({ sentence: "The party starts at eight." })
+  ]);
+
+  const completed = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "art", targetDictionary: "en" });
+  expect(completed?.senses[0].examples).toEqual([]);
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author"]);
+});
+
 test("English resolve rejects obvious non-lexical candidates before model eligibility", async () => {
   const repository = new MemoryEnglishRepository();
   const gateway = new ScriptedGateway([]);
-  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   for (const query of ["https://example.com", "<b>word</b>", "123.45", "two\nlines", "東京"]) {
     expect(await dictionary.resolve({ query, targetDictionary: "en" })).toBeNull();
@@ -66,7 +91,7 @@ test("English resolve authors, reviews, stages, and completes source-grounded se
     JSON.stringify({ sentence: "She leads the design team." }),
     reviewAccepted
   ]);
-  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   const entry = await dictionary.resolve({ query: "lead", targetDictionary: "en" });
   expect(entry).toMatchObject({
@@ -83,10 +108,10 @@ test("English resolve authors, reviews, stages, and completes source-grounded se
     "entry-author", "entry-review", "example-author", "example-review"
   ]);
   expect(gateway.calls.map(({ model }) => model)).toEqual([
-    "openai/gpt-5.6-luna",
-    "google/gemini-3-flash-preview",
-    "openai/gpt-5.6-luna",
-    "google/gemini-3-flash-preview"
+    englishModels.author,
+    englishModels.reviewer,
+    englishModels.author,
+    englishModels.reviewer
   ]);
 });
 
@@ -102,9 +127,9 @@ test("English review fails closed and concurrent requests share one in-flight au
         dated: false, usage: ["transitive"], evidenceIds: ["wiktionary:en:lead:verb:1:1"], provenance: "source"
       }]
     }),
-    JSON.stringify({ candidateId: "wrong-id", issues: [] })
+    "accept"
   ]);
-  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   const [first, second] = await Promise.all([
     dictionary.resolve({ query: "lead", targetDictionary: "en" }),
@@ -115,6 +140,54 @@ test("English review fails closed and concurrent requests share one in-flight au
   expect(repository.entry).toBeNull();
   expect(gateway.calls).toHaveLength(2);
   expect(repository.attempts.at(-1)?.outcome).toBe("malformed");
+});
+
+test("English source-backed senses cannot gain invented labels", async () => {
+  const repository = new MemoryEnglishRepository({ sources: [["lead", [sourceRecord()]]] });
+  const gateway = new ScriptedGateway([
+    JSON.stringify({
+      headword: "lead",
+      pronunciations: [{ ipa: "/liːd/", region: "US", evidenceIds: ["wiktionary:en:lead:verb:1:pronunciation:1"] }],
+      senses: [{
+        partOfSpeech: "verb", definition: "to guide or conduct", registers: ["formal"], regions: [], domains: [],
+        dated: false, usage: ["transitive"], evidenceIds: ["wiktionary:en:lead:verb:1:1"], provenance: "source"
+      }]
+    })
+  ]);
+
+  const entry = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "lead", targetDictionary: "en" });
+  expect(entry).toBeNull();
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
+});
+
+test("model work emits one aggregate outcome and cost summary", async () => {
+  const entry = releasedEntry();
+  entry.senses[0].examples = [];
+  const summaries: Record<string, unknown>[] = [];
+  const repository = new MemoryEnglishRepository({ released: [["bank", entry]] });
+  const gateway = new ScriptedGateway([
+    JSON.stringify({ sentence: "She deposited her salary at the bank." }),
+    reviewAccepted
+  ]);
+
+  await createEnglishOnDemandDictionary({
+    repository,
+    modelGateway: gateway,
+    models: englishModels,
+    logger: (summary) => summaries.push(summary)
+  }).resolve({ query: "bank", targetDictionary: "en", traceId: "trace-summary" });
+
+  expect(summaries).toEqual([{
+    event: "model_run_summary",
+    traceId: "trace-summary",
+    dictionary: "en",
+    attempts: 2,
+    outcomes: { candidate: 1, accepted: 1 },
+    inputTokens: 20,
+    outputTokens: 20,
+    costUsd: 0.002
+  }]);
 });
 
 test("English transient retries match the shared on-demand and bulk policy", async () => {
@@ -130,7 +203,7 @@ test("English transient retries match the shared on-demand and bulk policy", asy
       };
     }
   };
-  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
 
   expect(await dictionary.resolve({ query: "florp", targetDictionary: "en" })).toBeNull();
   expect(gateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "standard"]);
@@ -155,21 +228,18 @@ test("English generated provenance records the successful fallback tier", async 
       return response(request, reviewAccepted(request));
     }
   };
-  const entry = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway })
+  const entry = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
     .resolve({ query: "florp", targetDictionary: "en" });
 
   expect(entry?.senses[0].generation).toMatchObject({
-    model: "openai/gpt-5.6-luna",
+    model: englishModels.author,
     provider: "openrouter",
     promptVersion: "english-entry-author-v1",
     serviceTier: "standard"
   });
 });
 
-const reviewAccepted = (request: ModelRequest) => JSON.stringify({
-  candidateId: request.prompt.match(/candidateId: ([^\n]+)/)?.[1],
-  issues: []
-});
+const reviewAccepted = (_request: ModelRequest) => "ACCEPT";
 
 function response(request: ModelRequest, text: string): ModelResponse {
   return {
@@ -192,7 +262,8 @@ class ScriptedGateway implements ModelGateway {
       provider: request.provider,
       effectiveServiceTier: request.requestedServiceTier,
       inputTokens: 10,
-      outputTokens: 10
+      outputTokens: 10,
+      costUsd: 0.001
     };
   }
 }
@@ -210,8 +281,9 @@ class MemoryEnglishRepository implements EnglishEnrichmentRepository {
     this.released = new Map(options.released ?? []);
     this.sources = new Map(options.sources ?? []);
   }
-  findReleased(query: string) { return this.released.get(query.toLowerCase()) ?? null; }
-  findOverlay(query: string) { return this.entry?.headword === query.toLowerCase() ? this.entry : null; }
+  find(query: string) {
+    return this.entry?.headword === query.toLowerCase() ? this.entry : this.released.get(query.toLowerCase()) ?? null;
+  }
   findSources(query: string) { return structuredClone(this.sources.get(query.toLowerCase()) ?? []); }
   saveEntry(entry: EnglishEntry) { this.entry = structuredClone(entry); }
   saveExample(senseId: string, example: EnglishExample) {

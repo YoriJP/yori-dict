@@ -2,7 +2,11 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { summarizeEnglishReviewerEvaluation, type EnglishReviewerJudgment } from "../src/english-evaluation";
 import { createOpenRouterModelGateway } from "../src/model-gateway";
-import type { ModelRequest } from "../src/on-demand-dictionary";
+import {
+  createEnglishOnDemandEvaluationContracts,
+  type ModelRequest
+} from "../src/on-demand-dictionary";
+import type { EnglishSourceRecord } from "../src/english-types";
 
 if (!Bun.argv.includes("--run")) {
   console.error("Paid English evaluation is disabled. Re-run with --run to call OpenRouter.");
@@ -14,43 +18,71 @@ if (!process.env.OPENROUTER_API_KEY) {
 }
 
 const corpus = await Bun.file(resolve(flag("--corpus") ?? "fixtures/english-evaluation-corpus.json")).json() as Corpus;
+const authorModels = flags("--author-model");
+const reviewerModels = flags("--reviewer-model");
+if (authorModels.length < 2 || reviewerModels.length < 2) {
+  console.error("Pass at least two --author-model and two --reviewer-model values for a blind comparison.");
+  process.exit(2);
+}
 const outputDirectory = resolve(flag("--out-dir") ?? "data/english-evaluation");
 await mkdir(outputDirectory, { recursive: true });
 const gateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY });
-const judgments: EnglishReviewerJudgment[] = [];
-for (const test of corpus.reviewer) {
-  const candidateId = `review:${test.id}`;
-  const seeded = seededReviewerFixture(test.defect);
-  const response = await gateway.call(request({
-    role: "entry-review",
-    model: "google/gemini-3-flash-preview",
-    promptVersion: "english-entry-review-v1",
-    prompt: [
-      "Reject only. Return JSON with candidateId and issues. Any material issue must be listed; never rewrite.",
-      "Check omissions, invented senses, pronunciations, merged senses, circular definitions, unsupported labels, and misleading examples.",
-      `candidateId: ${candidateId}`,
-      `source_evidence: ${JSON.stringify(seeded.sourceEvidence)}`,
-      `candidate: ${JSON.stringify(seeded.candidate)}`
-    ].join("\n"),
-    responseSchema: {
-      name: "reject_only_review",
-      schema: {
-        type: "object", additionalProperties: false,
-        properties: { candidateId: { type: "string" }, issues: { type: "array", items: { type: "string" } } },
-        required: ["candidateId", "issues"]
-      }
-    }
-  }));
-  judgments.push({ id: test.id, expected: test.expected, actual: accepted(response.text, candidateId) ? "accept" : "reject" });
-  await Bun.write(resolve(outputDirectory, "reviewer-results.json"), `${JSON.stringify({ judgments }, null, 2)}\n`);
+const reviewerResults: Array<{ model: string; judgments: EnglishReviewerJudgment[]; summary: ReturnType<typeof summarizeEnglishReviewerEvaluation> }> = [];
+for (const reviewerModel of reviewerModels) {
+  const contracts = createEnglishOnDemandEvaluationContracts({ author: authorModels[0], reviewer: reviewerModel });
+  const judgments: EnglishReviewerJudgment[] = [];
+  for (const test of corpus.reviewer) {
+    const candidateId = `review:${test.id}`;
+    const seeded = seededReviewerFixture(test.defect);
+    const response = await gateway.call(request({
+      ...contracts.entryReview,
+      prompt: contracts.entryReview.prompt(candidateId, {
+        sourceEvidence: seeded.sourceEvidence,
+        candidate: seeded.candidate
+      })
+    }));
+    judgments.push({ id: test.id, expected: test.expected, actual: accepted(response.text) ? "accept" : "reject" });
+  }
+  reviewerResults.push({ model: reviewerModel, judgments, summary: summarizeEnglishReviewerEvaluation(judgments) });
 }
 
-const reviewerSummary = summarizeEnglishReviewerEvaluation(judgments);
-await Bun.write(resolve(outputDirectory, "reviewer-results.json"), `${JSON.stringify({ judgments, summary: reviewerSummary }, null, 2)}\n`);
-console.log(JSON.stringify({
-  reviewerSummary
-}, null, 2));
-if (reviewerSummary.releaseBlocked) process.exitCode = 1;
+const generationResults: Array<{
+  caseId: string;
+  authorModel: string;
+  reviewerModel: string;
+  accepted: boolean;
+}> = [];
+for (const [caseIndex, test] of corpus.generation.entries()) {
+  for (const [authorIndex, authorModel] of authorModels.entries()) {
+    const authorContracts = createEnglishOnDemandEvaluationContracts({ author: authorModel, reviewer: reviewerModels[0] });
+    const authored = await gateway.call(request({
+      ...authorContracts.entryAuthor,
+      prompt: authorContracts.entryAuthor.prompt(`generation:${caseIndex}:${authorIndex}`, test.headword, test.sourceEvidence, test.context)
+    }));
+    for (const [reviewerIndex, reviewerModel] of reviewerModels.entries()) {
+      const reviewContracts = createEnglishOnDemandEvaluationContracts({ author: authorModel, reviewer: reviewerModel });
+      const candidateId = `blind:${caseIndex}:${authorIndex}:${reviewerIndex}`;
+      const reviewed = await gateway.call(request({
+        ...reviewContracts.entryReview,
+        prompt: reviewContracts.entryReview.prompt(candidateId, {
+          sourceEvidence: test.sourceEvidence,
+          candidate: parsedCandidate(authored.text)
+        })
+      }));
+      generationResults.push({
+        caseId: test.id,
+        authorModel,
+        reviewerModel,
+        accepted: accepted(reviewed.text)
+      });
+    }
+  }
+}
+
+const output = { reviewerResults, generationResults };
+await Bun.write(resolve(outputDirectory, "comparison-results.json"), `${JSON.stringify(output, null, 2)}\n`);
+console.log(JSON.stringify(output, null, 2));
+if (reviewerResults.some(({ summary }) => summary.releaseBlocked)) process.exitCode = 1;
 
 function request(input: Pick<ModelRequest, "role" | "model" | "promptVersion" | "prompt" | "responseSchema">): ModelRequest {
   return {
@@ -62,18 +94,25 @@ function request(input: Pick<ModelRequest, "role" | "model" | "promptVersion" | 
   };
 }
 
-function accepted(text: string, candidateId: string): boolean {
+function accepted(text: string): boolean {
+  return text.trim() === "ACCEPT";
+}
+
+function parsedCandidate(text: string): unknown {
   try {
-    const value = JSON.parse(text) as { candidateId?: unknown; issues?: unknown };
-    return value.candidateId === candidateId && Array.isArray(value.issues) && value.issues.length === 0;
+    return JSON.parse(text);
   } catch {
-    return false;
+    return text;
   }
 }
 
 function flag(name: string): string | null {
   const index = Bun.argv.indexOf(name);
   return index === -1 ? null : Bun.argv[index + 1] ?? null;
+}
+
+function flags(name: string): string[] {
+  return Bun.argv.flatMap((value, index) => value === name && Bun.argv[index + 1] ? [Bun.argv[index + 1]] : []);
 }
 
 function seededReviewerFixture(defect: ReviewerDefect) {
@@ -121,4 +160,5 @@ type ReviewerDefect = null | "omission" | "invented-sense" | "wrong-pronunciatio
   | "circular-definition" | "unsupported-label" | "misleading-example";
 type Corpus = {
   reviewer: Array<{ id: string; expected: "accept" | "reject"; defect: ReviewerDefect }>;
+  generation: Array<{ id: string; headword: string; context: string; sourceEvidence: EnglishSourceRecord[] }>;
 };

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   createOnDemandDictionary,
+  createModelCallLimiter,
   type EnrichmentRepository,
   type ModelGateway,
   ModelGatewayError,
@@ -18,13 +19,12 @@ test("resolve returns a released entry without calling a model", async () => {
 
   expect(await dictionary.resolve(request("学校"))).toEqual(released);
   expect(repository.lookups).toEqual([
-    ["released", "学校"],
-    ["overlay", "学校"]
+    ["dictionary", "学校"]
   ]);
   expect(gateway.calls).toEqual([]);
 });
 
-test("a supplied lemma checks released and overlay lookup before eligibility", async () => {
+test("a supplied lemma checks canonical lookup before eligibility", async () => {
   const released = existingEntry();
   released.word = "取り組む";
   released.reading = "とりくむ";
@@ -137,6 +137,8 @@ test("resolve authors a source-grounded entry before completing its examples", a
     "flex", "flex", "flex", "flex"
   ]);
   expect(gateway.calls[1].prompt).toContain("licensed-test-dictionary:source-42:1");
+  expect(gateway.calls[1].prompt).toContain("Return exactly ACCEPT or REJECT");
+  expect(gateway.calls[1].responseSchema).toBeUndefined();
   expect(gateway.calls[3].prompt).toContain(`\"sense\"`);
   expect(entry.word).toBe("未知語");
   expect(entry.source).toBe("generated");
@@ -415,11 +417,8 @@ test("unsafe or oversized occurrence context is rejected before model work", asy
 
 test("semantic and malformed review failures are terminal", async () => {
   for (const review of [
-    (modelRequest: ModelRequest) => {
-      const id = candidateId(modelRequest);
-      return JSON.stringify({ candidateId: id, issues: ["invented meaning"] });
-    },
-    "{}"
+    "REJECT",
+    "reject"
   ]) {
     const repository = new MemoryRepository();
     const gateway = new ScriptedGateway([
@@ -459,6 +458,64 @@ test("deterministic validation rejects source-backed senses that change source g
   expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("未知語"))).toBeNull();
   expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
   expect(repository.entries.size).toBe(0);
+});
+
+test("deterministic validation rejects invented labels on source-backed senses", async () => {
+  const source: SourceEvidence = {
+    source: "licensed-test-dictionary",
+    sourceEntryId: "source-42",
+    headword: "未知語",
+    reading: "みちご",
+    senses: [{
+      evidenceId: "licensed-test-dictionary:source-42:1",
+      partOfSpeech: ["n"],
+      labels: ["comp"],
+      glosses: [{ lang: "en", text: "unknown technical term" }]
+    }]
+  };
+  const repository = new MemoryRepository({ sources: [["未知語", [source]]] });
+  const gateway = new ScriptedGateway([authoredEntry({
+    headword: "未知語",
+    reading: "みちご",
+    evidenceId: "licensed-test-dictionary:source-42:1",
+    partOfSpeech: ["n"],
+    registers: ["comp", "arch"]
+  })]);
+
+  expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("未知語"))).toBeNull();
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
+  expect(repository.entries.size).toBe(0);
+});
+
+test("generated Japanese examples require the standalone headword or an inflected form", async () => {
+  const released = existingEntry();
+  released.word = "生";
+  released.reading = "せい";
+  released.headwords = [{ text: "生", reading: "せい", kind: "kanji", common: false, tags: [] }];
+  released.senses[0].examples = undefined;
+  const repository = new MemoryRepository({ released: [["生", released]] });
+  const gateway = new ScriptedGateway([
+    JSON.stringify({
+      sentence: "先生が教室に入った。",
+      translations: { en: "The teacher entered the classroom.", "zh-tw": "老師走進教室。" }
+    })
+  ]);
+
+  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("生"));
+  expect(entry?.senses[0].examples).toBeUndefined();
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author"]);
+});
+
+test("reviewer explanations fail closed as malformed", async () => {
+  const repository = new MemoryRepository();
+  const gateway = new ScriptedGateway([
+    "AI",
+    authoredEntry({ headword: "AI", reading: "エーアイ", partOfSpeech: ["n"], provenance: "generated" }),
+    "REJECT because the meaning is invented"
+  ]);
+
+  expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("AI"))).toBeNull();
+  expect(repository.attempts.at(-1)).toMatchObject({ outcome: "malformed" });
 });
 
 test("deterministic schema validation rejects omitted fields and extra properties", async () => {
@@ -616,6 +673,47 @@ test("model calls are globally bounded and timeouts use the transient fallback p
   expect(timeoutGateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "standard"]);
 });
 
+test("one shared limiter bounds model calls across independent resolvers", async () => {
+  const first = existingEntry();
+  first.senses[0].examples = undefined;
+  const second = existingEntry();
+  second.word = "教室";
+  second.id = "yori:e_jmdict_room";
+  second.headwords = [{ text: "教室", reading: "きょうしつ", kind: "kanji", common: true, tags: [] }];
+  second.senses = [{ ...second.senses[0], id: "yori:s_jmdict_room_1", examples: undefined }];
+  let active = 0;
+  let maximum = 0;
+  const gateway: ModelGateway = {
+    async call(modelRequest) {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return {
+        text: modelRequest.role === "example-author"
+          ? exampleFor(modelRequest.prompt.includes("教室") ? "教室" : "学校")
+          : reviewForPrompt(modelRequest),
+        requestId: crypto.randomUUID(),
+        model: modelRequest.model,
+        provider: "scripted",
+        effectiveServiceTier: modelRequest.requestedServiceTier,
+        inputTokens: 1,
+        outputTokens: 1
+      };
+    }
+  };
+  const limiter = createModelCallLimiter(1);
+  const school = createOnDemandDictionary({
+    repository: new MemoryRepository({ released: [["学校", first]] }), modelGateway: gateway, limiter
+  });
+  const classroom = createOnDemandDictionary({
+    repository: new MemoryRepository({ released: [["教室", second]] }), modelGateway: gateway, limiter
+  });
+
+  await Promise.all([school.resolve(request("学校")), classroom.resolve(request("教室"))]);
+  expect(maximum).toBe(1);
+});
+
 test("invalid concurrency and timeout configuration fails during startup", () => {
   for (const options of [{ concurrency: 0 }, { timeoutMs: Number.NaN }]) {
     expect(() => createOnDemandDictionary({
@@ -686,14 +784,8 @@ class ScriptedGateway implements ModelGateway {
   }
 }
 
-function reviewForPrompt(request: ModelRequest): string {
-  return JSON.stringify({ candidateId: candidateId(request), issues: [] });
-}
-
-function candidateId(request: ModelRequest): string {
-  const match = request.prompt.match(/candidateId:\s*([^\s]+)/);
-  if (!match) throw new Error("Prompt did not contain a candidate id");
-  return match[1];
+function reviewForPrompt(_request: ModelRequest): string {
+  return "ACCEPT";
 }
 
 function authoredEntry(options: {
@@ -702,6 +794,7 @@ function authoredEntry(options: {
   partOfSpeech: string[];
   evidenceId?: string;
   provenance?: "source" | "generated";
+  registers?: string[];
 }): string {
   return JSON.stringify({
     headword: options.headword,
@@ -709,7 +802,7 @@ function authoredEntry(options: {
     senses: [
       {
         partOfSpeech: options.partOfSpeech,
-        registers: [],
+        registers: options.registers ?? [],
         domains: [],
         dialect: [],
         pronunciations: [],
@@ -746,14 +839,16 @@ class MemoryRepository implements EnrichmentRepository {
     this.sources = new Map(options.sources ?? []);
   }
 
-  findReleased(query: string) {
-    this.lookups.push(["released", query]);
-    return this.released.get(query) ?? null;
-  }
-
-  findOverlay(query: string) {
-    this.lookups.push(["overlay", query]);
-    return this.entries.get(query) ?? null;
+  find(query: string) {
+    this.lookups.push(["dictionary", query]);
+    const entry = this.entries.get(query) ?? this.released.get(query) ?? null;
+    if (!entry) return null;
+    return {
+      ...entry,
+      senses: entry.senses.map((sense) => this.examples.has(sense.id)
+        ? { ...sense, examples: this.examples.get(sense.id) }
+        : sense)
+    };
   }
 
   findSources(query: string) {

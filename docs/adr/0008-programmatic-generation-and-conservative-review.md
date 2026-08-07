@@ -2,9 +2,9 @@
 
 Claude CLI orchestration is difficult to scale, observe, and use on demand. Yori Dict uses the official `@openrouter/sdk` behind its small `ModelGateway` port, with pinned model snapshots, reasoning effort, serving provider, and prompt version. The broader AI SDK abstraction is not used because this module needs one gateway and two fixed models, not a provider framework.
 
-The selected pairing for both Japanese and English enrichment is GPT-5.6 Luna at minimal effort for eligibility and source-grounded generation, followed by Gemini 3 Flash Preview at minimal effort for review. The reviewer is a different model family and never rewrites a candidate. Each dictionary keeps independent prompts, evidence, validation, and reviewer calibration.
+Japanese enrichment uses GPT-5.6 Luna at minimal effort for eligibility and source-grounded generation, followed by Gemini 3 Flash Preview at minimal effort for review. English author and reviewer models remain explicit runtime configuration until a blind hard-English comparison selects them. In either dictionary, the reviewer is a different model family and never rewrites a candidate. Each dictionary keeps independent prompts, evidence, validation, and reviewer calibration.
 
-Review is deliberately asymmetric: a false rejection leaves a recoverable coverage gap, while a false acceptance pollutes public dictionary data. Any material issue in the review output rejects the candidate even if an overall boolean says it is publishable. Missing, malformed, or incomplete verdicts fail closed.
+Review is deliberately asymmetric: a false rejection leaves a recoverable coverage gap, while a false acceptance pollutes public dictionary data. The reviewer returns exactly `ACCEPT` or `REJECT`; any other output fails closed. Prompts, candidates, raw responses, and classified outcomes remain available for private diagnosis, so production does not pay for unused explanations or issue codes.
 
 Semantic rejection, deterministic validation failure, and malformed model content are terminal for that candidate. They are not regenerated. Only transient provider, transport, timeout, rate-limit, and service-tier failures may retry.
 
@@ -18,6 +18,6 @@ If a sense lacks a sourced or accepted example, Luna produces a Japanese example
 
 ## Observability
 
-Every attempt records its candidate id, role, prompt version, model snapshot, reasoning effort, provider, requested and effective service tier, provider request id, duration, token use, and classified outcome. Bounded prompts, responses, and errors remain in the staging overlay for debugging; public exports remove those payloads and expose concise per-entry provenance.
+Every attempt records its candidate id, role, prompt version, model snapshot, reasoning effort, provider, requested and effective service tier, provider request id, duration, token use, and classified outcome. Bounded prompts, responses, and errors remain in the production database for debugging; public exports remove those payloads and expose concise per-entry provenance.
 
 No manual review queue is introduced. Regression corpora contain difficult vocabulary, Taiwan terminology, political framing, and deliberately mutated errors. Model or prompt changes must pass those evals before becoming the pinned configuration.

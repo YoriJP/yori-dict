@@ -1,18 +1,19 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { createOverlayLookupDb, openEnrichmentRepository } from "../src/enrichment-repository";
+import { openEnrichmentRepository } from "../src/enrichment-repository";
+import { importLegacyOverlays } from "../src/legacy-overlay-import";
+import { openLookupDb } from "../src/db";
+import { importJapaneseRelease, migrateProductionDatabase } from "../src/production-database";
 import type { AttemptRecord } from "../src/on-demand-dictionary";
-import type { LookupDb } from "../src/db";
 import type { PublicExample, PublicLookupItem } from "../src/types";
 
-test("the enrichment repository persists entries, examples, and attempt records", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "yori-enrichment-")), "overlay.sqlite");
-  const released = releasedEntry();
-  const db = lookupDb(released);
-  const first = openEnrichmentRepository(path, db);
+test("accepted Japanese enrichment becomes canonical production data", async () => {
+  const path = await productionDatabase();
+  const firstLookup = openLookupDb(path);
+  const first = openEnrichmentRepository(path, firstLookup);
   const generated = generatedEntry();
   const example: PublicExample = {
     text: "この未知語の意味を調べた。",
@@ -38,82 +39,94 @@ test("the enrichment repository persists entries, examples, and attempt records"
 
   first.saveEntry(generated);
   first.saveExample(generated.senses[0].id, example);
-  first.saveExample(released.senses[0].id, example);
+  const releasedSenseId = first.find("学校", "ja")!.senses[0].id;
+  first.saveExample(releasedSenseId, example);
   first.recordAttempt(attempt);
   first.close();
+  firstLookup.close();
 
-  const reopened = openEnrichmentRepository(path, db);
-  expect(reopened.findOverlay("未知語", "ja")?.senses[0].examples).toEqual([example]);
-  expect(reopened.findOverlay("学校", "ja")?.senses[0].examples).toEqual([example]);
+  const reopenedLookup = openLookupDb(path);
+  const reopened = openEnrichmentRepository(path, reopenedLookup);
+  expect(reopened.find("未知語", "ja")?.senses[0].examples).toEqual([example]);
+  expect(reopened.find("学校", "ja")?.senses[0].examples).toEqual([example]);
   expect(reopened.acceptedEntries()).toEqual([
     { ...generated, senses: [{ ...generated.senses[0], examples: [example] }] }
   ]);
   expect(reopened.attemptRecords()).toEqual([attempt]);
-  const publicLookup = createOverlayLookupDb(db, reopened);
-  expect(publicLookup.lookup("未知語", "en").item?.senses[0].glosses).toEqual([
-    { text: "unknown term", source: "generated", reviewStatus: "checked" }
-  ]);
   reopened.close();
+  reopenedLookup.close();
 });
 
-test("opening the new repository preserves accepted examples from the legacy overlay", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "yori-legacy-overlay-")), "overlay.sqlite");
+test("production migrations are idempotent", async () => {
+  const path = await productionDatabase();
+  migrateProductionDatabase(path);
+  migrateProductionDatabase(path);
+  const lookup = openLookupDb(path);
+  expect(lookup.lookup("学校", "en").item?.word).toBe("学校");
+  lookup.close();
+});
+
+test("a Japanese source refresh preserves accepted generated content", async () => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
   const example: PublicExample = {
     text: "学校へ行きます。",
     translations: [{ lang: "en", text: "I go to school." }],
     source: "generated",
     reviewStatus: "checked"
   };
-  const legacy = new Database(path, { create: true });
-  legacy.exec(`create table example_enrichments (
-    sense_id text primary key,
-    status text not null,
-    example_json text,
-    attempts_json text not null,
-    reason text,
-    updated_at text not null
-  )`);
-  legacy.prepare("insert into example_enrichments values (?, 'accepted', ?, '[]', null, ?)")
-    .run(releasedEntry().senses[0].id, JSON.stringify(example), "2026-01-01T00:00:00.000Z");
-  legacy.close();
-
-  const repository = openEnrichmentRepository(path, lookupDb(releasedEntry()));
-  expect(repository.findOverlay("学校", "ja")?.senses[0].examples).toEqual([example]);
+  repository.saveEntry(generatedEntry());
+  repository.saveExample(repository.find("学校", "ja")!.senses[0].id, example);
   repository.close();
+  lookup.close();
+
+  const next = join(mkdtempSync(join(tmpdir(), "yori-next-release-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${next}`.quiet();
+  const candidate = new Database(next);
+  candidate.prepare("update metadata set value = 'next' where key = 'dictDate'").run();
+  candidate.close();
+  expect(importJapaneseRelease(path, next)).toBe(true);
+
+  const refreshedLookup = openLookupDb(path);
+  expect(refreshedLookup.lookup("未知語", "en").item?.word).toBe("未知語");
+  expect(refreshedLookup.lookup("学校", "en").item?.senses[0].examples).toEqual([example]);
+  refreshedLookup.close();
 });
 
-function lookupDb(item: PublicLookupItem): LookupDb {
-  return {
-    lookup(query) {
-      return { item: query === item.word ? item : null };
-    },
-    meta() {
-      return { apiVersion: "v1", dictionaryVersion: null, languages: [], tags: {}, sources: [] };
-    },
-    close() {}
+test("legacy overlays are absorbed once into canonical production data", async () => {
+  const path = await productionDatabase();
+  const legacyPath = join(mkdtempSync(join(tmpdir(), "yori-legacy-overlay-")), "example-overlay.sqlite");
+  const legacy = new Database(legacyPath);
+  legacy.exec(`create table example_enrichments (
+    sense_id text primary key, status text not null, example_json text,
+    attempts_json text not null, reason text, updated_at text not null
+  )`);
+  const lookup = openLookupDb(path);
+  const senseId = lookup.lookup("学校", "en").item!.senses[0].id;
+  lookup.close();
+  const example: PublicExample = {
+    text: "学校へ行きます。",
+    translations: [{ lang: "en", text: "I go to school." }],
+    source: "generated",
+    reviewStatus: "checked"
   };
-}
+  legacy.prepare("insert into example_enrichments values (?, 'accepted', ?, '[]', null, ?)")
+    .run(senseId, JSON.stringify(example), "2026-08-01T00:00:00.000Z");
+  legacy.close();
 
-function releasedEntry(): PublicLookupItem {
-  return {
-    id: "yori:e_jmdict_1206730",
-    word: "学校",
-    reading: "がっこう",
-    common: true,
-    source: "jmdict",
-    sourceId: "1206730",
-    headwordLanguage: "ja",
-    headwords: [{ text: "学校", reading: "がっこう", kind: "kanji", common: true, tags: [] }],
-    senses: [
-      {
-        id: "yori:s_jmdict_1206730_1",
-        position: 1,
-        appliesTo: { kanji: ["*"], kana: ["*"] },
-        partOfSpeech: ["n"],
-        glosses: [{ text: "school", source: "jmdict", reviewStatus: "source" }]
-      }
-    ]
-  };
+  expect(importLegacyOverlays(path, legacyPath, join(dirname(legacyPath), "missing.sqlite")).japanese).toBe(true);
+  expect(importLegacyOverlays(path, legacyPath, join(dirname(legacyPath), "missing.sqlite")).japanese).toBe(false);
+  const reopened = openLookupDb(path);
+  expect(reopened.lookup("学校", "en").item?.senses[0].examples).toEqual([example]);
+  reopened.close();
+});
+
+async function productionDatabase(): Promise<string> {
+  const path = join(mkdtempSync(join(tmpdir(), "yori-production-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  migrateProductionDatabase(path);
+  return path;
 }
 
 function generatedEntry(): PublicLookupItem {

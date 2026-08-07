@@ -12,10 +12,13 @@ type DataReleasePin = {
   sha256: string;
 };
 
+type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
 type DownloadOptions = {
   pinPath?: string;
   outPath?: string;
   releaseBaseUrl?: string;
+  fetch?: Fetcher;
 };
 
 export async function downloadPinnedDataRelease(options: DownloadOptions = {}): Promise<void> {
@@ -33,7 +36,7 @@ export async function downloadPinnedDataRelease(options: DownloadOptions = {}): 
 
   try {
     console.log(`Downloading ${artifactUrl}`);
-    const response = await fetch(artifactUrl);
+    const response = await (options.fetch ?? fetch)(artifactUrl);
     if (!response.ok) {
       throw new Error(`Download failed with HTTP ${response.status}: ${artifactUrl}`);
     }

@@ -31,7 +31,9 @@ test("English reviewer evaluation permits release only with zero false acceptanc
 test("the English paid reviewer calibration is explicit and covers every seeded defect class", async () => {
   const corpus = await Bun.file("fixtures/english-evaluation-corpus.json").json() as {
     reviewer: Array<{ id: string }>;
+    generation: Array<{ id: string }>;
   };
+  expect(corpus.generation.map(({ id }) => id)).toEqual(["bank-polysemy", "sanction-contrast"]);
   expect(corpus.reviewer.map(({ id }) => id)).toEqual(expect.arrayContaining([
     "omission", "invented-sense", "wrong-pronunciation", "merged-senses",
     "circular-definition", "unsupported-label", "misleading-example"

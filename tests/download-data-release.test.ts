@@ -9,24 +9,19 @@ const sqliteBytes = Buffer.from("published sqlite bytes");
 const gzipBytes = gzipSync(sqliteBytes);
 const sha256 = createHash("sha256").update(gzipBytes).digest("hex");
 let tempDir: string;
-let server: ReturnType<typeof Bun.serve>;
 
 beforeAll(async () => {
   tempDir = await mkdtemp("/tmp/yori-dict-release-test-");
-  server = Bun.serve({
-    port: 0,
-    fetch(request) {
-      return /\/yori-dict-2026-07-01(?:\.1)?\.sqlite\.gz$/.test(new URL(request.url).pathname)
-        ? new Response(gzipBytes)
-        : new Response("not found", { status: 404 });
-    }
-  });
 });
 
 afterAll(async () => {
-  server.stop(true);
   await rm(tempDir, { recursive: true, force: true });
 });
+
+const fetchRelease = async (input: string | URL | Request): Promise<Response> =>
+  /\/yori-dict-2026-07-01(?:\.1)?\.sqlite\.gz$/.test(new URL(input.toString()).pathname)
+    ? new Response(gzipBytes)
+    : new Response("not found", { status: 404 });
 
 test("downloads, verifies, and expands the pinned public release artifact", async () => {
   const pinPath = join(tempDir, "valid-pin.json");
@@ -36,7 +31,8 @@ test("downloads, verifies, and expands the pinned public release artifact", asyn
   await downloadPinnedDataRelease({
     pinPath,
     outPath,
-    releaseBaseUrl: server.url.toString().replace(/\/$/, "")
+    releaseBaseUrl: "https://release.test",
+    fetch: fetchRelease
   });
 
   expect(await readFile(outPath)).toEqual(sqliteBytes);
@@ -53,7 +49,8 @@ test("rejects a checksum mismatch without replacing the current database", async
     downloadPinnedDataRelease({
       pinPath,
       outPath,
-      releaseBaseUrl: server.url.toString().replace(/\/$/, "")
+      releaseBaseUrl: "https://release.test",
+      fetch: fetchRelease
     })
   ).rejects.toThrow("Checksum mismatch");
 

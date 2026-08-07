@@ -4,22 +4,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openEnglishEnrichmentRepository } from "../src/english-enrichment-repository";
 import { buildEnglishRelease } from "../src/english-release";
+import { importEnglishRelease, migrateProductionDatabase } from "../src/production-database";
 import type { AttemptRecord } from "../src/on-demand-dictionary";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "../src/english-types";
 
-test("English staging persists accepted entries, examples, attempts, and source discovery", async () => {
-  const root = mkdtempSync(join(tmpdir(), "yori-en-overlay-"));
+test("English source and accepted enrichment share the canonical production database", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-en-production-"));
+  const path = join(root, "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  migrateProductionDatabase(path);
   const source = sourceRecord();
   const release = await buildEnglishRelease([source], {
     outputDirectory: join(root, "release"), version: "test", createdAt: "2026-08-06T00:00:00.000Z"
   });
-  const overlayPath = join(root, "overlay.sqlite");
-  const first = openEnglishEnrichmentRepository(overlayPath, release.sqlite);
+  expect(importEnglishRelease(path, release.sqlite)).toBe(true);
+  expect(importEnglishRelease(path, release.sqlite)).toBe(false);
+
+  const first = openEnglishEnrichmentRepository(path);
   const entry = generatedEntry();
   const example: EnglishExample = { text: "She leads the team.", source: "generated", reviewStatus: "checked" };
   const attempt = attemptRecord();
 
-  expect(first.findReleased("bank")?.headword).toBe("bank");
+  expect(first.find("bank")?.headword).toBe("bank");
   expect(first.findSources("bank")).toEqual([source]);
   first.saveEntry(entry);
   first.saveExample(entry.senses[0].id, example);
@@ -27,8 +33,14 @@ test("English staging persists accepted entries, examples, attempts, and source 
   first.saveTerminalOutcome("request:en:nope", "skipped");
   first.close();
 
-  const reopened = openEnglishEnrichmentRepository(overlayPath, release.sqlite);
-  expect(reopened.findOverlay("lead")?.senses[0].examples).toEqual([example]);
+  const nextRelease = await buildEnglishRelease([source], {
+    outputDirectory: join(root, "next-release"), version: "test-2", createdAt: "2026-08-07T00:00:00.000Z"
+  });
+  expect(importEnglishRelease(path, nextRelease.sqlite)).toBe(true);
+
+  const reopened = openEnglishEnrichmentRepository(path);
+  expect(reopened.find("bank")?.headword).toBe("bank");
+  expect(reopened.find("lead")?.senses[0].examples).toEqual([example]);
   expect(reopened.acceptedEntries()).toEqual([{ ...entry, senses: [{ ...entry.senses[0], examples: [example] }] }]);
   expect(reopened.attemptRecords()).toEqual([attempt]);
   expect(reopened.terminalOutcome("request:en:nope")).toBe("skipped");

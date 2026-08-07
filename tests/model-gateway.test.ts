@@ -17,7 +17,7 @@ test("the OpenRouter adapter sends Flex requests with strict routing and no SDK 
             systemFingerprint: null,
             serviceTier: "flex",
             choices: [{ index: 0, finishReason: "stop", message: { role: "assistant", content: "SKIP" } }],
-            usage: { promptTokens: 12, completionTokens: 2, totalTokens: 14 },
+            usage: { promptTokens: 12, completionTokens: 2, totalTokens: 14, cost: 0.00042 },
             openrouterMetadata: {
               attempt: 0,
               attempts: [{ model: "openai/gpt-5.6-luna", provider: "OpenAI", status: 200 }]
@@ -48,7 +48,8 @@ test("the OpenRouter adapter sends Flex requests with strict routing and no SDK 
     provider: "OpenAI",
     effectiveServiceTier: "flex",
     inputTokens: 12,
-    outputTokens: 2
+    outputTokens: 2,
+    costUsd: 0.00042
   });
 });
 

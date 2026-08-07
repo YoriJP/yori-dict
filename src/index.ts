@@ -1,54 +1,55 @@
 import { createApp } from "./app";
-import { existsSync } from "node:fs";
 import { openLookupDb } from "./db";
-import { createOverlayLookupDb, openEnrichmentRepository } from "./enrichment-repository";
+import { openEnrichmentRepository } from "./enrichment-repository";
 import { openEnglishEnrichmentRepository } from "./english-enrichment-repository";
 import { createOpenRouterModelGateway } from "./model-gateway";
-import { createEnglishOnDemandDictionary, createOnDemandDictionary } from "./on-demand-dictionary";
+import {
+  createEnglishOnDemandDictionary,
+  createModelCallLimiter,
+  createOnDemandDictionary
+} from "./on-demand-dictionary";
 import { openSourceEvidenceIndex } from "./source-index";
 
 const dbPath = process.env.YORI_DB_PATH ?? "data/yori.sqlite";
+const logger = (event: Record<string, unknown>) => console.info(JSON.stringify(event));
+const modelGateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY });
+const modelLimiter = createModelCallLimiter(Number(process.env.YORI_ENRICHMENT_CONCURRENCY ?? "4"));
+const modelTimeoutMs = Number(process.env.YORI_MODEL_TIMEOUT_MS ?? "15000");
 const releasedDb = openLookupDb(dbPath);
 const sourceIndex = await openSourceEvidenceIndex(
   (process.env.YORI_JA_SOURCE_EVIDENCE_PATHS ?? "").split(",").map((path) => path.trim()).filter(Boolean)
 );
 const repository = openEnrichmentRepository(
-  process.env.YORI_ENRICHMENT_OVERLAY_PATH ?? process.env.YORI_EXAMPLE_OVERLAY_PATH ?? "data/example-overlay.sqlite",
+  dbPath,
   releasedDb,
   sourceIndex.lookup
 );
 const onDemand = createOnDemandDictionary({
   repository,
-  modelGateway: createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY }),
-  concurrency: Number(process.env.YORI_ENRICHMENT_CONCURRENCY ?? "4"),
-  timeoutMs: Number(process.env.YORI_MODEL_TIMEOUT_MS ?? "15000")
+  modelGateway,
+  limiter: modelLimiter,
+  timeoutMs: modelTimeoutMs,
+  logger
 });
-const defaultEnglishReleasePath = "releases/english/yori-english-2026.08.1.sqlite";
-const configuredEnglishReleasePath = process.env.YORI_ENGLISH_DB_PATH ?? defaultEnglishReleasePath;
-const englishReleasePath = existsSync(configuredEnglishReleasePath)
-  ? configuredEnglishReleasePath
+const englishRepository = openEnglishEnrichmentRepository(dbPath);
+const englishModels = process.env.YORI_ENGLISH_AUTHOR_MODEL && process.env.YORI_ENGLISH_REVIEW_MODEL
+  ? { author: process.env.YORI_ENGLISH_AUTHOR_MODEL, reviewer: process.env.YORI_ENGLISH_REVIEW_MODEL }
   : undefined;
-const englishRepository = englishReleasePath
-  ? openEnglishEnrichmentRepository(
-      process.env.YORI_ENGLISH_ENRICHMENT_OVERLAY_PATH ?? "data/english-overlay.sqlite",
-      englishReleasePath
-    )
-  : undefined;
-const englishOnDemand = englishRepository
+const englishOnDemand = englishModels
   ? createEnglishOnDemandDictionary({
       repository: englishRepository,
-      modelGateway: createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY }),
-      concurrency: Number(process.env.YORI_ENRICHMENT_CONCURRENCY ?? "4"),
-      timeoutMs: Number(process.env.YORI_MODEL_TIMEOUT_MS ?? "15000")
+      modelGateway,
+      models: englishModels,
+      limiter: modelLimiter,
+      timeoutMs: modelTimeoutMs,
+      logger
     })
   : undefined;
-const app = createApp(createOverlayLookupDb(releasedDb, repository), {
+const app = createApp(releasedDb, {
   onDemand,
-  englishLookup: englishRepository
-    ? (query) => englishRepository.findOverlay(query) ?? englishRepository.findReleased(query)
-    : undefined,
+  englishLookup: (query) => englishRepository.find(query),
   englishOnDemand,
-  logger: (event) => console.info(JSON.stringify(event)),
+  logger,
   enrichmentToken: process.env.YORI_ENRICHMENT_TOKEN
 });
 

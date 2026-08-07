@@ -9,6 +9,7 @@ import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./englis
 export type TargetDictionary = "ja" | "en";
 
 const traceContext = new AsyncLocalStorage<string | undefined>();
+const modelRunContext = new AsyncLocalStorage<ModelRunMetrics>();
 
 export type ResolveRequest = {
   query: string;
@@ -59,6 +60,7 @@ export type ModelResponse = {
   effectiveServiceTier: ServiceTier;
   inputTokens: number;
   outputTokens: number;
+  costUsd?: number;
 };
 
 export type ModelGateway = {
@@ -93,6 +95,7 @@ export type AttemptRecord = {
   durationMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
   prompt?: string;
   response?: string;
   error?: string;
@@ -100,8 +103,7 @@ export type AttemptRecord = {
 };
 
 export type EnrichmentRepository = {
-  findReleased(query: string, targetDictionary: TargetDictionary): PublicLookupItem | null;
-  findOverlay(query: string, targetDictionary: TargetDictionary): PublicLookupItem | null;
+  find(query: string, targetDictionary: TargetDictionary): PublicLookupItem | null;
   findSources(query: string, targetDictionary: TargetDictionary): SourceEvidence[];
   saveEntry(entry: PublicLookupItem): void;
   saveExample(senseId: string, example: PublicExample): void;
@@ -120,8 +122,7 @@ export type DictionaryResolver<TEntry> = {
 };
 
 export type EnglishEnrichmentRepository = {
-  findReleased(query: string): EnglishEntry | null;
-  findOverlay(query: string): EnglishEntry | null;
+  find(query: string): EnglishEntry | null;
   findSources(query: string): EnglishSourceRecord[];
   saveEntry(entry: EnglishEntry): void;
   saveExample(senseId: string, example: EnglishExample): void;
@@ -132,15 +133,37 @@ export type EnglishEnrichmentRepository = {
 
 export type EnglishOnDemandDictionary = DictionaryResolver<EnglishEntry>;
 
+export type ModelCallLimiter = <T>(work: () => Promise<T>) => Promise<T>;
+
+export type ModelRunSummary = {
+  event: "model_run_summary";
+  traceId: string;
+  dictionary: TargetDictionary;
+  attempts: number;
+  outcomes: Record<string, number>;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+};
+
+export type EnglishModelSelection = {
+  author: string;
+  reviewer: string;
+};
+
+type ModelRunMetrics = Omit<ModelRunSummary, "event" | "traceId" | "dictionary">;
+
 export function createOnDemandDictionary(options: {
   repository: EnrichmentRepository;
   modelGateway: ModelGateway;
   concurrency?: number;
   timeoutMs?: number;
+  limiter?: ModelCallLimiter;
+  logger?: (summary: ModelRunSummary) => void;
 }): OnDemandDictionary {
   const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
   const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
-  const runLimited = createLimiter(concurrency);
+  const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const entryInFlight = new Map<string, Promise<PublicLookupItem | null>>();
   const canonicalLocks = new Map<string, Promise<void>>();
   const exampleLocks = new Map<string, Promise<void>>();
@@ -157,10 +180,9 @@ export function createOnDemandDictionary(options: {
 
   return {
     async resolve(request) {
-      return traceContext.run(request.traceId, async () => {
-      const released = options.repository.findReleased(request.query, request.targetDictionary);
-      const overlay = options.repository.findOverlay(request.query, request.targetDictionary);
-      const existing = mergeEntries(released, overlay);
+      const traceId = request.traceId ?? crypto.randomUUID();
+      return traceContext.run(traceId, () => runWithModelSummary("ja", traceId, options.logger, async () => {
+      const existing = options.repository.find(request.query, request.targetDictionary);
       if (existing && existing.senses.every((sense) => (sense.examples?.length ?? 0) > 0)) return existing;
 
       const key = `${effectiveMode(request.mode)}:${requestOutcomeKey(request)}`;
@@ -170,7 +192,7 @@ export function createOnDemandDictionary(options: {
         .finally(() => entryInFlight.delete(key));
       entryInFlight.set(key, task);
       return task;
-      });
+      }));
     }
   };
 }
@@ -216,18 +238,6 @@ const entrySchema = {
     required: ["headword", "reading", "senses"]
   }
 };
-const reviewSchema = {
-  name: "reject_only_review",
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      candidateId: { type: "string" },
-      issues: stringArraySchema
-    },
-    required: ["candidateId", "issues"]
-  }
-};
 const exampleSchema = {
   name: "dictionary_example",
   schema: {
@@ -249,9 +259,9 @@ const exampleSchema = {
 const lunaModel = "openai/gpt-5.6-luna";
 const geminiReviewModel = "google/gemini-3-flash-preview";
 const entryAuthorConfig = modelConfig("entry-author", lunaModel, "entry-author-v1", entrySchema);
-const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v1", reviewSchema);
+const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v2");
 const exampleAuthorConfig = modelConfig("example-author", lunaModel, "example-author-v1", exampleSchema);
-const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v1", reviewSchema);
+const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v2");
 
 type ModelConfig = Omit<ModelRequest, "prompt" | "signal">;
 
@@ -282,10 +292,7 @@ async function resolveMissing(
 
   let headword = request.context?.lemma?.trim() || request.query.trim();
   if (headword !== request.query.trim()) {
-    const existing = mergeEntries(
-      options.repository.findReleased(headword, request.targetDictionary),
-      options.repository.findOverlay(headword, request.targetDictionary)
-    );
+    const existing = options.repository.find(headword, request.targetDictionary);
     if (existing) return completeEntryExamples(options, existing, request.mode);
   }
   let evidence = options.repository.findSources(headword, request.targetDictionary);
@@ -309,10 +316,7 @@ async function resolveMissing(
     }
     if (sourceHeadword !== headword) {
       headword = sourceHeadword;
-      const existing = mergeEntries(
-        options.repository.findReleased(headword, request.targetDictionary),
-        options.repository.findOverlay(headword, request.targetDictionary)
-      );
+      const existing = options.repository.find(headword, request.targetDictionary);
       if (existing) return completeEntryExamples(options, existing, request.mode);
       evidence = options.repository.findSources(headword, request.targetDictionary);
     }
@@ -332,9 +336,7 @@ async function resolveMissing(
     const canonicalHeadword = eligibility.headword;
     if (canonicalHeadword !== headword) {
       headword = canonicalHeadword;
-      const released = options.repository.findReleased(headword, request.targetDictionary);
-      const overlay = options.repository.findOverlay(headword, request.targetDictionary);
-      const existing = mergeEntries(released, overlay);
+      const existing = options.repository.find(headword, request.targetDictionary);
       if (existing) return completeEntryExamples(options, existing, request.mode);
       evidence = options.repository.findSources(headword, request.targetDictionary);
     }
@@ -344,10 +346,7 @@ async function resolveMissing(
   if (options.repository.terminalOutcome(canonicalKey)) return null;
   return serializeByKey(options.canonicalLocks, canonicalKey, async () => {
     if (options.repository.terminalOutcome(canonicalKey)) return null;
-    const existing = mergeEntries(
-      options.repository.findReleased(headword, request.targetDictionary),
-      options.repository.findOverlay(headword, request.targetDictionary)
-    );
+    const existing = options.repository.find(headword, request.targetDictionary);
     if (existing) return completeEntryExamples(options, existing, request.mode);
     return authorEntry(request, options, headword, evidence, requestKey, canonicalKey);
   });
@@ -389,7 +388,7 @@ async function authorEntry(
     entryId
   );
   if (!reviewed) return null;
-  const review = reviewOutcome(reviewed.text, entryId);
+  const review = reviewOutcome(reviewed.text);
   recordOutcome(options.repository, reviewed.attempt, review);
   if (review !== "accepted") {
     saveTerminal(options.repository, [requestKey, canonicalKey], review);
@@ -455,7 +454,7 @@ async function completeExample(
   if (options.repository.terminalOutcome(terminalKey)) return null;
   return serializeByKey(options.exampleLocks, terminalKey, async () => {
     if (options.repository.terminalOutcome(terminalKey)) return null;
-    const staged = options.repository.findOverlay(entry.word, "ja")
+    const staged = options.repository.find(entry.word, "ja")
       ?.senses.find((candidate) => candidate.id === sense.id)
       ?.examples?.[0];
     if (staged) return staged;
@@ -490,7 +489,7 @@ async function completeExampleWork(
     candidateId
   );
   if (!reviewed) return null;
-  const review = reviewOutcome(reviewed.text, candidateId);
+  const review = reviewOutcome(reviewed.text);
   recordOutcome(options.repository, reviewed.attempt, review);
   if (review !== "accepted") {
     options.repository.saveTerminalOutcome(terminalKey, review);
@@ -531,6 +530,7 @@ async function callAndRecord(
         durationMs: Math.max(0, performance.now() - started),
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
+        costUsd: response.costUsd,
         prompt: boundedLog(prompt),
         response: boundedLog(response.text),
         outcome: "pending"
@@ -538,7 +538,7 @@ async function callAndRecord(
       return { text: response.text, attempt };
     } catch (error) {
       const kind = error instanceof ModelGatewayError ? error.kind : "permanent";
-      options.repository.recordAttempt({
+      persistAttempt(options.repository, {
         ...config,
         traceId: traceContext.getStore(),
         candidateId,
@@ -640,6 +640,8 @@ function parseAuthoredEntry(
     }
     const pragmaticFunctions = requiredStringList(sense.pragmaticFunctions);
     const authoredLabels = new Set([...misc, ...field, ...dialect]);
+    const sourceLabels = new Set(evidenceIds.flatMap((evidenceId) => knownEvidence.get(evidenceId)?.labels ?? []));
+    if (evidenceIds.length > 0 && !sameStringSet(authoredLabels, sourceLabels)) throw new Error("Source labels were changed");
     for (const evidenceId of evidenceIds) {
       const sourceSense = knownEvidence.get(evidenceId)!;
       if (sourceSense.partOfSpeech.some((label) => !partOfSpeech.includes(label))) {
@@ -746,15 +748,27 @@ function parseExample(text: string, headword: string): PublicExample {
 }
 
 function sentenceContainsHeadword(sentence: string, headword: string): boolean {
-  if (sentence.includes(headword)) return true;
   const segments = Array.from(japaneseWordSegmenter.segment(sentence));
   if (segments.some(({ segment, isWordLike }) => Boolean(isWordLike) && segment === headword)) return true;
   const chars = Array.from(sentence);
+  const wordBoundaries = new Set([0, chars.length]);
   const starts = new Set([0]);
   for (const segment of segments) {
+    const start = Array.from(sentence.slice(0, segment.index)).length;
+    const end = start + Array.from(segment.segment).length;
+    wordBoundaries.add(start);
+    wordBoundaries.add(end);
     if (!segment.isWordLike || inflectionBoundaries.has(segment.segment)) {
-      starts.add(Array.from(sentence.slice(0, segment.index + segment.segment.length)).length);
+      starts.add(end);
     }
+  }
+  const headwordLength = Array.from(headword).length;
+  for (let start = 0; start + headwordLength <= chars.length; start += 1) {
+    if (
+      wordBoundaries.has(start)
+      && wordBoundaries.has(start + headwordLength)
+      && chars.slice(start, start + headwordLength).join("") === headword
+    ) return true;
   }
   for (let start = 0; start < chars.length; start += 1) {
     for (let end = start + 1; end <= Math.min(chars.length, start + Math.max(12, Array.from(headword).length + 8)); end += 1) {
@@ -774,25 +788,15 @@ function isStandaloneInflection(chars: string[], start: number, end: number, hea
     .some(({ segment, isWordLike }) => Boolean(isWordLike) && segment === headword);
 }
 
-function reviewOutcome(text: string, candidateId: string): "accepted" | "rejected" | "malformed" {
-  try {
-    const value = parseObject(text);
-    if (
-      Object.keys(value).sort().join(",") !== "candidateId,issues"
-      || value.candidateId !== candidateId
-      || !Array.isArray(value.issues)
-      || !value.issues.every(nonemptyString)
-    ) {
-      return "malformed";
-    }
-    return value.issues.length === 0 ? "accepted" : "rejected";
-  } catch {
-    return "malformed";
-  }
+function reviewOutcome(text: string): "accepted" | "rejected" | "malformed" {
+  const verdict = text.trim();
+  if (verdict === "ACCEPT") return "accepted";
+  if (verdict === "REJECT") return "rejected";
+  return "malformed";
 }
 
 function recordOutcome(repository: EnrichmentRepository, attempt: AttemptRecord, outcome: string): void {
-  repository.recordAttempt({ ...attempt, outcome });
+  persistAttempt(repository, { ...attempt, outcome });
 }
 
 function parseObject(text: string): Record<string, any> {
@@ -843,20 +847,6 @@ function stableId(kind: "entry" | "sense", value: string): string {
   return `yori:${kind === "entry" ? "e" : "s"}_generated_${createHash("sha256").update(value).digest("hex").slice(0, 16)}`;
 }
 
-function mergeEntries(released: PublicLookupItem | null, overlay: PublicLookupItem | null): PublicLookupItem | null {
-  if (!released) return overlay;
-  if (!overlay) return released;
-  if (released.id !== overlay.id) return overlay;
-  const overlaySenses = new Map(overlay.senses.map((sense) => [sense.id, sense]));
-  return {
-    ...released,
-    senses: released.senses.map((sense) => {
-      const staged = overlaySenses.get(sense.id);
-      return staged ? { ...sense, ...(staged.examples ? { examples: staged.examples } : {}) } : sense;
-    })
-  };
-}
-
 function eligibilityPrompt(request: ResolveRequest): string {
   return [
     "Return exactly one canonical Japanese dictionary headword or SKIP.",
@@ -900,7 +890,7 @@ function exampleAuthorPrompt(candidateId: string, entry: PublicLookupItem, sense
 
 function reviewPrompt(candidateId: string, candidate: unknown): string {
   return [
-    "Reject only. Return JSON with candidateId and issues. Any material issue must be listed; never rewrite.",
+    "Reject only. Return exactly ACCEPT or REJECT and nothing else. Never rewrite or explain.",
     "Check coverage, sense structure, pronunciation, labels, source provenance, Taiwan terminology, factual accuracy, and safety.",
     `candidateId: ${candidateId}`,
     `candidate: ${JSON.stringify(candidate)}`
@@ -917,8 +907,7 @@ export const onDemandEvaluationContracts = {
   },
   entryReview: {
     model: geminiReviewModel,
-    promptVersion: "entry-review-v1",
-    responseSchema: reviewSchema,
+    promptVersion: "entry-review-v2",
     prompt: reviewPrompt
   }
 } as const;
@@ -967,20 +956,31 @@ const englishExampleSchema = {
   }
 };
 
-const englishEntryAuthorConfig = modelConfig("entry-author", lunaModel, "english-entry-author-v1", englishEntrySchema);
-const englishEntryReviewConfig = modelConfig("entry-review", geminiReviewModel, "english-entry-review-v1", reviewSchema);
-const englishExampleAuthorConfig = modelConfig("example-author", lunaModel, "english-example-author-v1", englishExampleSchema);
-const englishExampleReviewConfig = modelConfig("example-review", geminiReviewModel, "english-example-review-v1", reviewSchema);
+function englishModelConfigs(selection: EnglishModelSelection) {
+  return {
+    eligibility: modelConfig("eligibility", selection.author, "english-eligibility-v1"),
+    entryAuthor: modelConfig("entry-author", selection.author, "english-entry-author-v1", englishEntrySchema),
+    entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v2"),
+    exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v1", englishExampleSchema),
+    exampleReview: modelConfig("example-review", selection.reviewer, "english-example-review-v2")
+  };
+}
 
 export function createEnglishOnDemandDictionary(options: {
   repository: EnglishEnrichmentRepository;
   modelGateway: ModelGateway;
+  models: EnglishModelSelection;
   concurrency?: number;
   timeoutMs?: number;
+  limiter?: ModelCallLimiter;
+  logger?: (summary: ModelRunSummary) => void;
 }): EnglishOnDemandDictionary {
+  if (!nonemptyString(options.models.author) || !nonemptyString(options.models.reviewer)) {
+    throw new Error("English author and reviewer models must be configured explicitly");
+  }
   const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
   const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
-  const runLimited = createLimiter(concurrency);
+  const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const inFlight = new Map<string, Promise<EnglishEntry | null>>();
   const locks = new Map<string, Promise<void>>();
   const runtime: EnglishRuntimeOptions = {
@@ -988,19 +988,20 @@ export function createEnglishOnDemandDictionary(options: {
     modelGateway: {
       call(input) { return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs)); }
     },
+    modelConfigs: englishModelConfigs(options.models),
     locks,
     exampleLocks: new Map()
   };
   return {
     async resolve(request) {
-      return traceContext.run(request.traceId, async () => {
+      const traceId = request.traceId ?? crypto.randomUUID();
+      return traceContext.run(traceId, () => runWithModelSummary("en", traceId, options.logger, async () => {
       if (request.targetDictionary !== "en") return null;
       const surface = normalizeEnglishHeadword(request.query);
       const lemma = request.context?.lemma ? normalizeEnglishHeadword(request.context.lemma) : "";
-      const existing = options.repository.findOverlay(surface)
-        ?? options.repository.findReleased(surface)
+      const existing = options.repository.find(surface)
         ?? (lemma && lemma !== surface
-          ? options.repository.findOverlay(lemma) ?? options.repository.findReleased(lemma)
+          ? options.repository.find(lemma)
           : null);
       if (existing && existing.senses.every((sense) => sense.examples.length > 0)) return existing;
       if (invalidEnglishRequest(request)) return null;
@@ -1012,7 +1013,7 @@ export function createEnglishOnDemandDictionary(options: {
         .finally(() => inFlight.delete(key));
       inFlight.set(key, task);
       return task;
-      });
+      }));
     }
   };
 }
@@ -1046,14 +1047,14 @@ async function resolveMissingEnglish(
     const decision = await englishEligibility(request, options);
     if (!decision || !relatedEnglishHeadword(request, decision)) return null;
     headword = decision;
-    const existing = options.repository.findOverlay(headword) ?? options.repository.findReleased(headword);
+    const existing = options.repository.find(headword);
     if (existing) return existing;
     sources = options.repository.findSources(headword);
   }
   const key = `entry:en:${normalizeEnglishHeadword(headword)}`;
   if (options.repository.terminalOutcome(key)) return null;
   return serializeByKey(options.locks, key, async () => {
-    const existing = options.repository.findOverlay(headword) ?? options.repository.findReleased(headword);
+    const existing = options.repository.find(headword);
     if (existing) return existing;
     if (options.repository.terminalOutcome(key)) return null;
     return authorEnglishEntry(request, headword, sources, key, options);
@@ -1063,7 +1064,7 @@ async function resolveMissingEnglish(
 async function englishEligibility(request: ResolveRequest, options: EnglishRuntimeOptions): Promise<string | null> {
   const result = await callAndRecord(
     options,
-    modelConfig("eligibility", lunaModel, "english-eligibility-v1"),
+    options.modelConfigs.eligibility,
     englishEligibilityPrompt(request),
     request.mode,
     englishRequestKey(request)
@@ -1093,7 +1094,7 @@ async function authorEnglishEntry(
 ): Promise<EnglishEntry | null> {
   const entryId = englishStableId("entry", headword);
   const authored = await callAndRecord(
-    options, englishEntryAuthorConfig, englishEntryAuthorPrompt(entryId, headword, request, sources), request.mode, entryId
+    options, options.modelConfigs.entryAuthor, englishEntryAuthorPrompt(entryId, headword, request, sources), request.mode, entryId
   );
   if (!authored) return null;
   let entry: EnglishEntry;
@@ -1107,13 +1108,13 @@ async function authorEnglishEntry(
   englishRecordOutcome(options.repository, authored.attempt, "candidate");
   const reviewed = await callAndRecord(
     options,
-    englishEntryReviewConfig,
+    options.modelConfigs.entryReview,
     reviewPrompt(entryId, { entry, sourceEvidence: sources }),
     request.mode,
     entryId
   );
   if (!reviewed) return null;
-  const outcome = reviewOutcome(reviewed.text, entryId);
+  const outcome = reviewOutcome(reviewed.text);
   englishRecordOutcome(options.repository, reviewed.attempt, outcome);
   if (outcome !== "accepted") {
     options.repository.saveTerminalOutcome(terminalKey, outcome);
@@ -1134,7 +1135,7 @@ async function completeEnglishExamples(
     if (options.repository.terminalOutcome(candidateId)) return null;
     return serializeByKey(options.exampleLocks, candidateId, async () => {
       if (options.repository.terminalOutcome(candidateId)) return null;
-      const staged = options.repository.findOverlay(entry.headword)
+      const staged = options.repository.find(entry.headword)
         ?.senses.find((candidate) => candidate.id === sense.id)?.examples[0];
       if (staged) return staged;
       return completeEnglishExample(entry, sense, candidateId, mode, options);
@@ -1156,7 +1157,7 @@ async function completeEnglishExample(
   options: EnglishRuntimeOptions
 ): Promise<EnglishExample | null> {
     const authored = await callAndRecord(
-      options, englishExampleAuthorConfig, englishExamplePrompt(candidateId, entry, sense), mode, candidateId
+      options, options.modelConfigs.exampleAuthor, englishExamplePrompt(candidateId, entry, sense), mode, candidateId
     );
     if (!authored) return null;
     let example: EnglishExample;
@@ -1173,13 +1174,13 @@ async function completeEnglishExample(
     englishRecordOutcome(options.repository, authored.attempt, "candidate");
     const reviewed = await callAndRecord(
       options,
-      englishExampleReviewConfig,
+      options.modelConfigs.exampleReview,
       reviewPrompt(candidateId, { entry: { headword: entry.headword }, sense, example }),
       mode,
       candidateId
     );
     if (!reviewed) return null;
-    const outcome = reviewOutcome(reviewed.text, candidateId);
+    const outcome = reviewOutcome(reviewed.text);
     englishRecordOutcome(options.repository, reviewed.attempt, outcome);
     if (outcome !== "accepted") {
       options.repository.saveTerminalOutcome(candidateId, outcome);
@@ -1229,14 +1230,21 @@ function parseEnglishEntry(
     const domains = requiredStringList(sense.domains);
     const usage = requiredStringList(sense.usage);
     const supported = evidenceIds.map((id) => knownSenseEvidence.get(id)!);
+    const expectedRegisters = new Set(supported.flatMap((source) => source.registers));
+    const expectedRegions = new Set(supported.flatMap((source) => source.regions));
+    const expectedDomains = new Set(supported.flatMap((source) => source.domains));
+    const expectedUsage = new Set(supported.flatMap((source) => source.usage));
     if (supported.some((source) =>
       source.partOfSpeech !== sense.partOfSpeech
-      || source.registers.some((label) => !registers.includes(label))
-      || source.regions.some((label) => !regions.includes(label))
-      || source.domains.some((label) => !domains.includes(label))
-      || (source.dated && sense.dated !== true)
-      || source.usage.some((label) => !usage.includes(label))
-    )) throw new Error("Source sense structure was changed");
+      || source.dated !== sense.dated
+    )
+      || (evidenceIds.length > 0 && (
+        !sameStringSet(new Set(registers), expectedRegisters)
+        || !sameStringSet(new Set(regions), expectedRegions)
+        || !sameStringSet(new Set(domains), expectedDomains)
+        || !sameStringSet(new Set(usage), expectedUsage)
+      ))
+    ) throw new Error("Source sense structure was changed");
     if (new Set(supported.map(englishSourceSenseIdentity)).size > 1) throw new Error("Distinct source senses were merged");
     return {
       id: englishStableId("sense", englishSenseIdentity(entryId, sense, evidenceIds)),
@@ -1291,12 +1299,13 @@ function parseEnglishEntry(
 type EnglishRuntimeOptions = {
   repository: EnglishEnrichmentRepository;
   modelGateway: ModelGateway;
+  modelConfigs: ReturnType<typeof englishModelConfigs>;
   locks: Map<string, Promise<void>>;
   exampleLocks: Map<string, Promise<void>>;
 };
 
 function englishRecordOutcome(repository: EnglishEnrichmentRepository, attempt: AttemptRecord, outcome: string): void {
-  repository.recordAttempt({ ...attempt, outcome });
+  persistAttempt(repository, { ...attempt, outcome });
 }
 
 function englishEligibilityPrompt(request: ResolveRequest): string {
@@ -1368,8 +1377,11 @@ function englishInflections(headword: string): Set<string> {
 
 function englishSentenceContains(sentence: string, headword: string): boolean {
   const words = sentence.normalize("NFKC").toLocaleLowerCase("en-US").match(/[\p{Letter}\p{Mark}'’-]+/gu) ?? [];
-  const forms = englishInflections(headword);
-  return words.some((word) => forms.has(word)) || sentence.toLocaleLowerCase("en-US").includes(headword);
+  return Array.from(englishInflections(headword), (form) =>
+    form.match(/[\p{Letter}\p{Mark}'’-]+/gu) ?? []
+  ).some((formWords) => formWords.length > 0 && words.some((_, start) =>
+    formWords.every((word, offset) => words[start + offset] === word)
+  ));
 }
 
 function englishStableId(kind: "entry" | "sense", value: string): string {
@@ -1427,15 +1439,26 @@ function englishSourceSenseIdentity(sense: EnglishSourceRecord["senses"][number]
   ]);
 }
 
-export const englishOnDemandEvaluationContracts = {
-  eligibility: {
-    model: lunaModel,
-    promptVersion: "english-eligibility-v1",
-    prompt(candidate: string) { return englishEligibilityPrompt({ query: candidate, targetDictionary: "en" }); }
-  },
-  entryAuthor: englishEntryAuthorConfig,
-  entryReview: englishEntryReviewConfig
-} as const;
+export function createEnglishOnDemandEvaluationContracts(models: EnglishModelSelection) {
+  const configs = englishModelConfigs(models);
+  return {
+    eligibility: {
+      ...configs.eligibility,
+      prompt(candidate: string) { return englishEligibilityPrompt({ query: candidate, targetDictionary: "en" }); }
+    },
+    entryAuthor: {
+      ...configs.entryAuthor,
+      prompt(candidateId: string, headword: string, sources: EnglishSourceRecord[], sentence = "") {
+        return englishEntryAuthorPrompt(candidateId, headword, {
+          query: headword,
+          targetDictionary: "en",
+          ...(sentence ? { context: { sentence } } : {})
+        }, sources);
+      }
+    },
+    entryReview: { ...configs.entryReview, prompt: reviewPrompt }
+  } as const;
+}
 
 function requiredStringList(value: unknown): string[] {
   if (!Array.isArray(value) || !value.every(nonemptyString)) throw new Error("Expected a string array");
@@ -1478,7 +1501,8 @@ async function serializeByKey<T>(locks: Map<string, Promise<void>>, key: string,
   }
 }
 
-function createLimiter(concurrency: number): <T>(work: () => Promise<T>) => Promise<T> {
+export function createModelCallLimiter(concurrency: number): ModelCallLimiter {
+  positiveInteger(concurrency, "Enrichment concurrency");
   let active = 0;
   const queue: Array<() => void> = [];
   return <T>(work: () => Promise<T>) => new Promise<T>((resolve, reject) => {
@@ -1491,6 +1515,48 @@ function createLimiter(concurrency: number): <T>(work: () => Promise<T>) => Prom
     };
     if (active < concurrency) run();
     else queue.push(run);
+  });
+}
+
+function sameStringSet(actual: Set<string>, expected: Set<string>): boolean {
+  return actual.size === expected.size && Array.from(actual).every((value) => expected.has(value));
+}
+
+function persistAttempt(
+  repository: { recordAttempt(attempt: AttemptRecord): void },
+  attempt: AttemptRecord
+): void {
+  repository.recordAttempt(attempt);
+  const metrics = modelRunContext.getStore();
+  if (!metrics) return;
+  metrics.attempts += 1;
+  metrics.outcomes[attempt.outcome] = (metrics.outcomes[attempt.outcome] ?? 0) + 1;
+  metrics.inputTokens += attempt.inputTokens ?? 0;
+  metrics.outputTokens += attempt.outputTokens ?? 0;
+  metrics.costUsd += attempt.costUsd ?? 0;
+}
+
+function runWithModelSummary<T>(
+  dictionary: TargetDictionary,
+  traceId: string,
+  logger: ((summary: ModelRunSummary) => void) | undefined,
+  work: () => Promise<T>
+): Promise<T> {
+  const metrics: ModelRunMetrics = {
+    attempts: 0,
+    outcomes: {},
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: 0
+  };
+  return modelRunContext.run(metrics, async () => {
+    try {
+      return await work();
+    } finally {
+      if (metrics.attempts > 0) {
+        logger?.({ event: "model_run_summary", traceId, dictionary, ...metrics });
+      }
+    }
   });
 }
 

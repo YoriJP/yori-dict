@@ -5,14 +5,10 @@ import { exportOnDemandArtifacts } from "../src/on-demand-export";
 
 const argv = Bun.argv.slice(2);
 const dbPath = readFlag(argv, "--db") ?? process.env.YORI_DB_PATH ?? "data/yori.sqlite";
-const overlayPath = readFlag(argv, "--overlay")
-  ?? process.env.YORI_ENRICHMENT_OVERLAY_PATH
-  ?? process.env.YORI_EXAMPLE_OVERLAY_PATH
-  ?? "data/example-overlay.sqlite";
 const outputDirectory = readFlag(argv, "--out") ?? "releases/on-demand-ja";
 
 const db = openLookupDb(resolve(dbPath));
-const repository = openEnrichmentRepository(resolve(overlayPath), db);
+const repository = openEnrichmentRepository(resolve(dbPath), db);
 try {
   const entries = repository.acceptedEntries();
   const attempts = repository.attemptRecords();

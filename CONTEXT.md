@@ -115,7 +115,10 @@ A separately trained model family that accepts or rejects a candidate and never 
 _Avoid_: Editor, fixer, corrector
 
 **Reason Code**:
-The fixed vocabulary a reviewer rejects with — wrong-sense, unnatural, translation-mismatch, too-complex, off-topic — chosen so rejections can be counted.
+The fixed vocabulary a reviewer rejects with — missing-source-meaning, invented-meaning,
+merged-senses, wrong-part-of-speech, wrong-pronunciation, unsupported-label,
+source-provenance, wrong-sense, unnatural, translation-mismatch, taiwan-terminology,
+too-complex, off-topic, factual-error, or unsafe — chosen so rejections can be counted.
 _Avoid_: Review comment, free-text feedback
 
 **Review Status**:

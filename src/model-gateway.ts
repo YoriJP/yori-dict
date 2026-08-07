@@ -82,7 +82,8 @@ function parseResponse(result: any): ModelResponse {
     provider,
     effectiveServiceTier: result.serviceTier === "flex" ? "flex" : "standard",
     inputTokens: result.usage?.promptTokens ?? 0,
-    outputTokens: result.usage?.completionTokens ?? 0
+    outputTokens: result.usage?.completionTokens ?? 0,
+    ...(typeof result.usage?.cost === "number" ? { costUsd: result.usage.cost } : {})
   };
 }
 

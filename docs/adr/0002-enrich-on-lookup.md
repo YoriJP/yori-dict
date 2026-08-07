@@ -1,5 +1,7 @@
 # Gaps are filled on lookup, into a staging overlay
 
+> Superseded by [ADR-0009](0009-one-persistent-production-database.md). Enrich-on-lookup remains; accepted content now writes to the canonical production database rather than an overlay.
+
 > Amended by [ADR-0007](0007-on-demand-enrichment-is-one-deep-module.md): lookup enrichment now also covers missing entries, while preserving the overlay and failure-isolation decisions here.
 
 Yori Dict owns everything intrinsic to a word, and an example sentence is intrinsic to a word. So Yori Dict fills its own gaps: when a lookup asks for a word with no example and the caller is authorized to enrich, it generates one, runs it through the deterministic filter and the reviewer, writes it to the enrichment overlay, and returns the entry complete.

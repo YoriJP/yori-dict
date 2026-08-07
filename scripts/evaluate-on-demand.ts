@@ -46,10 +46,9 @@ for (const test of corpus.reviewDefects) {
     role: "entry-review",
     model: onDemandEvaluationContracts.entryReview.model,
     promptVersion: onDemandEvaluationContracts.entryReview.promptVersion,
-    prompt: onDemandEvaluationContracts.entryReview.prompt(candidateId, test.candidate),
-    responseSchema: onDemandEvaluationContracts.entryReview.responseSchema
+    prompt: onDemandEvaluationContracts.entryReview.prompt(candidateId, test.candidate)
   }));
-  const verdict = parseReview(response.text, candidateId);
+  const verdict = parseReview(response.text);
   const passed = verdict === "rejected";
   if (!passed) failed += 1;
   console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}: ${verdict}`);
@@ -69,14 +68,11 @@ function request(input: Omit<ModelRequest, "provider" | "reasoningEffort" | "req
   };
 }
 
-function parseReview(text: string, candidateId: string): "accepted" | "rejected" | "malformed" {
-  try {
-    const value = JSON.parse(text) as { candidateId?: unknown; issues?: unknown };
-    if (value.candidateId !== candidateId || !Array.isArray(value.issues)) return "malformed";
-    return value.issues.length > 0 ? "rejected" : "accepted";
-  } catch {
-    return "malformed";
-  }
+function parseReview(text: string): "accepted" | "rejected" | "malformed" {
+  const verdict = text.trim();
+  if (verdict === "ACCEPT") return "accepted";
+  if (verdict === "REJECT") return "rejected";
+  return "malformed";
 }
 
 async function evaluateProductionPath(test: EligibilityCase, gateway: ReturnType<typeof createOpenRouterModelGateway>): Promise<boolean> {
@@ -112,8 +108,7 @@ class EvaluationRepository implements EnrichmentRepository {
 
   constructor(private readonly source: SourceEvidence) {}
 
-  findReleased() { return null; }
-  findOverlay(query: string) { return this.entry?.word === query ? this.entry : null; }
+  find(query: string) { return this.entry?.word === query ? this.entry : null; }
   findSources(query: string) { return query === this.source.headword ? [this.source] : []; }
   saveEntry(entry: PublicLookupItem) { this.entry = entry; }
   saveExample(senseId: string, example: PublicExample) {
