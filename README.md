@@ -56,7 +56,7 @@ is not sentence parsing.
 
 For the complete request and response schemas, use the
 [interactive API documentation](https://yori-dict-production.up.railway.app/doc)
-or the [OpenAPI specification](https://yori-dict-production.up.railway.app/openapi.yaml).
+or the [OpenAPI specification](https://github.com/YoriJP/yori-dict/blob/main/openapi.yaml).
 
 ## Japanese SQLite Release
 
