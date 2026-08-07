@@ -4,6 +4,8 @@ data/ai-candidates/
 data/ai-batches/
 data/ai-review/
 data/ai-seeds/
+data/example-evaluation/
+data/english-evaluation/
 data/kaikki/
 data/raw/
 data/*.sqlite

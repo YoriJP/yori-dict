@@ -1,0 +1,23 @@
+{
+  "eligibility": [
+    { "candidate": "情報", "expected": "情報", "reading": "じょうほう", "sourceSenses": [{ "partOfSpeech": ["n"], "gloss": "information" }] },
+    { "candidate": "動画", "expected": "動画", "reading": "どうが", "sourceSenses": [{ "partOfSpeech": ["n"], "gloss": "video; moving image" }] },
+    { "candidate": "適当", "expected": "適当", "reading": "てきとう", "sourceSenses": [{ "partOfSpeech": ["adj-na"], "gloss": "suitable; appropriate" }, { "partOfSpeech": ["adj-na"], "gloss": "careless; irresponsible" }] },
+    { "candidate": "結構", "expected": "結構", "reading": "けっこう", "sourceSenses": [{ "partOfSpeech": ["adj-na"], "gloss": "splendid; sufficient" }, { "partOfSpeech": ["adv"], "gloss": "quite; reasonably" }, { "partOfSpeech": ["int"], "gloss": "no thank you; that is enough" }] },
+    { "candidate": "大丈夫", "expected": "大丈夫", "reading": "だいじょうぶ", "sourceSenses": [{ "partOfSpeech": ["adj-na"], "gloss": "safe; all right; no problem" }] },
+    { "candidate": "生", "expected": "生", "reading": "なま", "sourceSenses": [{ "partOfSpeech": ["n"], "gloss": "raw; uncooked; live; fresh" }] },
+    { "candidate": "忖度", "expected": "忖度", "reading": "そんたく", "sourceSenses": [{ "partOfSpeech": ["n"], "gloss": "surmising another person's wishes" }] },
+    { "candidate": "やばい", "expected": "やばい", "reading": "やばい", "sourceSenses": [{ "partOfSpeech": ["adj-i"], "gloss": "dangerous; awful; amazing" }] }
+  ],
+  "reviewDefects": [
+    { "id": "invented-meaning", "candidate": { "headword": "情報", "gloss": "weather forecast" } },
+    { "id": "missing-sense", "candidate": { "headword": "結構", "gloss": "splendid", "omits": "declining an offer" } },
+    { "id": "merged-pos", "candidate": { "headword": "適当", "partOfSpeech": ["noun-adjective-verb"] } },
+    { "id": "wrong-pronunciation", "candidate": { "headword": "生", "reading": "しょうだけ" } },
+    { "id": "circular-definition", "candidate": { "headword": "忖度", "gloss": "忖度すること" } },
+    { "id": "unsupported-label", "candidate": { "headword": "動画", "labels": ["internet-ish"] } },
+    { "id": "mainland-terminology", "candidate": { "headword": "軟體", "zh-tw": "软件" } },
+    { "id": "political-misinformation", "candidate": { "headword": "選挙", "gloss": "a ceremony where votes never affect leadership" } },
+    { "id": "partisan-framing", "candidate": { "headword": "政党", "gloss": "a corrupt group opposed to the people" } }
+  ]
+}

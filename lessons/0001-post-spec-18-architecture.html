@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yori Dict after issue #18</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Lesson 0001 · about 7 minutes</p>
+    <h1>How Yori Dict works now</h1>
+    <p class="lede">A simple mental model for the architecture after issue #18: two published dictionaries, one safe lookup API, and one controlled path for filling genuine gaps.</p>
+  </header>
+
+  <div class="mental-model">
+    Yori Dict is a publishing system first and a model-powered API second. The released dictionaries are the product; model calls only prepare possible additions.
+  </div>
+
+  <h2>1. Start with two separate books</h2>
+  <p>Japanese and English are not two language modes inside one universal dictionary. Think of them as two independently published books that happen to share some production machinery.</p>
+
+  <div class="cards">
+    <article class="card">
+      <span class="tag">Japanese dictionary</span>
+      <h3>Japanese-shaped data</h3>
+      <p>JMdict-style headwords, readings, senses, deinflection, Japanese examples, and translated glosses.</p>
+    </article>
+    <article class="card">
+      <span class="tag">English dictionary</span>
+      <h3>English-shaped data</h3>
+      <p>English headwords, pronunciations, parts of speech, regions, registers, definitions, and English examples.</p>
+    </article>
+  </div>
+
+  <p>Each book has its own sources, schema, version, validation, and release schedule. They share only things that are honestly common: model-call transport, attempt records, concurrency control, provenance, and release utilities. This boundary comes from <a href="../docs/adr/0005-japanese-and-english-are-independent-dictionaries.md">ADR 0005</a>.</p>
+
+  <h2>2. The five moving parts</h2>
+
+  <div class="architecture" aria-label="Simplified runtime architecture">
+    <div class="node"><strong>Consumer</strong><small>Yori News or another tool asks for a lexical item.</small></div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>HTTP API</strong><small>Authenticates enrichment and chooses the Japanese or English path.</small></div>
+    <div class="arrow">→</div>
+    <div class="node"><strong>Production database</strong><small>One persistent SQLite store for lookup, accepted enrichment, sources, and attempts.</small></div>
+  </div>
+
+  <div class="cards">
+    <article class="card">
+      <span class="tag">Deep module</span>
+      <h3><code>OnDemandDictionary.resolve</code></h3>
+      <p>Owns the whole enrichment workflow so callers do not orchestrate validation, sources, models, review, examples, or persistence.</p>
+    </article>
+    <article class="card">
+      <span class="tag">Small port</span>
+      <h3><code>ModelGateway</code></h3>
+      <p>Only transports model requests. One shared limiter bounds Japanese and English calls together.</p>
+    </article>
+  </div>
+
+  <div class="callout safe">
+    <strong>The production database is the working source of truth.</strong>
+    Published SQLite, JSONL, and Yomitan files are validated snapshots. Japanese and English still release independently.
+  </div>
+
+  <h2>3. Ordinary lookup: the short path</h2>
+  <ol class="flow">
+    <li>The consumer calls <code>/v1/lookup</code> or the batch endpoint.</li>
+    <li>The API chooses <code>ja</code> or <code>en</code>.</li>
+    <li>The canonical production dictionary is searched.</li>
+    <li>The matching entry—or no entry—is returned.</li>
+  </ol>
+
+  <p>No model is involved. A normal read cannot spend model quota or silently invent data. See the route boundary in <a href="../src/app.ts">src/app.ts</a>.</p>
+
+  <h2>4. Enrichment lookup: the guarded path</h2>
+  <p>The longer path runs only when the caller explicitly asks for <code>enrich=true</code> and supplies the bearer token.</p>
+
+  <ol class="flow">
+    <li><strong>Reject obvious junk.</strong> Empty text, markup, URLs, numbers, unsafe context, and other extraction noise stop early.</li>
+    <li><strong>Search before generating.</strong> Check the canonical dictionary and licensed source index.</li>
+    <li><strong>Find the canonical headword.</strong> On a total miss, the eligibility model returns one headword or <code>SKIP</code>.</li>
+    <li><strong>Search sources again.</strong> If canonicalization changed the word, source discovery gets one more chance.</li>
+    <li><strong>Author a candidate.</strong> The author model receives licensed source evidence as minimum required coverage.</li>
+    <li><strong>Validate with code.</strong> Schema, provenance, source meanings, labels, scripts, and Taiwan terminology are checked before review.</li>
+    <li><strong>Review without rewriting.</strong> A different model family returns exactly <code>ACCEPT</code> or <code>REJECT</code>.</li>
+    <li><strong>Persist the accepted entry.</strong> It is written transactionally to canonical production tables.</li>
+    <li><strong>Fill missing examples.</strong> Each sense is handled independently; a failed example leaves a valid thinner entry.</li>
+    <li><strong>Return the canonical entry.</strong> The caller does not need to know about storage or migrations.</li>
+  </ol>
+
+  <div class="callout warn">
+    <strong>The bias is intentionally conservative.</strong>
+    A false rejection creates a temporary gap. A false acceptance pollutes dictionary data. So malformed verdicts, deterministic failure, and semantic rejection all fail closed.
+  </div>
+
+  <h2>5. How working data becomes a release</h2>
+  <ol class="flow">
+    <li>Real authenticated lookups create accepted canonical rows.</li>
+    <li><code>bun run japanese:release</code> or <code>bun run english:release</code> produces a complete deterministic snapshot with provenance.</li>
+    <li>The artifacts are validated as an independent Japanese or English snapshot.</li>
+    <li>A release publishes SQLite and JSONL without changing the running database.</li>
+    <li>Yomitan v3 is produced as an adapter, not as the canonical schema.</li>
+  </ol>
+
+  <p>This separation keeps public releases reproducible: the working database can grow while yesterday’s published artifacts remain immutable.</p>
+
+  <h2>Check your mental model</h2>
+
+  <section class="quiz" data-quiz>
+    <h3>A normal unauthenticated lookup misses. What happens next?</h3>
+    <div class="quiz-options">
+      <button data-answer="correct" data-correct-feedback="Correct. Public lookup is model-free." data-incorrect-feedback="Not quite. Generation requires explicit authenticated enrichment.">Returns nothing</button>
+      <button data-answer="incorrect" data-correct-feedback="" data-incorrect-feedback="Generation requires explicit authenticated enrichment.">Calls author</button>
+      <button data-answer="incorrect" data-correct-feedback="" data-incorrect-feedback="Only accepted authenticated enrichment writes canonical data.">Writes database</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <section class="quiz" data-quiz>
+    <h3>Where does an accepted generated entry go first?</h3>
+    <div class="quiz-options">
+      <button data-answer="correct" data-correct-feedback="Correct. Releases are exported snapshots." data-incorrect-feedback="Not quite. The working source is the persistent database.">Production database</button>
+      <button data-answer="incorrect" data-correct-feedback="" data-incorrect-feedback="Published SQLite files stay immutable.">Published release</button>
+      <button data-answer="incorrect" data-correct-feedback="" data-incorrect-feedback="Source archives preserve imported evidence, not generated drafts.">Source archive</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <div class="next-links">
+    <a href="../reference/architecture-map.html">Open the one-page architecture map</a>
+    <a href="../docs/adr/0007-on-demand-enrichment-is-one-deep-module.md">Primary source: ADR 0007</a>
+  </div>
+
+  <footer>
+    Ask your agent about any unclear step. A useful follow-up is: “Walk one Japanese miss through the exact functions in code.”
+  </footer>
+</main>
+</body>
+</html>

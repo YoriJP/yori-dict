@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1786012788943,
+      "tag": "0000_production-store",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786017554300,
+      "tag": "0001_generated-source-records",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786017953305,
+      "tag": "0002_source-import-tracking",
+      "breakpoints": true
+    }
+  ]
+}

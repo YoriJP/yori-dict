@@ -5,8 +5,12 @@ import type {
   PublicEntry,
   PublicGloss,
   PublicHeadword,
+  PublicExample,
+  InflectionStep,
+  PublicLanguageSource,
   PublicLookupItem,
-  PublicSense
+  PublicSense,
+  Xref
 } from "./types";
 import { normalizeQuery } from "./normalize";
 import { deinflect, type DeinflectionCandidate } from "./deinflect";
@@ -14,8 +18,10 @@ import { apiLanguages } from "./lang";
 
 type EntryRow = {
   id: string;
-  source: "jmdict";
+  source: "jmdict" | "generated";
   source_id: string;
+  headword_language?: "ja";
+  estimated_level?: PublicEntry["estimatedLevel"] | null;
 };
 
 type FormRow = {
@@ -34,6 +40,14 @@ type SenseRow = {
   applies_to_kanji: string;
   applies_to_kana: string;
   part_of_speech: string;
+  // Absent in databases built before these columns existed.
+  misc?: string;
+  field?: string;
+  dialect?: string;
+  info?: string;
+  related?: string;
+  antonym?: string;
+  language_source?: string;
 };
 
 type GlossRow = {
@@ -42,11 +56,22 @@ type GlossRow = {
   text: string;
   source: "jmdict" | "ai-assisted";
   review_status: "source" | "checked";
+  type: string | null;
 };
 
 type LookupCandidate = {
   rank: number;
   entryIds: string[];
+  inflectionPath: InflectionStep[];
+};
+
+type ExampleRow = {
+  text: string;
+  translations: string;
+  source: "sourced" | "generated";
+  source_name: string | null;
+  source_id: string | null;
+  review_status: "source" | "checked";
 };
 
 export type LookupDb = {
@@ -55,6 +80,7 @@ export type LookupDb = {
     apiVersion: "v1";
     dictionaryVersion: string | null;
     languages: string[];
+    tags: Record<string, string>;
     sources: Array<{ name: string; license: string; url: string }>;
   };
   close(): void;
@@ -72,6 +98,7 @@ export function openLookupDb(path: string): LookupDb {
         apiVersion: "v1",
         dictionaryVersion: readMetadata(db, "dictDate"),
         languages: apiLanguages,
+        tags: readTags(db),
         sources: [
           {
             name: "JMdict",
@@ -79,19 +106,34 @@ export function openLookupDb(path: string): LookupDb {
             url: "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
           },
           {
-            name: "Yori AI-assisted zh-TW glosses",
+            name: "Tatoeba example sentences",
+            license: "CC BY 2.0 FR",
+            url: "https://tatoeba.org/"
+          },
+          {
+            name: "yomitan-jlpt-vocab estimated levels",
+            license: "CC BY-SA 4.0",
+            url: "https://github.com/stephenmk/yomitan-jlpt-vocab"
+          },
+          {
+            name: "Yori generated zh-TW glosses (legacy records)",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/zh-tw.jsonl"
           },
           {
-            name: "Yori AI-assisted zh-CN glosses",
+            name: "Yori generated zh-CN glosses (legacy records)",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/zh-cn.jsonl"
           },
           {
-            name: "Yori AI-assisted Korean glosses",
+            name: "Yori generated Korean glosses (legacy records)",
             license: "CC-BY-SA-4.0",
             url: "sources/ai-glosses/ko.jsonl"
+          },
+          {
+            name: "Yori generated examples",
+            license: "CC-BY-SA-4.0",
+            url: "sources/ai-examples/generated.jsonl"
           }
         ]
       };
@@ -100,6 +142,43 @@ export function openLookupDb(path: string): LookupDb {
       db.close();
     }
   };
+}
+
+export function visitLookupItems(path: string, visit: (entry: PublicLookupItem) => void): void {
+  const db = new Database(path, { readonly: true });
+  const generatedRecord = db.query<{ entry_json: string }, [string]>(
+    "select entry_json from japanese_generated_records where entry_id = ?"
+  );
+  try {
+    let after = "";
+    while (true) {
+      const ids = db.query<{ id: string }, [string]>(
+        "select id from entries where id > ? order by id limit 1000"
+      ).all(after).map(({ id }) => id);
+      if (ids.length === 0) return;
+      for (const normalized of readEntries(db, ids, undefined)) {
+        const stored = normalized.source === "generated"
+          ? generatedRecord.get(normalized.id)?.entry_json
+          : null;
+        if (!stored) {
+          visit(toLookupItem(normalized, []));
+          continue;
+        }
+        const generated = JSON.parse(stored) as PublicLookupItem;
+        const examples = new Map(normalized.senses.map((sense) => [sense.id, sense.examples]));
+        visit({
+          ...generated,
+          senses: generated.senses.map((sense) => ({
+            ...sense,
+            ...(examples.get(sense.id)?.length ? { examples: examples.get(sense.id) } : {})
+          }))
+        });
+      }
+      after = ids.at(-1)!;
+    }
+  } finally {
+    db.close();
+  }
 }
 
 function lookup(db: Database, query: string, requestedLang: ApiLang | null): LookupResponse {
@@ -111,7 +190,8 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
   if (exactEntryIds.length > 0) {
     candidates.push({
       rank: 0,
-      entryIds: exactEntryIds
+      entryIds: exactEntryIds,
+      inflectionPath: []
     });
   }
 
@@ -121,7 +201,8 @@ function lookup(db: Database, query: string, requestedLang: ApiLang | null): Loo
 
     candidates.push({
       rank: matchRank(candidate),
-      entryIds: candidateEntryIds
+      entryIds: candidateEntryIds,
+      inflectionPath: [{ from: normalizedQuery, to: candidate.text, reason: candidate.reasons[0] ?? "deinflected" }]
     });
   }
 
@@ -168,10 +249,10 @@ function readBestItem(
   const entry = readEntries(db, [best.entryIds[0]], lang)[0];
   if (!entry) return null;
 
-  return toLookupItem(entry);
+  return toLookupItem(entry, best.inflectionPath);
 }
 
-function toLookupItem(entry: PublicEntry): PublicLookupItem {
+function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): PublicLookupItem {
   const headword = entry.headwords[0];
   return {
     id: entry.id,
@@ -180,16 +261,19 @@ function toLookupItem(entry: PublicEntry): PublicLookupItem {
     common: entry.headwords.some((item) => item.common),
     source: entry.source,
     sourceId: entry.sourceId,
+    headwordLanguage: entry.headwordLanguage,
+    ...(entry.estimatedLevel ? { estimatedLevel: entry.estimatedLevel } : {}),
+    ...(inflectionPath.length > 0 ? { inflectionPath } : {}),
     headwords: entry.headwords,
     senses: entry.senses
   };
 }
 
-function readEntries(db: Database, entryIds: string[], lang: ApiLang): PublicEntry[] {
+function readEntries(db: Database, entryIds: string[], lang: ApiLang | undefined): PublicEntry[] {
   if (entryIds.length === 0) return [];
 
   const entryQuery = db.query<EntryRow, [string]>(
-    "select id, source, source_id from entries where id = ?"
+    "select * from entries where id = ?"
   );
   const entries = entryIds
     .map((entryId) => entryQuery.get(entryId))
@@ -199,6 +283,8 @@ function readEntries(db: Database, entryIds: string[], lang: ApiLang): PublicEnt
     id: entry.id,
     source: entry.source,
     sourceId: entry.source_id,
+    headwordLanguage: entry.headword_language ?? "ja",
+    ...(entry.estimated_level ? { estimatedLevel: entry.estimated_level } : {}),
     headwords: readHeadwords(db, entry.id),
     senses: readSenses(db, entry.id, lang)
   }));
@@ -222,11 +308,10 @@ function readHeadwords(db: Database, entryId: string): PublicHeadword[] {
     }));
 }
 
-function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[] {
+function readSenses(db: Database, entryId: string, lang: ApiLang | undefined): PublicSense[] {
   return db
     .query<SenseRow, [string]>(
-      `select id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech
-       from senses
+      `select * from senses
        where entry_id = ?
        order by position`
     )
@@ -244,40 +329,72 @@ function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[]
             kana: JSON.parse(row.applies_to_kana) as string[]
           },
           partOfSpeech: JSON.parse(row.part_of_speech) as string[],
+          ...whenPresent("misc", parseList<string>(row.misc)),
+          ...whenPresent("field", parseList<string>(row.field)),
+          ...whenPresent("dialect", parseList<string>(row.dialect)),
+          ...whenPresent("info", parseList<string>(row.info)),
+          ...whenPresent("related", parseList<Xref>(row.related)),
+          ...whenPresent("antonym", parseList<Xref>(row.antonym)),
+          ...whenPresent("languageSource", parseList<PublicLanguageSource>(row.language_source)),
+          ...whenPresent("examples", readExamples(db, row.id)),
           glosses
         }
       ];
     });
 }
 
-function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {
+function readExamples(db: Database, senseId: string): PublicExample[] {
   try {
     return db
-      .query<GlossRow, [string, ApiLang]>(
-        "select sense_id, lang, text, source, review_status from glosses where sense_id = ? and lang = ? order by rowid"
+      .query<Partial<ExampleRow>, [string]>(
+        "select * from examples where sense_id = ? order by position"
       )
-      .all(senseId, lang)
+      .all(senseId)
       .map((row) => ({
-        text: row.text,
-        source: row.source,
-        reviewStatus: row.review_status
+        text: row.text ?? "",
+        translations: parseList<{ lang: string; text: string }>(row.translations),
+        source: row.source ?? "sourced",
+        ...(row.source_name ? { sourceName: row.source_name } : {}),
+        ...(row.source_id ? { sourceId: row.source_id } : {}),
+        reviewStatus: row.review_status ?? "source"
       }));
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("no such column: source")) {
-      throw error;
-    }
-
-    return db
-      .query<{ text: string }, [string, ApiLang]>(
-        "select text from glosses where sense_id = ? and lang = ? order by rowid"
-      )
-      .all(senseId, lang)
-      .map((row) => ({
-        text: row.text,
-        source: "jmdict",
-        reviewStatus: "source"
-      }));
+  } catch {
+    return [];
   }
+}
+
+function parseList<T>(value: string | null | undefined): T[] {
+  if (!value) return [];
+  return JSON.parse(value) as T[];
+}
+
+function whenPresent<K extends string, T>(key: K, values: T[]): Partial<Record<K, T[]>> {
+  return values.length > 0 ? ({ [key]: values } as Record<K, T[]>) : {};
+}
+
+// `select *` so that databases built before a column was added still load:
+// missing columns read back as undefined and fall through to their defaults.
+function readGlosses(db: Database, senseId: string, lang: ApiLang | undefined): PublicGloss[] {
+  const rows = lang
+    ? db.query<Partial<GlossRow>, [string, ApiLang]>(
+        "select * from glosses where sense_id = ? and lang = ? order by rowid"
+      ).all(senseId, lang)
+    : db.query<Partial<GlossRow>, [string]>(
+        "select * from glosses where sense_id = ? order by lang, rowid"
+      ).all(senseId);
+  return rows
+    .map((row) => ({
+      text: row.text ?? "",
+      source: row.source === "ai-assisted" ? "generated" : row.source ?? "jmdict",
+      reviewStatus: row.review_status ?? "source",
+      ...(row.type ? { type: row.type } : {})
+    }));
+}
+
+function readTags(db: Database): Record<string, string> {
+  const raw = readMetadata(db, "tags");
+  if (!raw) return {};
+  return JSON.parse(raw) as Record<string, string>;
 }
 
 function readMetadata(db: Database, key: string): string | null {
