@@ -1,17 +1,11 @@
 import { integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-// JMdict's normalized tables are installed by the pinned Japanese source import.
-// Drizzle owns the production-only tables added around that canonical dataset.
+// The canonical `ja_*` and `english_*` dictionary tables are installed by their
+// own dictionary rebuilds. Drizzle owns the production-only tables around them.
 
 export const productionMetadata = sqliteTable("production_metadata", {
   key: text("key").primaryKey(),
   value: text("value").notNull()
-});
-
-export const japaneseGeneratedRecords = sqliteTable("japanese_generated_records", {
-  entryId: text("entry_id").primaryKey(),
-  entryJson: text("entry_json").notNull(),
-  acceptedAt: text("accepted_at").notNull()
 });
 
 export const englishSourcePayloads = sqliteTable("english_source_payloads", {

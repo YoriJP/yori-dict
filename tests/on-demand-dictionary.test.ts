@@ -109,7 +109,7 @@ test("resolve authors a source-grounded entry before completing its examples", a
           dialect: [],
           pronunciations: [],
           pragmaticFunctions: [],
-          glosses: { en: ["unknown term"], "zh-tw": ["未知詞"] },
+          glosses: ["unknown term"],
           evidenceIds: ["licensed-test-dictionary:source-42:1"],
           provenance: "source"
         }
@@ -118,7 +118,7 @@ test("resolve authors a source-grounded entry before completing its examples", a
     reviewForPrompt,
     JSON.stringify({
       sentence: "この未知語の意味を調べた。",
-      translations: { en: "I looked up the meaning of this unknown term.", "zh-tw": "我查了這個未知詞的意思。" }
+      translation: "I looked up the meaning of this unknown term."
     }),
     reviewForPrompt
   ]);
@@ -143,10 +143,9 @@ test("resolve authors a source-grounded entry before completing its examples", a
   expect(entry.word).toBe("未知語");
   expect(entry.source).toBe("generated");
   expect(entry.senses[0].evidenceIds).toEqual(["licensed-test-dictionary:source-42:1"]);
+  // The generated example is a pair in the requested language only.
   expect(entry.senses[0].examples?.[0].translations).toEqual([
-    { lang: "en", text: "I looked up the meaning of this unknown term." },
-    { lang: "zh-tw", text: "我查了這個未知詞的意思。" },
-    { lang: "zh-cn", text: "我查了这个未知词的意思。" }
+    { lang: "en", text: "I looked up the meaning of this unknown term." }
   ]);
   expect(repository.entries.get("未知語")).toEqual(entry);
   expect(repository.attempts).toHaveLength(4);
@@ -184,7 +183,7 @@ test("resolve canonicalizes once and repeats source discovery for the changed he
     reviewForPrompt,
     JSON.stringify({
       sentence: "政府は改革に取り組んでいる。",
-      translations: { en: "The government is working on reforms.", "zh-tw": "政府正在推動改革。" }
+      translation: "The government is working on reforms."
     }),
     reviewForPrompt
   ]);
@@ -313,7 +312,7 @@ test("canonicalization to a released entry still completes its missing examples"
     "取り組む",
     JSON.stringify({
       sentence: "政府は改革に取り組んでいる。",
-      translations: { en: "The government is working on reforms.", "zh-tw": "政府正在推動改革。" }
+      translation: "The government is working on reforms."
     }),
     reviewForPrompt
   ]);
@@ -809,6 +808,7 @@ function authoredEntry(options: {
   evidenceId?: string;
   provenance?: "source" | "generated";
   registers?: string[];
+  glosses?: string[];
 }): string {
   return JSON.stringify({
     headword: options.headword,
@@ -821,7 +821,7 @@ function authoredEntry(options: {
         dialect: [],
         pronunciations: [],
         pragmaticFunctions: [],
-        glosses: { en: ["test gloss"], "zh-tw": ["測試詞義"] },
+        glosses: options.glosses ?? ["test gloss"],
         evidenceIds: options.evidenceId ? [options.evidenceId] : [],
         provenance: options.provenance ?? "source"
       }
@@ -829,10 +829,10 @@ function authoredEntry(options: {
   });
 }
 
-function exampleFor(headword: string): string {
+function exampleFor(headword: string, translation?: string): string {
   return JSON.stringify({
     sentence: `この${headword}について詳しく調べた。`,
-    translations: { en: `I researched ${headword} in detail.`, "zh-tw": `我仔細查了${headword}。` }
+    translation: translation ?? `I researched this in detail.`
   });
 }
 

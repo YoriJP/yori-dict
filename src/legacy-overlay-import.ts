@@ -6,7 +6,8 @@ import { openEnrichmentRepository } from "./enrichment-repository";
 import { openEnglishEnrichmentRepository } from "./english-enrichment-repository";
 import type { AttemptRecord } from "./on-demand-dictionary";
 import type { EnglishEntry, EnglishExample } from "./english-types";
-import type { PublicExample, PublicLookupItem } from "./types";
+import type { ApiLang, PublicExample, PublicLookupItem } from "./types";
+import { parseApiLang } from "./lang";
 
 export function importLegacyOverlays(
   productionPath: string,
@@ -27,19 +28,34 @@ function importJapaneseOverlay(productionPath: string, overlayPath: string): boo
   try {
     if (hasTable(legacy, "on_demand_entries")) {
       for (const row of legacy.query<{ entry_json: string }, []>("select entry_json from on_demand_entries order by entry_id").all()) {
-        repository.saveEntry(JSON.parse(row.entry_json) as PublicLookupItem);
+        // A legacy record held every gloss language against one meaning list.
+        // It is split back into one independent group per language, keeping
+        // each language's own meanings, ids, and order.
+        for (const [lang, entry] of splitLegacyEntry(JSON.parse(row.entry_json) as PublicLookupItem)) {
+          repository.saveEntry(entry, lang);
+        }
       }
     }
-    if (hasTable(legacy, "on_demand_examples")) {
-      for (const row of legacy.query<{ sense_id: string; example_json: string }, []>(
-        "select sense_id, example_json from on_demand_examples order by sense_id"
-      ).all()) repository.saveExample(row.sense_id, JSON.parse(row.example_json) as PublicExample);
-    }
-    if (hasTable(legacy, "example_enrichments")) {
-      for (const row of legacy.query<{ sense_id: string; example_json: string }, []>(`
-        select sense_id, example_json from example_enrichments
-         where status = 'accepted' and example_json is not null order by sense_id
-      `).all()) repository.saveExample(row.sense_id, JSON.parse(row.example_json) as PublicExample);
+    const production = new Database(productionPath, { readonly: true });
+    try {
+      const saveLegacyExample = (senseId: string, example: PublicExample) => {
+        for (const [targetSenseId, owned] of legacyExampleTargets(production, senseId, example)) {
+          repository.saveExample(targetSenseId, owned);
+        }
+      };
+      if (hasTable(legacy, "on_demand_examples")) {
+        for (const row of legacy.query<{ sense_id: string; example_json: string }, []>(
+          "select sense_id, example_json from on_demand_examples order by sense_id"
+        ).all()) saveLegacyExample(row.sense_id, JSON.parse(row.example_json) as PublicExample);
+      }
+      if (hasTable(legacy, "example_enrichments")) {
+        for (const row of legacy.query<{ sense_id: string; example_json: string }, []>(`
+          select sense_id, example_json from example_enrichments
+           where status = 'accepted' and example_json is not null order by sense_id
+        `).all()) saveLegacyExample(row.sense_id, JSON.parse(row.example_json) as PublicExample);
+      }
+    } finally {
+      production.close();
     }
     if (hasTable(legacy, "on_demand_attempts")) {
       for (const row of legacy.query<{ attempt_json: string }, []>("select attempt_json from on_demand_attempts order by id").all()) {
@@ -117,4 +133,50 @@ function hasTable(db: Database, table: string): boolean {
   return Boolean(db.query<{ name: string }, [string]>(
     "select name from sqlite_master where type = 'table' and name = ?"
   ).get(table));
+}
+
+/**
+ * Splits one legacy multi-language record into independent entry-language
+ * groups. Meaning identifiers become language-scoped so that later authoring or
+ * review in one language cannot collide with another language's content.
+ */
+function splitLegacyEntry(entry: PublicLookupItem): Array<[ApiLang, PublicLookupItem]> {
+  const languages = new Set<ApiLang>();
+  for (const sense of entry.senses) {
+    for (const gloss of sense.glosses) {
+      const lang = parseApiLang(gloss.lang ?? "en");
+      if (lang) languages.add(lang);
+    }
+  }
+  return Array.from(languages, (lang) => {
+    const senses = entry.senses.flatMap((sense) => {
+      const glosses = sense.glosses.filter((gloss) => (gloss.lang ?? "en") === lang);
+      if (glosses.length === 0) return [];
+      return [{ ...sense, id: `${sense.id}:${lang}`, glosses }];
+    }).map((sense, index) => ({ ...sense, position: index + 1 }));
+    return [lang, { ...entry, senses }] as [ApiLang, PublicLookupItem];
+  });
+}
+
+/**
+ * Resolves a legacy example, which named one shared meaning, onto the
+ * language-scoped meanings that own its paired sentences. Each target keeps
+ * only its own language's sentence.
+ */
+function legacyExampleTargets(
+  production: Database,
+  senseId: string,
+  example: PublicExample
+): Array<[string, PublicExample]> {
+  const senseExists = production.query<{ id: string }, [string]>("select id from ja_senses where id = ?");
+  if (senseExists.get(senseId)) return [[senseId, example]];
+  const targets: Array<[string, PublicExample]> = [];
+  for (const translation of example.translations) {
+    const lang = parseApiLang(translation.lang);
+    if (!lang) continue;
+    const targetId = `${senseId}:${lang}`;
+    if (!senseExists.get(targetId)) continue;
+    targets.push([targetId, { ...example, translations: [{ lang, text: translation.text }] }]);
+  }
+  return targets;
 }

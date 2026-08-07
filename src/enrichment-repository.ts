@@ -1,15 +1,18 @@
 import { Database } from "bun:sqlite";
 import type { LookupDb } from "./db";
+import { createJapaneseSchema } from "./japanese-schema";
+import { apiLanguages } from "./lang";
 import type {
   AttemptRecord,
   EnrichmentRepository,
+  GenerationProvenance,
   SourceEvidence,
   TargetDictionary
 } from "./on-demand-dictionary";
-import type { PublicExample, PublicLookupItem, PublicSense } from "./types";
+import type { ApiLang, PublicExample, PublicLookupItem, PublicSense } from "./types";
 
 export type PersistentEnrichmentRepository = EnrichmentRepository & {
-  acceptedEntries(): PublicLookupItem[];
+  acceptedEntries(lang: ApiLang): PublicLookupItem[];
   attemptRecords(): AttemptRecord[];
   close(): void;
 };
@@ -21,50 +24,52 @@ export function openEnrichmentRepository(
 ): PersistentEnrichmentRepository {
   const db = new Database(path);
   db.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
+  createJapaneseSchema(db);
 
   const saveEntryRow = db.prepare(`
-    insert into entries (id, source, source_id, headword_language, estimated_level)
+    insert into ja_entries (id, source, source_id, headword_language, estimated_level)
     values (?, ?, ?, 'ja', ?)
     on conflict(id) do update set
       source = excluded.source,
       source_id = excluded.source_id,
-      headword_language = excluded.headword_language,
       estimated_level = excluded.estimated_level
   `);
   const saveForm = db.prepare(`
-    insert into forms (entry_id, text, reading, kind, common, tags) values (?, ?, ?, ?, ?, ?)
+    insert or replace into ja_forms (entry_id, text, reading, kind, common, tags) values (?, ?, ?, ?, ?, ?)
   `);
   const saveLookupTerm = db.prepare(`
-    insert into lookup_terms (term, entry_id, match_kind) values (?, ?, ?)
+    insert or ignore into ja_lookup_terms (term, entry_id, match_kind) values (?, ?, ?)
   `);
   const saveSense = db.prepare(`
-    insert into senses (
-      id, entry_id, position, applies_to_kanji, applies_to_kana, part_of_speech,
-      misc, field, dialect, info, related, antonym, language_source
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    insert into ja_senses (
+      id, entry_id, lang, position, applies_to_kanji, applies_to_kana, part_of_speech,
+      misc, field, dialect, info, related, antonym, language_source,
+      pronunciations, pragmatic_functions, provenance, source_name, source_version, source_ref, generation_id
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const saveGloss = db.prepare(`
-    insert into glosses (sense_id, lang, text, source, review_status, type)
+    insert into ja_glosses (sense_id, position, text, source, review_status, type)
     values (?, ?, ?, ?, ?, ?)
   `);
   const saveExampleRow = db.prepare(`
-    insert into examples (
-      sense_id, position, text, translations, source, source_name, source_id, review_status
-    ) values (?, 1, ?, ?, 'generated', null, null, 'checked')
+    insert into ja_examples (
+      sense_id, position, text, translations, source, source_name, source_id, review_status, generation_id
+    ) values (?, 1, ?, ?, 'generated', null, null, 'checked', ?)
     on conflict(sense_id, position) do update set
       text = excluded.text,
       translations = excluded.translations,
       source = excluded.source,
-      source_name = excluded.source_name,
-      source_id = excluded.source_id,
-      review_status = excluded.review_status
+      review_status = excluded.review_status,
+      generation_id = excluded.generation_id
+  `);
+  const saveGeneration = db.prepare(`
+    insert into ja_generations
+      (id, model, provider, reasoning_effort, prompt_version, service_tier, review_outcome, created_at)
+    values (?, ?, ?, ?, ?, ?, ?, ?)
+    on conflict(id) do update set review_outcome = excluded.review_outcome
   `);
   const saveAttempt = db.prepare(`
     insert into model_attempts (dictionary, attempt_json, created_at) values ('ja', ?, ?)
-  `);
-  const saveGeneratedRecord = db.prepare(`
-    insert into japanese_generated_records (entry_id, entry_json, accepted_at) values (?, ?, ?)
-    on conflict(entry_id) do update set entry_json = excluded.entry_json, accepted_at = excluded.accepted_at
   `);
   const readTerminal = db.query<{ outcome: string }, [string]>(`
     select outcome from terminal_outcomes where dictionary = 'ja' and outcome_key = ?
@@ -74,33 +79,47 @@ export function openEnrichmentRepository(
     on conflict(dictionary, outcome_key) do update set outcome = excluded.outcome
   `);
 
-  function find(query: string): PublicLookupItem | null {
-    return lookupDb.lookup(query, "en").item;
+  function recordGeneration(generation: GenerationProvenance | undefined): string | null {
+    if (!generation) return null;
+    const id = generationId(generation);
+    saveGeneration.run(
+      id,
+      generation.model,
+      generation.provider,
+      generation.reasoningEffort,
+      generation.promptVersion,
+      generation.serviceTier ?? null,
+      generation.reviewOutcome,
+      generation.createdAt
+    );
+    return id;
   }
 
   return {
-    find(query, targetDictionary) {
-      return targetDictionary === "ja" ? find(query) : null;
+    find(query, targetDictionary, lang) {
+      return targetDictionary === "ja" ? lookupDb.lookup(query, lang).item : null;
     },
     findSources(query, targetDictionary) {
       return sourceLookup(query, targetDictionary);
     },
-    saveEntry(entry) {
+    /**
+     * Writes one entry-language group atomically. Only meanings in `lang` are
+     * replaced, so authoring or rejecting one language never disturbs another
+     * language's accepted content for the same entry.
+     */
+    saveEntry(entry, lang, generation) {
       db.transaction(() => {
-        const senseIds = db.query<{ id: string }, [string]>("select id from senses where entry_id = ?")
-          .all(entry.id).map((row) => row.id);
+        const generationRef = recordGeneration(generation);
+        const senseIds = db.query<{ id: string }, [string, string]>(
+          "select id from ja_senses where entry_id = ? and lang = ?"
+        ).all(entry.id, lang).map((row) => row.id);
         for (const senseId of senseIds) {
-          db.prepare("delete from glosses where sense_id = ?").run(senseId);
-          db.prepare("delete from examples where sense_id = ?").run(senseId);
+          db.prepare("delete from ja_glosses where sense_id = ?").run(senseId);
+          db.prepare("delete from ja_examples where sense_id = ?").run(senseId);
         }
-        db.prepare("delete from senses where entry_id = ?").run(entry.id);
-        db.prepare("delete from forms where entry_id = ?").run(entry.id);
-        db.prepare("delete from lookup_terms where entry_id = ?").run(entry.id);
+        db.prepare("delete from ja_senses where entry_id = ? and lang = ?").run(entry.id, lang);
 
         saveEntryRow.run(entry.id, entry.source, entry.sourceId, entry.estimatedLevel ?? null);
-        if (entry.source === "generated") {
-          saveGeneratedRecord.run(entry.id, JSON.stringify(entry), new Date().toISOString());
-        }
         for (const headword of entry.headwords) {
           saveForm.run(
             entry.id,
@@ -115,11 +134,20 @@ export function openEnrichmentRepository(
             saveLookupTerm.run(headword.reading, entry.id, "reading");
           }
         }
-        for (const sense of entry.senses) saveJapaneseSense(entry.id, sense);
+        entry.senses.forEach((sense, index) => {
+          saveJapaneseSense(entry.id, lang, sense, index + 1, generationRef);
+        });
       })();
     },
-    saveExample(senseId, example) {
-      saveExampleRow.run(senseId, example.text, JSON.stringify(example.translations));
+    saveExample(senseId, example, generation) {
+      db.transaction(() => {
+        saveExampleRow.run(
+          senseId,
+          example.text,
+          JSON.stringify(example.translations),
+          recordGeneration(generation)
+        );
+      })();
     },
     recordAttempt(attempt) {
       saveAttempt.run(JSON.stringify(attempt), new Date().toISOString());
@@ -133,10 +161,26 @@ export function openEnrichmentRepository(
     knownLabels() {
       return new Set(Object.keys(lookupDb.meta().tags));
     },
-    acceptedEntries() {
-      return db.query<{ entry_json: string }, []>(`
-        select entry_json from japanese_generated_records order by entry_id
-      `).all().map((row) => withCanonicalExamples(JSON.parse(row.entry_json) as PublicLookupItem));
+    canonicalHeadword(query) {
+      for (const lang of apiLanguages) {
+        const item = lookupDb.lookup(query, lang).item;
+        if (item) return item.word;
+      }
+      return null;
+    },
+    acceptedEntries(lang) {
+      return db.query<{ id: string }, [string]>(`
+        select distinct entry.id as id from ja_entries entry
+          join ja_senses sense on sense.entry_id = entry.id
+         where entry.source = 'generated' and sense.lang = ?
+         order by entry.id
+      `).all(lang).flatMap((row) => {
+        const forms = db.query<{ text: string }, [string]>(
+          "select text from ja_forms where entry_id = ? order by common desc, text limit 1"
+        ).get(row.id);
+        const item = forms ? lookupDb.lookup(forms.text, lang).item : null;
+        return item ? [item] : [];
+      });
     },
     attemptRecords() {
       return db.query<{ attempt_json: string }, []>(`
@@ -148,11 +192,19 @@ export function openEnrichmentRepository(
     }
   };
 
-  function saveJapaneseSense(entryId: string, sense: PublicSense): void {
+  function saveJapaneseSense(
+    entryId: string,
+    lang: ApiLang,
+    sense: PublicSense,
+    position: number,
+    generationRef: string | null
+  ): void {
+    const provenance = sense.provenance ?? "generated";
     saveSense.run(
       sense.id,
       entryId,
-      sense.position,
+      lang,
+      position,
       JSON.stringify(sense.appliesTo.kanji),
       JSON.stringify(sense.appliesTo.kana),
       JSON.stringify(sense.partOfSpeech),
@@ -162,48 +214,37 @@ export function openEnrichmentRepository(
       JSON.stringify(sense.info ?? []),
       JSON.stringify(sense.related ?? []),
       JSON.stringify(sense.antonym ?? []),
-      JSON.stringify(sense.languageSource ?? [])
+      JSON.stringify(sense.languageSource ?? []),
+      JSON.stringify(sense.pronunciations ?? []),
+      JSON.stringify(sense.pragmaticFunctions ?? []),
+      provenance,
+      provenance === "generated" ? "generated" : sense.evidenceIds?.[0]?.split(":")[0] ?? "source",
+      null,
+      sense.evidenceIds?.[0] ?? null,
+      generationRef
     );
-    for (const gloss of sense.glosses) {
+    sense.glosses.forEach((gloss, index) => {
       saveGloss.run(
         sense.id,
-        gloss.lang ?? "en",
+        index + 1,
         gloss.text,
-        gloss.source === "generated" ? "ai-assisted" : "jmdict",
+        gloss.source === "jmdict" ? "jmdict" : "generated",
         gloss.reviewStatus,
         gloss.type ?? null
       );
-    }
-    for (const example of sense.examples ?? []) {
-      saveExampleRow.run(sense.id, example.text, JSON.stringify(example.translations));
-    }
+    });
+    (sense.examples ?? []).forEach((example) => {
+      saveExampleRow.run(sense.id, example.text, JSON.stringify(example.translations), generationRef);
+    });
   }
+}
 
-  function withCanonicalExamples(entry: PublicLookupItem): PublicLookupItem {
-    const readExamples = db.query<{
-      text: string;
-      translations: string;
-      source: "sourced" | "generated";
-      source_name: string | null;
-      source_id: string | null;
-      review_status: "source" | "checked";
-    }, [string]>(`
-      select text, translations, source, source_name, source_id, review_status
-        from examples where sense_id = ? order by position
-    `);
-    return {
-      ...entry,
-      senses: entry.senses.map((sense) => ({
-        ...sense,
-        examples: readExamples.all(sense.id).map((example) => ({
-          text: example.text,
-          translations: JSON.parse(example.translations),
-          source: example.source,
-          ...(example.source_name ? { sourceName: example.source_name } : {}),
-          ...(example.source_id ? { sourceId: example.source_id } : {}),
-          reviewStatus: example.review_status
-        }))
-      }))
-    };
-  }
+function generationId(generation: GenerationProvenance): string {
+  return [
+    generation.provider,
+    generation.model,
+    generation.promptVersion,
+    generation.reasoningEffort,
+    generation.serviceTier ?? "unset"
+  ].join("|");
 }

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { Converter } from "opencc-js";
 import { findPrcTerms } from "../scripts/taiwan-terminology";
 import { deinflect } from "./deinflect";
 import type { ApiLang, PublicExample, PublicLookupItem, PublicSense } from "./types";
@@ -108,15 +107,38 @@ export type AttemptRecord = {
   outcome: string;
 };
 
+/** Full generation provenance kept beside canonical generated content. */
+export type GenerationProvenance = {
+  model: string;
+  provider: string;
+  reasoningEffort: string;
+  promptVersion: string;
+  serviceTier?: string;
+  reviewOutcome: string;
+  createdAt: string;
+};
+
+/**
+ * Japanese enrichment persistence is scoped to one explanation language.
+ * `saveEntry` writes exactly one entry-language group, so a rejection or a
+ * retry in one language can never disturb another language's accepted content
+ * for the same entry.
+ */
 export type EnrichmentRepository = {
-  find(query: string, targetDictionary: TargetDictionary): PublicLookupItem | null;
+  find(query: string, targetDictionary: TargetDictionary, lang: ApiLang): PublicLookupItem | null;
   findSources(query: string, targetDictionary: TargetDictionary): SourceEvidence[];
-  saveEntry(entry: PublicLookupItem): void;
-  saveExample(senseId: string, example: PublicExample): void;
+  saveEntry(entry: PublicLookupItem, lang: ApiLang, generation?: GenerationProvenance): void;
+  saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
   terminalOutcome(key: string): string | null;
   saveTerminalOutcome(key: string, outcome: string): void;
   knownLabels(): Set<string>;
+  /**
+   * The canonical headword this query already resolves to in any explanation
+   * language, or null. Filling a missing language group for an entry the
+   * dictionary already knows needs no eligibility decision.
+   */
+  canonicalHeadword?(query: string): string | null;
 };
 
 export type DictionaryResolver<TEntry> = {
@@ -173,11 +195,45 @@ export function createOnDemandDictionary(options: {
 }
 
 /**
- * Explanation languages the Japanese author prompt can actually produce.
- * A request for any other language is a miss rather than a model call, so
- * enrichment never spends credits on content it cannot return.
+ * Explanation languages Japanese enrichment can author. Each is authored as
+ * its own independent group by its own request, so no language is produced by
+ * converting or translating another one. Taiwanese and Simplified Chinese are
+ * separate authored languages rather than character conversions of each other.
  */
-const japaneseAuthoredLanguages = new Set<ApiLang>(["en", "zh-tw", "zh-cn"]);
+const japaneseAuthoredLanguages = new Set<ApiLang>(["en", "de", "zh-tw", "zh-cn", "ko"]);
+
+const japaneseLanguageNames: Record<ApiLang, string> = {
+  en: "English",
+  de: "German",
+  "zh-tw": "Taiwan Mandarin Chinese written in traditional characters",
+  "zh-cn": "Mainland Simplified Chinese",
+  ko: "Korean"
+};
+
+const kanaPattern = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const hanPattern = /\p{Script=Han}/u;
+const hangulPattern = /\p{Script=Hangul}/u;
+
+/**
+ * Deterministic per-language checks the author output must pass before review.
+ * They reject content written in the wrong language rather than judging style.
+ */
+function invalidExplanationText(lang: ApiLang, text: string): boolean {
+  const value = text.trim();
+  if (!value) return true;
+  switch (lang) {
+    case "en":
+    case "de":
+      return kanaPattern.test(value) || hanPattern.test(value) || hangulPattern.test(value);
+    case "zh-tw":
+      return kanaPattern.test(value) || hangulPattern.test(value) || !hanPattern.test(value)
+        || findPrcTerms(value).length > 0;
+    case "zh-cn":
+      return kanaPattern.test(value) || hangulPattern.test(value) || !hanPattern.test(value);
+    case "ko":
+      return kanaPattern.test(value) || !hangulPattern.test(value);
+  }
+}
 
 export function createJapaneseOnDemandDictionary(options: {
   repository: EnrichmentRepository;
@@ -210,7 +266,7 @@ export function createJapaneseOnDemandDictionary(options: {
       return traceContext.run(traceId, () => runWithModelSummary("ja", traceId, options.logger, async () => {
       if (request.targetDictionary !== "ja" || !japaneseAuthoredLanguages.has(request.lang)) return null;
       if (invalidRequest(request)) return null;
-      const existing = options.repository.find(request.query, request.targetDictionary);
+      const existing = options.repository.find(request.query, request.targetDictionary, request.lang);
       if (existing && existing.senses.every((sense) => (sense.examples?.length ?? 0) > 0)) return existing;
 
       const key = `${effectiveMode(request.mode)}:${requestOutcomeKey(request)}`;
@@ -247,12 +303,7 @@ const entrySchema = {
             dialect: stringArraySchema,
             pronunciations: stringArraySchema,
             pragmaticFunctions: stringArraySchema,
-            glosses: {
-              type: "object",
-              additionalProperties: false,
-              properties: { en: stringArraySchema, "zh-tw": stringArraySchema },
-              required: ["en", "zh-tw"]
-            },
+            glosses: stringArraySchema,
             evidenceIds: stringArraySchema,
             provenance: { type: "string", enum: ["source", "generated"] }
           },
@@ -273,14 +324,9 @@ const exampleSchema = {
     additionalProperties: false,
     properties: {
       sentence: { type: "string" },
-      translations: {
-        type: "object",
-        additionalProperties: false,
-        properties: { en: { type: "string" }, "zh-tw": { type: "string" } },
-        required: ["en", "zh-tw"]
-      }
+      translation: { type: "string" }
     },
-    required: ["sentence", "translations"]
+    required: ["sentence", "translation"]
   }
 };
 
@@ -320,9 +366,25 @@ async function resolveMissing(
 
   let headword = request.context?.lemma?.trim() || request.query.trim();
   if (headword !== request.query.trim()) {
-    const existing = options.repository.find(headword, request.targetDictionary);
+    const existing = options.repository.find(headword, request.targetDictionary, request.lang);
     if (existing) return completeEntryExamples(options, existing, request);
   }
+
+  // The entry may already exist with only other languages' meanings. That is a
+  // missing language group, not an unknown word, so it is authored directly.
+  const known = options.repository.canonicalHeadword?.(request.query.trim())
+    ?? (headword === request.query.trim() ? null : options.repository.canonicalHeadword?.(headword))
+    ?? null;
+  if (known) {
+    return authorForHeadword(
+      request,
+      options,
+      known,
+      options.repository.findSources(known, request.targetDictionary).filter((source) => source.headword === known),
+      requestKey
+    );
+  }
+
   let evidence = options.repository.findSources(headword, request.targetDictionary);
   if (evidence.length > 0) {
     const sourceHeadwords = new Set(evidence.map((source) => source.headword));
@@ -343,7 +405,7 @@ async function resolveMissing(
     }
     if (sourceHeadword !== headword) {
       headword = sourceHeadword;
-      const existing = options.repository.find(headword, request.targetDictionary);
+      const existing = options.repository.find(headword, request.targetDictionary, request.lang);
       if (existing) return completeEntryExamples(options, existing, request);
       evidence = options.repository.findSources(headword, request.targetDictionary);
     }
@@ -362,17 +424,31 @@ async function resolveMissing(
     const canonicalHeadword = eligibility.headword;
     if (canonicalHeadword !== headword) {
       headword = canonicalHeadword;
-      const existing = options.repository.find(headword, request.targetDictionary);
+      const existing = options.repository.find(headword, request.targetDictionary, request.lang);
       if (existing) return completeEntryExamples(options, existing, request);
       evidence = options.repository.findSources(headword, request.targetDictionary);
     }
   }
 
+  return authorForHeadword(request, options, headword, evidence, requestKey);
+}
+
+/**
+ * Authors one entry-language group under a lock keyed by entry and language,
+ * so concurrent work in another language for the same entry is independent.
+ */
+function authorForHeadword(
+  request: ResolveRequest,
+  options: RuntimeOptions,
+  headword: string,
+  evidence: SourceEvidence[],
+  requestKey: string
+): Promise<PublicLookupItem | null> {
   const canonicalKey = entryOutcomeKey(request, headword);
-  if (options.repository.terminalOutcome(canonicalKey)) return null;
+  if (options.repository.terminalOutcome(canonicalKey)) return Promise.resolve(null);
   return serializeByKey(options.canonicalLocks, canonicalKey, async () => {
     if (options.repository.terminalOutcome(canonicalKey)) return null;
-    const existing = options.repository.find(headword, request.targetDictionary);
+    const existing = options.repository.find(headword, request.targetDictionary, request.lang);
     if (existing) return completeEntryExamples(options, existing, request);
     return authorEntry(request, options, headword, evidence, requestKey, canonicalKey);
   });
@@ -397,7 +473,14 @@ async function authorEntry(
 
   let entry: PublicLookupItem;
   try {
-    entry = parseAuthoredEntry(authored.text, entryId, headword, evidence, options.repository.knownLabels());
+    entry = parseAuthoredEntry(
+      authored.text,
+      entryId,
+      headword,
+      request.lang,
+      evidence,
+      options.repository.knownLabels()
+    );
   } catch {
     recordOutcome(options.repository, authored.attempt, "malformed");
     saveTerminal(options.repository, [requestKey, canonicalKey], "malformed-entry");
@@ -419,7 +502,10 @@ async function authorEntry(
     return null;
   }
 
-  options.repository.saveEntry(entry);
+  // One author request produced one complete entry-language group and one
+  // reviewer accepted it, so the group is persisted atomically for this
+  // language alone.
+  options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
   return completeEntryExamples(options, entry, request);
 }
 
@@ -486,11 +572,11 @@ async function completeExample(
   if (options.repository.terminalOutcome(terminalKey)) return null;
   return serializeByKey(options.exampleLocks, terminalKey, async () => {
     if (options.repository.terminalOutcome(terminalKey)) return null;
-    const canonical = options.repository.find(entry.word, "ja")
+    const canonical = options.repository.find(entry.word, "ja", request.lang)
       ?.senses.find((candidate) => candidate.id === sense.id)
       ?.examples?.[0];
     if (canonical) return canonical;
-    return completeExampleWork(options, entry, sense, terminalKey, request.mode);
+    return completeExampleWork(options, entry, sense, terminalKey, request);
   });
 }
 
@@ -499,13 +585,20 @@ async function completeExampleWork(
   entry: PublicLookupItem,
   sense: PublicSense,
   terminalKey: string,
-  mode: ResolveRequest["mode"]
+  request: ResolveRequest
 ): Promise<PublicExample | null> {
+  const mode = request.mode;
   const candidateId = `${sense.id}:example`;
-  const authored = await callAndRecord(options, exampleAuthorConfig, exampleAuthorPrompt(candidateId, entry, sense), mode, candidateId);
+  const authored = await callAndRecord(
+    options,
+    exampleAuthorConfig,
+    exampleAuthorPrompt(candidateId, entry, sense, request.lang),
+    mode,
+    candidateId
+  );
   let example: PublicExample;
   try {
-    example = parseExample(authored.text, entry.word);
+    example = parseExample(authored.text, entry.word, request.lang);
   } catch {
     recordOutcome(options.repository, authored.attempt, "malformed");
     options.repository.saveTerminalOutcome(terminalKey, "malformed-example");
@@ -522,11 +615,28 @@ async function completeExampleWork(
   const review = reviewOutcome(reviewed.text);
   recordOutcome(options.repository, reviewed.attempt, review);
   if (review !== "accepted") {
-    options.repository.saveTerminalOutcome(terminalKey, review);
+    // A rejected example is never saved and never removes accepted meanings.
+    // It stays missing and retryable, so a later owner-authorized lookup may
+    // try exactly one fresh candidate. A malformed response is terminal so a
+    // candidate the model cannot form does not loop.
+    if (review !== "rejected") options.repository.saveTerminalOutcome(terminalKey, review);
     return null;
   }
-  options.repository.saveExample(sense.id, example);
+  options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
   return example;
+}
+
+/** Full provenance for content a reviewer accepted. */
+function acceptedGeneration(attempt: AttemptRecord): GenerationProvenance {
+  return {
+    model: attempt.model,
+    provider: attempt.provider,
+    reasoningEffort: attempt.reasoningEffort,
+    promptVersion: attempt.promptVersion,
+    ...(attempt.effectiveServiceTier ? { serviceTier: attempt.effectiveServiceTier } : {}),
+    reviewOutcome: "accepted",
+    createdAt: new Date().toISOString()
+  };
 }
 
 /**
@@ -631,10 +741,15 @@ function saveTerminal(repository: EnrichmentRepository, keys: string[], outcome:
   for (const key of new Set(keys)) repository.saveTerminalOutcome(key, outcome);
 }
 
+/**
+ * Parses one authored entry-language group. The author writes meanings for a
+ * single explanation language; nothing here derives one language from another.
+ */
 function parseAuthoredEntry(
   text: string,
   entryId: string,
   expectedHeadword: string,
+  lang: ApiLang,
   evidence: SourceEvidence[],
   knownLabels: Set<string>
 ): PublicLookupItem {
@@ -672,7 +787,7 @@ function parseAuthoredEntry(
       if (!knownEvidence.has(evidenceId)) throw new Error("Unknown source evidence");
       usedEvidence.add(evidenceId);
     }
-    const glosses = parseGlosses(sense.glosses);
+    const glosses = parseGlosses(sense.glosses, lang);
     const misc = requiredStringList(sense.registers);
     const field = requiredStringList(sense.domains);
     const dialect = requiredStringList(sense.dialect);
@@ -701,11 +816,11 @@ function parseAuthoredEntry(
         throw new Error("Source pronunciation was omitted");
       }
     }
-    const senseKey = JSON.stringify([partOfSpeech, misc, field, dialect, pronunciations, pragmaticFunctions, glosses.map(({ lang, text }) => [lang, text])]);
+    const senseKey = JSON.stringify([partOfSpeech, misc, field, dialect, pronunciations, pragmaticFunctions, glosses.map(({ text }) => text)]);
     if (senseKeys.has(senseKey)) throw new Error("Duplicate sense");
     senseKeys.add(senseKey);
     return {
-      id: stableId("sense", `${entryId}:${index + 1}`),
+      id: stableId("sense", `${entryId}:${lang}:${index + 1}`),
       position: index + 1,
       appliesTo: { kanji: ["*"], kana: ["*"] },
       partOfSpeech,
@@ -743,48 +858,45 @@ function parseAuthoredEntry(
   };
 }
 
-function parseGlosses(value: unknown): PublicSense["glosses"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid gloss map");
-  const map = value as Record<string, unknown>;
-  assertExactKeys(map, ["en", "zh-tw"]);
-  const en = requiredStringList(map.en);
-  const zhTw = requiredStringList(map["zh-tw"]);
-  if (en.length === 0 || zhTw.length === 0) throw new Error("Missing required gloss language");
-  if (new Set(en).size !== en.length || new Set(zhTw).size !== zhTw.length) throw new Error("Duplicate gloss");
-  if (zhTw.some((gloss) => findPrcTerms(gloss).length > 0 || /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(gloss))) {
-    throw new Error("Invalid Taiwan Chinese gloss");
+function parseGlosses(value: unknown, lang: ApiLang): PublicSense["glosses"] {
+  const glosses = requiredStringList(value);
+  if (glosses.length === 0) throw new Error("Missing gloss");
+  if (new Set(glosses).size !== glosses.length) throw new Error("Duplicate gloss");
+  if (glosses.some((gloss) => invalidExplanationText(lang, gloss))) {
+    throw new Error(`Gloss is not written in ${lang}`);
   }
-  return [
-    ...en.map((text) => ({ text, lang: "en" as const, source: "generated" as const, reviewStatus: "checked" as const })),
-    ...zhTw.map((text) => ({ text, lang: "zh-tw" as const, source: "generated" as const, reviewStatus: "checked" as const })),
-    ...zhTw.map((text) => ({ text: toZhCn(text), lang: "zh-cn" as const, source: "generated" as const, reviewStatus: "checked" as const }))
-  ];
+  return glosses.map((text) => ({
+    text,
+    lang,
+    source: "generated" as const,
+    reviewStatus: "checked" as const
+  }));
 }
 
-const toZhCn = Converter({ from: "twp", to: "cn" });
 const japaneseWordSegmenter = new Intl.Segmenter("ja-JP", { granularity: "word" });
 const inflectionBoundaries = new Set(["は", "が", "を", "に", "へ", "と", "で", "も", "や", "か", "から", "まで", "より"]);
 
-function parseExample(text: string, headword: string): PublicExample {
+/**
+ * A generated example is a bilingual pair: the Japanese sentence and its
+ * sentence in the meaning's own explanation language. It carries no other
+ * language, so it can only ever be shown under the meaning that owns it.
+ */
+function parseExample(text: string, headword: string, lang: ApiLang): PublicExample {
   const value = parseObject(text);
-  assertExactKeys(value, ["sentence", "translations"]);
-  if (typeof value.sentence !== "string" || !value.translations || typeof value.translations !== "object") {
+  assertExactKeys(value, ["sentence", "translation"]);
+  if (typeof value.sentence !== "string" || typeof value.translation !== "string") {
     throw new Error("Invalid example");
   }
-  const translations = value.translations as Record<string, unknown>;
-  assertExactKeys(translations, ["en", "zh-tw"]);
-  const en = typeof translations.en === "string" ? translations.en.trim() : "";
-  const zhTw = typeof translations["zh-tw"] === "string" ? translations["zh-tw"].trim() : "";
-  if (!sentenceContainsHeadword(value.sentence, headword) || !en || !zhTw || findPrcTerms(zhTw).length > 0) {
+  const translation = value.translation.trim();
+  if (
+    !sentenceContainsHeadword(value.sentence, headword)
+    || invalidExplanationText(lang, translation)
+  ) {
     throw new Error("Invalid example");
   }
   return {
     text: value.sentence,
-    translations: [
-      { lang: "en", text: en },
-      { lang: "zh-tw", text: zhTw },
-      { lang: "zh-cn", text: toZhCn(zhTw) }
-    ],
+    translations: [{ lang, text: translation }],
     source: "generated",
     reviewStatus: "checked"
   };
@@ -909,23 +1021,30 @@ function entryAuthorPrompt(
   evidence: SourceEvidence[]
 ): string {
   return [
-    "Author one canonical Japanese dictionary entry as JSON.",
+    `Author one canonical Japanese dictionary entry explained in ${japaneseLanguageNames[request.lang]}, as JSON.`,
     "Preserve every source meaning and evidence id. Separate distinct parts of speech, registers, domains, pronunciations, and pragmatic functions.",
     "Include every schema array; use an empty array when a field does not apply.",
     "You may add an established missing sense with provenance generated and no evidence ids.",
-    "Use natural English and Taiwan Chinese glosses. Do not mechanically translate source wording.",
+    `Write every gloss as natural ${japaneseLanguageNames[request.lang]} dictionary wording. Divide meanings the way a ${japaneseLanguageNames[request.lang]} dictionary would; do not translate another language's wording line by line.`,
     `candidateId: ${candidateId}`,
+    `explanation_language: ${request.lang}`,
     `headword: ${headword}`,
     `reading_hint: ${request.context?.reading ?? ""}`,
     `source_evidence: ${JSON.stringify(evidence)}`
   ].join("\n");
 }
 
-function exampleAuthorPrompt(candidateId: string, entry: PublicLookupItem, sense: PublicSense): string {
+function exampleAuthorPrompt(
+  candidateId: string,
+  entry: PublicLookupItem,
+  sense: PublicSense,
+  lang: ApiLang
+): string {
   return [
     "Write one natural, safe Japanese learner example for exactly this sense.",
-    "Return JSON with sentence and English plus Taiwan Chinese translations.",
+    `Return JSON with the Japanese sentence and one translation written in ${japaneseLanguageNames[lang]}.`,
     `candidateId: ${candidateId}`,
+    `explanation_language: ${lang}`,
     `headword: ${entry.word}`,
     `sense: ${JSON.stringify(sense)}`
   ].join("\n");

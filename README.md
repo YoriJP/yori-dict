@@ -83,10 +83,27 @@ Inspect a dictionary form with the `sqlite3` CLI:
 
 ```sh
 sqlite3 "yori-dict-${version}.sqlite" \
-  "SELECT text, reading, kind, common FROM forms WHERE text = '食べる';"
+  "SELECT text, reading, kind, common FROM ja_forms WHERE text = '食べる';"
 ```
 
-Exact record counts and source metadata are recorded in the release manifest:
+Meanings live in `ja_senses`, which names the explanation language. Read one
+language's meanings without mixing in another:
+
+```sh
+sqlite3 "yori-dict-${version}.sqlite" \
+  "SELECT g.text FROM ja_glosses g
+     JOIN ja_senses s ON s.id = g.sense_id
+     JOIN ja_entries e ON e.id = s.entry_id
+    WHERE e.source_id = '1358280' AND s.lang = 'zh-tw'
+    ORDER BY s.position, g.position;"
+```
+
+Each release also publishes one Yomitan pack per explanation language, named
+`yori-ja-en.zip`, `yori-ja-zh-tw.zip`, and so on. A pack contains only the
+language it names, so packs for different languages can be installed together.
+
+Exact per-language record counts and source metadata are recorded in the release
+manifest:
 
 ```sh
 curl -LO "https://github.com/YoriJP/yori-dict/releases/download/data-${version}/yori-dict-${version}.json"

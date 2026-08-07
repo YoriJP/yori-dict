@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { downloadPinnedDataRelease } from "../scripts/download-data-release";
+import { createJapaneseSchema } from "./japanese-schema";
 import type { EnglishEntry } from "./english-types";
 
 const migrationsFolder = resolve(import.meta.dir, "../drizzle");
@@ -40,6 +41,14 @@ export async function ensureJapaneseProductionDatabase(path: string): Promise<bo
     throw new Error(`Production database exists without a Japanese dictionary: ${path}`);
   }
   await downloadPinnedDataRelease({ outPath: path });
+  // A release published before the `ja_*` rebuild cannot be served. Fail here
+  // rather than starting on a database no lookup can read.
+  if (!hasJapaneseDictionary(path)) {
+    throw new Error(
+      `Pinned data release does not use the ja_* canonical schema: ${path}. ` +
+        "Publish a rebuilt release, or build locally with bun run build:db."
+    );
+  }
   return true;
 }
 
@@ -168,17 +177,23 @@ function mergeGeneratedEnglishSenses(db: Database, lookupTerm: string, previousJ
   }
 }
 
+/**
+ * Grafts a rebuilt Japanese release onto the production database. Imported
+ * content is replaced wholesale while accepted generated entries and accepted
+ * generated examples on imported meanings are retained with their provenance.
+ */
 export function importJapaneseRelease(path: string, releasePath: string): boolean {
   const production = new Database(path);
   production.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
+  createJapaneseSchema(production);
   const source = new Database(releasePath, { readonly: true });
   const incomingVersion = source.query<{ value: string }, []>(
-    "select value from metadata where key = 'dictDate'"
+    "select value from ja_metadata where key = 'dictDate'"
   ).get()?.value;
   source.close();
   if (!incomingVersion) throw new Error(`Japanese release has no dictDate: ${releasePath}`);
   const currentVersion = production.query<{ value: string }, []>(
-    "select value from metadata where key = 'dictDate'"
+    "select value from ja_metadata where key = 'dictDate'"
   ).get()?.value;
   if (currentVersion === incomingVersion) {
     production.close();
@@ -190,36 +205,37 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
     try {
       production.transaction(() => {
         production.exec(`
-          create temp table retained_japanese_examples as
-            select example.* from examples example
-            join senses sense on sense.id = example.sense_id
-            join entries entry on entry.id = sense.entry_id
-            where example.source = 'generated' and entry.source != 'generated';
-          delete from examples where sense_id in (
-            select sense.id from senses sense join entries entry on entry.id = sense.entry_id
-            where entry.source != 'generated'
+          create temp table retained_ja_examples as
+            select example.* from ja_examples example
+            join ja_senses sense on sense.id = example.sense_id
+            join ja_entries entry on entry.id = sense.entry_id
+            where example.source = 'generated' and entry.source <> 'generated';
+          delete from ja_examples where sense_id in (
+            select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
+            where entry.source <> 'generated'
           );
-          delete from glosses where sense_id in (
-            select sense.id from senses sense join entries entry on entry.id = sense.entry_id
-            where entry.source != 'generated'
+          delete from ja_glosses where sense_id in (
+            select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
+            where entry.source <> 'generated'
           );
-          delete from senses where entry_id in (select id from entries where source != 'generated');
-          delete from forms where entry_id in (select id from entries where source != 'generated');
-          delete from lookup_terms where entry_id in (select id from entries where source != 'generated');
-          delete from entries where source != 'generated';
-          delete from metadata;
+          delete from ja_senses where entry_id in (select id from ja_entries where source <> 'generated');
+          delete from ja_forms where entry_id in (select id from ja_entries where source <> 'generated');
+          delete from ja_lookup_terms where entry_id in (select id from ja_entries where source <> 'generated');
+          delete from ja_entries where source <> 'generated';
+          delete from ja_metadata;
 
-          insert into metadata select * from japanese_release.metadata;
-          insert into entries select * from japanese_release.entries;
-          insert into forms select * from japanese_release.forms;
-          insert into senses select * from japanese_release.senses;
-          insert into glosses select * from japanese_release.glosses;
-          insert into examples select * from japanese_release.examples;
-          insert into lookup_terms select * from japanese_release.lookup_terms;
-          insert or ignore into examples
-            select retained.* from retained_japanese_examples retained
-            join senses sense on sense.id = retained.sense_id;
-          drop table retained_japanese_examples;
+          insert into ja_metadata select * from japanese_release.ja_metadata;
+          insert or ignore into ja_generations select * from japanese_release.ja_generations;
+          insert or ignore into ja_entries select * from japanese_release.ja_entries;
+          insert or ignore into ja_forms select * from japanese_release.ja_forms;
+          insert or ignore into ja_lookup_terms select * from japanese_release.ja_lookup_terms;
+          insert or ignore into ja_senses select * from japanese_release.ja_senses;
+          insert or ignore into ja_glosses select * from japanese_release.ja_glosses;
+          insert or ignore into ja_examples select * from japanese_release.ja_examples;
+          insert or ignore into ja_examples
+            select retained.* from retained_ja_examples retained
+            join ja_senses sense on sense.id = retained.sense_id;
+          drop table retained_ja_examples;
         `);
       })();
     } finally {
@@ -249,7 +265,7 @@ function hasJapaneseDictionary(path: string): boolean {
   if (!existsSync(path)) return false;
   const db = new Database(path, { readonly: true });
   try {
-    return Boolean(db.query<{ value: string }, []>("select value from metadata where key = 'dictDate'").get()?.value);
+    return Boolean(db.query<{ value: string }, []>("select value from ja_metadata where key = 'dictDate'").get()?.value);
   } catch {
     return false;
   } finally {

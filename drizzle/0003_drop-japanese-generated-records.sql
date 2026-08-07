@@ -1,0 +1,1 @@
+DROP TABLE `japanese_generated_records`;

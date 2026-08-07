@@ -66,10 +66,28 @@ beforeAll(async () => {
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --examples fixtures/jmdict-examples-sample.json --out ${dbPath}`.quiet();
   migrateProductionDatabase(dbPath);
 
+  // Legacy accepted Taiwanese content maps onto an exact imported meaning and
+  // becomes that language's own independent meaning.
   const writable = new Database(dbPath);
+  const imported = writable
+    .query<Record<string, unknown>, [string]>("select * from ja_senses where id = ?")
+    .get("yori:s_jmdict_1358280_1:en")!;
+  const taiwanese: Record<string, unknown> = {
+    ...imported,
+    id: "yori:s_jmdict_1358280_1:zh-tw",
+    lang: "zh-tw",
+    position: 1,
+    provenance: "generated",
+    source_name: "yori-legacy",
+    source_ref: "yori:s_jmdict_1358280_1"
+  };
+  const columns = Object.keys(taiwanese);
   writable
-    .prepare("insert into glosses (sense_id, lang, text, source, review_status) values (?, 'zh-tw', ?, 'ai-assisted', 'checked')")
-    .run("yori:s_jmdict_1358280_1", "吃");
+    .prepare(`insert into ja_senses (${columns.join(", ")}) values (${columns.map(() => "?").join(", ")})`)
+    .run(...columns.map((column) => taiwanese[column] as never));
+  writable
+    .prepare("insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, ?, 'generated', 'checked')")
+    .run("yori:s_jmdict_1358280_1:zh-tw", "吃");
   writable.close();
 
   const release = await buildEnglishRelease([englishSource()], {

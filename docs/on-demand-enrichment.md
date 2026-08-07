@@ -24,7 +24,7 @@ type OnDemandDictionary = {
 };
 ```
 
-`lang` is the requested explanation language. It scopes the request key, the canonical entry key, the example key, the in-flight deduplication key, and every persisted terminal outcome, so work for one language never blocks or answers for another. Enrichment runs only for languages a dictionary can author today: Japanese authors en, zh-tw, and zh-cn; English authors en. Any other requested language resolves to `null` without a model call.
+`lang` is the requested explanation language. It scopes the request key, the canonical entry key, the example key, the in-flight deduplication key, and every persisted terminal outcome, so work for one language never blocks or answers for another. Japanese authors en, de, zh-tw, zh-cn, and ko, each as an independent group written directly in that language; no language is produced by translating or character-converting another. English authors en. Any other requested language resolves to `null` without a model call.
 
 The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call, and the HTTP layer answers with an error. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted meanings and the example stays missing and retryable.
 
@@ -44,16 +44,17 @@ Public lookup and owner-authorized enrichment are one route family at v1. `GET /
 3. Search the canonical dictionary and indexed licensed sources.
 4. If all miss, ask Luna for one canonical headword or `SKIP`, using the occurrence context for disambiguation.
 5. When Luna changes the headword, repeat source discovery once before generating.
-6. Build a source-evidence bundle and ask Luna to author the canonical entry. Source evidence is minimum coverage, not a literal translation template.
+6. Build a source-evidence bundle and ask Luna to author one complete entry-language group for the requested language. Source evidence is minimum coverage, not a literal translation template, and the author may divide meanings the way that language's dictionaries do.
 7. Run deterministic schema, script, provenance, label, and Taiwan-terminology checks.
 8. Ask Gemini for a reject-only review that returns exactly `ACCEPT` or `REJECT`. Any other output fails closed.
-9. Persist accepted entries in the canonical database, then generate and review one example for each sense that still lacks one.
+9. Persist the accepted group in the canonical database, replacing only that entry's meanings in that language, then generate and review one example for each of its meanings that still lacks one. A generated example carries only the meaning's own language pair.
 10. Return the canonical entry. Example failure produces a thinner entry, not a failed lookup.
 
 ## Failure policy
 
-- `SKIP`, deterministic rejection, semantic rejection, and malformed content are terminal.
-- Terminal outcomes are stored per explanation language, so a rejection in one language leaves another language free to run.
+- `SKIP`, deterministic rejection, semantic rejection, and malformed content are terminal for an entry-language group.
+- A rejected example is not terminal: it is never saved, it never removes accepted meanings, and a later owner-authorized lookup may try exactly one fresh candidate. A malformed example response stays terminal.
+- Authoring and review are atomic per entry and language, and terminal outcomes are stored per explanation language, so a rejection in one language leaves another language's accepted content untouched.
 - Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008. An exhausted retry is an operational failure, not a terminal outcome, and stays retryable.
 - Concurrent requests for the same canonical headword or sense share one in-flight operation.
 - A failed or rejected candidate is observable but never becomes dictionary data.
@@ -61,6 +62,8 @@ Public lookup and owner-authorized enrichment are one route family at v1. `GET /
 ## Production data and release path
 
 `YORI_DB_PATH` selects the single persistent SQLite database. Drizzle migrations change its schema during startup; they never seed or replace content. `bun run db:import -- --japanese <sqlite>` and `--english <sqlite>` explicitly import refreshed source releases while preserving accepted generated content. `bun run japanese:release -- --version <version>` and `bun run english:release -- --version <version>` write complete canonical SQLite, JSONL, and Yomitan v3 snapshots. Publication remains independent by dictionary.
+
+The Japanese canonical store uses concise `ja_*` tables. `ja_senses` carries the explanation language, so an entry shares only identity and written forms while each language owns its meanings, ordering, glosses, examples, and provenance. `bun run build:db` is a deliberate full rebuild: it writes a fresh file from the pinned JMdict and example inputs plus retained accepted generated and legacy content, and only replaces the previous database once it succeeds. A Japanese release publishes one canonical SQLite, one JSONL with sibling language groups under each entry, a manifest with per-language coverage and source versions, and one Yomitan pack per explanation language named `yori-ja-<lang>.zip`.
 
 ## Runtime configuration
 

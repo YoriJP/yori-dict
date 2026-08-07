@@ -37,24 +37,55 @@ test("accepted Japanese enrichment becomes canonical production data", async () 
     outcome: "candidate"
   };
 
-  first.saveEntry(generated);
-  first.saveExample(generated.senses[0].id, example);
-  const releasedSenseId = first.find("学校", "ja")!.senses[0].id;
-  first.saveExample(releasedSenseId, example);
+  first.saveEntry(englishGroup(generated), "en", generation);
+  first.saveEntry(taiwaneseGroup(generated), "zh-tw", generation);
+  first.saveExample(englishGroup(generated).senses[0].id, example, generation);
+  const releasedSenseId = first.find("学校", "ja", "en")!.senses[0].id;
+  first.saveExample(releasedSenseId, example, generation);
   first.recordAttempt(attempt);
   first.close();
   firstLookup.close();
 
   const reopenedLookup = openLookupDb(path);
   const reopened = openEnrichmentRepository(path, reopenedLookup);
-  expect(reopened.find("未知語", "ja")?.senses[0].examples).toEqual([example]);
-  expect(reopened.find("学校", "ja")?.senses[0].examples).toEqual([example]);
-  expect(reopened.acceptedEntries()).toEqual([
-    { ...generated, senses: [{ ...generated.senses[0], examples: [example] }] }
-  ]);
+  expect(reopened.find("未知語", "ja", "en")?.senses[0].examples).toEqual([example]);
+  expect(reopened.find("学校", "ja", "en")?.senses[0].examples).toEqual([example]);
+  // Each explanation language keeps its own meaning list for the same entry.
+  expect(reopened.find("未知語", "ja", "zh-tw")?.senses.map((sense) => sense.glosses[0].text))
+    .toEqual(["未知詞"]);
+  expect(reopened.find("未知語", "ja", "ko")).toBeNull();
+  expect(reopened.acceptedEntries("en").map((entry) => entry.word)).toEqual(["未知語"]);
   expect(reopened.attemptRecords()).toEqual([attempt]);
+
+  // Full generation provenance stays in canonical storage.
+  const generations = new Database(path, { readonly: true });
+  expect(generations.query<{ model: string; prompt_version: string; review_outcome: string }, []>(
+    "select model, prompt_version, review_outcome from ja_generations"
+  ).all()).toEqual([
+    { model: "gpt-5.6-luna", prompt_version: "entry-author-v1", review_outcome: "accepted" }
+  ]);
+  generations.close();
   reopened.close();
   reopenedLookup.close();
+});
+
+test("one language's rejection leaves another language's accepted group visible", async () => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const generated = generatedEntry();
+
+  repository.saveEntry(englishGroup(generated), "en", generation);
+  repository.saveEntry(taiwaneseGroup(generated), "zh-tw", generation);
+  // A later Taiwanese rejection is recorded against that language alone.
+  repository.saveTerminalOutcome("entry:ja:zh-tw:未知語", "rejected");
+  repository.close();
+
+  const reopened = openLookupDb(path);
+  expect(reopened.lookup("未知語", "en").item?.senses[0].glosses[0].text).toBe("unknown term");
+  expect(reopened.lookup("未知語", "zh-tw").item?.senses[0].glosses[0].text).toBe("未知詞");
+  reopened.close();
+  lookup.close();
 });
 
 test("production migrations are idempotent", async () => {
@@ -76,15 +107,15 @@ test("a Japanese source refresh preserves accepted generated content", async () 
     source: "generated",
     reviewStatus: "checked"
   };
-  repository.saveEntry(generatedEntry());
-  repository.saveExample(repository.find("学校", "ja")!.senses[0].id, example);
+  repository.saveEntry(englishGroup(generatedEntry()), "en", generation);
+  repository.saveExample(repository.find("学校", "ja", "en")!.senses[0].id, example, generation);
   repository.close();
   lookup.close();
 
   const next = join(mkdtempSync(join(tmpdir(), "yori-next-release-")), "yori.sqlite");
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${next}`.quiet();
   const candidate = new Database(next);
-  candidate.prepare("update metadata set value = 'next' where key = 'dictDate'").run();
+  candidate.prepare("update ja_metadata set value = 'next' where key = 'dictDate'").run();
   candidate.close();
   expect(importJapaneseRelease(path, next)).toBe(true);
 
@@ -127,6 +158,35 @@ async function productionDatabase(): Promise<string> {
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
   migrateProductionDatabase(path);
   return path;
+}
+
+const generation = {
+  model: "gpt-5.6-luna",
+  provider: "openrouter",
+  reasoningEffort: "minimal",
+  promptVersion: "entry-author-v1",
+  serviceTier: "flex",
+  reviewOutcome: "accepted",
+  createdAt: "2026-08-08T00:00:00.000Z"
+};
+
+/** One entry-language group: only this language's meanings and glosses. */
+function languageGroup(entry: PublicLookupItem, lang: "en" | "zh-tw"): PublicLookupItem {
+  return {
+    ...entry,
+    senses: entry.senses.flatMap((sense) => {
+      const glosses = sense.glosses.filter((gloss) => gloss.lang === lang);
+      return glosses.length === 0 ? [] : [{ ...sense, id: `${sense.id}:${lang}`, glosses }];
+    })
+  };
+}
+
+function englishGroup(entry: PublicLookupItem): PublicLookupItem {
+  return languageGroup(entry, "en");
+}
+
+function taiwaneseGroup(entry: PublicLookupItem): PublicLookupItem {
+  return languageGroup(entry, "zh-tw");
 }
 
 function generatedEntry(): PublicLookupItem {

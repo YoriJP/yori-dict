@@ -14,20 +14,16 @@ beforeAll(async () => {
   const writableDb = new Database(testDbPath);
   writableDb
     .prepare(
-      `insert into examples
+      `insert into ja_examples
         (sense_id, position, text, translations, source, review_status)
        values (?, 1, ?, ?, 'generated', 'checked')`
     )
     .run(
-      "yori:s_jmdict_1283190_1",
+      "yori:s_jmdict_1283190_1:en",
       "それは高かったです。",
       JSON.stringify([{ lang: "en", text: "It was expensive." }])
     );
-  writableDb
-    .prepare(
-      "insert into glosses (sense_id, lang, text, source, review_status) values (?, 'zh-tw', ?, 'ai-assisted', 'checked')"
-    )
-    .run("yori:s_jmdict_1358280_1", "吃");
+  addTaiwaneseMeaning(writableDb, "yori:s_jmdict_1358280_1", "吃");
   writableDb.close();
   lookupDb = openLookupDb(testDbPath);
   app = createApp(lookupDb);
@@ -37,6 +33,24 @@ afterAll(() => {
   lookupDb.close();
   new Database(testDbPath).close();
 });
+
+/**
+ * Legacy accepted Taiwanese content maps onto an exact imported meaning and
+ * becomes that language's own meaning rather than another gloss on the English
+ * meaning.
+ */
+function addTaiwaneseMeaning(db: Database, baseSenseId: string, gloss: string): void {
+  const source = db
+    .query<Record<string, unknown>, [string]>("select * from ja_senses where id = ?")
+    .get(`${baseSenseId}:en`)!;
+  const row: Record<string, unknown> = { ...source, id: `${baseSenseId}:zh-tw`, lang: "zh-tw", position: 1, provenance: "generated", source_name: "yori-legacy", source_ref: baseSenseId };
+  const columns = Object.keys(row);
+  db.prepare(`insert into ja_senses (${columns.join(", ")}) values (${columns.map(() => "?").join(", ")})`)
+    .run(...columns.map((column) => row[column] as never));
+  db.prepare(
+    "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, ?, 'generated', 'checked')"
+  ).run(`${baseSenseId}:zh-tw`, gloss);
+}
 
 async function lookup(query: string, lang = "en", extra = ""): Promise<any> {
   const res = await app.request(
@@ -111,7 +125,7 @@ test("looks up an exact Japanese headword in the requested language", async () =
   expect(entry.meanings[0].glosses[0].text).toBe("吃");
 });
 
-test("maps legacy ai-assisted storage to generated public provenance", async () => {
+test("legacy accepted content reads as generated provenance in its own language", async () => {
   const entry = await lookup("食べる", "zh-tw");
   expect(entry.meanings[0].glosses[0]).toEqual({
     text: "吃",
