@@ -20,6 +20,50 @@ export async function buildEnglishRelease(
     `${left.source}:${left.sourceEntryId}`.localeCompare(`${right.source}:${right.sourceEntryId}`, "en")
   );
   const entries = reconcileEnglishSourceRecords(records);
+  return writeEnglishRelease(entries, records, options);
+}
+
+export async function buildEnglishReleaseFromProduction(
+  productionPath: string,
+  options: { outputDirectory: string; version: string; createdAt?: string }
+): Promise<EnglishReleaseArtifacts> {
+  const db = new Database(productionPath, { readonly: true });
+  try {
+    const records = db.query<{ record_json: string; raw_json: string }, []>(`
+      select record.record_json, payload.raw_json
+        from english_source_records record
+        join english_source_payloads payload
+          on payload.source = record.source and payload.payload_id = record.payload_id
+       order by record.source, record.source_entry_id
+    `).all().map((row) => ({
+      ...(JSON.parse(row.record_json) as EnglishSourceRecord),
+      rawRecord: JSON.parse(row.raw_json)
+    }));
+    const examples = new Map(db.query<{ sense_id: string; example_json: string }, []>(
+      "select sense_id, example_json from english_examples order by sense_id"
+    ).all().map((row) => [row.sense_id, JSON.parse(row.example_json)]));
+    const entries = db.query<{ entry_json: string }, []>(
+      "select entry_json from english_entries order by lookup_term, id"
+    ).all().map((row) => {
+      const entry = JSON.parse(row.entry_json) as EnglishEntry;
+      return {
+        ...entry,
+        senses: entry.senses.map((sense) => examples.has(sense.id)
+          ? { ...sense, examples: [examples.get(sense.id)] }
+          : sense)
+      } as EnglishEntry;
+    });
+    return writeEnglishRelease(entries, records, options);
+  } finally {
+    db.close();
+  }
+}
+
+async function writeEnglishRelease(
+  entries: EnglishEntry[],
+  records: EnglishSourceRecord[],
+  options: { outputDirectory: string; version: string; createdAt?: string }
+): Promise<EnglishReleaseArtifacts> {
   const problems = validateEnglishDictionary(entries);
   if (problems.length > 0) throw new Error(`Invalid English dictionary:\n${problems.join("\n")}`);
   mkdirSync(options.outputDirectory, { recursive: true });

@@ -113,13 +113,13 @@ export type EnrichmentRepository = {
   knownLabels(): Set<string>;
 };
 
-export type OnDemandDictionary = {
-  resolve(request: ResolveRequest): Promise<PublicLookupItem | null>;
-};
-
 export type DictionaryResolver<TEntry> = {
   resolve(request: ResolveRequest): Promise<TEntry | null>;
 };
+
+export type OnDemandEntry = PublicLookupItem | EnglishEntry;
+export type OnDemandDictionary = DictionaryResolver<OnDemandEntry>;
+export type JapaneseOnDemandDictionary = DictionaryResolver<PublicLookupItem>;
 
 export type EnglishEnrichmentRepository = {
   find(query: string): EnglishEntry | null;
@@ -154,13 +154,26 @@ export type EnglishModelSelection = {
 type ModelRunMetrics = Omit<ModelRunSummary, "event" | "traceId" | "dictionary">;
 
 export function createOnDemandDictionary(options: {
+  japanese: JapaneseOnDemandDictionary;
+  english?: EnglishOnDemandDictionary;
+}): OnDemandDictionary {
+  return {
+    resolve(request) {
+      return request.targetDictionary === "en"
+        ? options.english?.resolve(request) ?? Promise.resolve(null)
+        : options.japanese.resolve(request);
+    }
+  };
+}
+
+export function createJapaneseOnDemandDictionary(options: {
   repository: EnrichmentRepository;
   modelGateway: ModelGateway;
   concurrency?: number;
   timeoutMs?: number;
   limiter?: ModelCallLimiter;
   logger?: (summary: ModelRunSummary) => void;
-}): OnDemandDictionary {
+}): JapaneseOnDemandDictionary {
   const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
   const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
@@ -182,6 +195,7 @@ export function createOnDemandDictionary(options: {
     async resolve(request) {
       const traceId = request.traceId ?? crypto.randomUUID();
       return traceContext.run(traceId, () => runWithModelSummary("ja", traceId, options.logger, async () => {
+      if (request.targetDictionary !== "ja" || invalidRequest(request)) return null;
       const existing = options.repository.find(request.query, request.targetDictionary);
       if (existing && existing.senses.every((sense) => (sense.examples?.length ?? 0) > 0)) return existing;
 
@@ -454,10 +468,10 @@ async function completeExample(
   if (options.repository.terminalOutcome(terminalKey)) return null;
   return serializeByKey(options.exampleLocks, terminalKey, async () => {
     if (options.repository.terminalOutcome(terminalKey)) return null;
-    const staged = options.repository.find(entry.word, "ja")
+    const canonical = options.repository.find(entry.word, "ja")
       ?.senses.find((candidate) => candidate.id === sense.id)
       ?.examples?.[0];
-    if (staged) return staged;
+    if (canonical) return canonical;
     return completeExampleWork(options, entry, sense, terminalKey, mode);
   });
 }
@@ -1009,7 +1023,7 @@ export function createEnglishOnDemandDictionary(options: {
       if (options.repository.terminalOutcome(key)) return null;
       const running = inFlight.get(key);
       if (running) return running;
-      const task = (existing ? stageAndCompleteEnglishEntry(existing, request.mode, runtime) : resolveMissingEnglish(request, runtime))
+      const task = (existing ? completeCanonicalEnglishEntry(existing, request.mode, runtime) : resolveMissingEnglish(request, runtime))
         .finally(() => inFlight.delete(key));
       inFlight.set(key, task);
       return task;
@@ -1018,7 +1032,7 @@ export function createEnglishOnDemandDictionary(options: {
   };
 }
 
-function stageAndCompleteEnglishEntry(
+function completeCanonicalEnglishEntry(
   entry: EnglishEntry,
   mode: ResolveRequest["mode"],
   options: EnglishRuntimeOptions
@@ -1135,9 +1149,9 @@ async function completeEnglishExamples(
     if (options.repository.terminalOutcome(candidateId)) return null;
     return serializeByKey(options.exampleLocks, candidateId, async () => {
       if (options.repository.terminalOutcome(candidateId)) return null;
-      const staged = options.repository.find(entry.headword)
+      const canonical = options.repository.find(entry.headword)
         ?.senses.find((candidate) => candidate.id === sense.id)?.examples[0];
-      if (staged) return staged;
+      if (canonical) return canonical;
       return completeEnglishExample(entry, sense, candidateId, mode, options);
     });
   }));

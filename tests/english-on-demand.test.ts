@@ -30,7 +30,7 @@ test("English enrichment requires an explicitly selected author and reviewer", (
   })).toThrow("must be configured explicitly");
 });
 
-test("English resolve completes and stages missing examples on released senses", async () => {
+test("English resolve completes missing examples on released senses", async () => {
   const entry = releasedEntry();
   entry.senses[0].examples = [];
   const repository = new MemoryEnglishRepository({ released: [["bank", entry]] });
@@ -73,7 +73,7 @@ test("English resolve rejects obvious non-lexical candidates before model eligib
   expect(gateway.calls).toEqual([]);
 });
 
-test("English resolve authors, reviews, stages, and completes source-grounded senses", async () => {
+test("English resolve authors, reviews, persists, and completes source-grounded senses", async () => {
   const source = sourceRecord();
   const repository = new MemoryEnglishRepository({ sources: [["lead", [source]]] });
   const gateway = new ScriptedGateway([

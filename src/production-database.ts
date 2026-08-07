@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { downloadPinnedDataRelease } from "../scripts/download-data-release";
+import type { EnglishEntry } from "./english-types";
 
 const migrationsFolder = resolve(import.meta.dir, "../drizzle");
 
@@ -71,6 +72,15 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
 
     db.prepare("attach database ? as english_release").run(resolve(releasePath));
     try {
+      const generatedCollisions = db.query<{ lookup_term: string; entry_json: string }, []>(`
+        select current.lookup_term, current.entry_json
+          from english_entries current
+          join english_release.entries incoming on incoming.lookup_term = current.lookup_term
+         where exists (
+           select 1 from json_each(current.entry_json, '$.senses') sense
+            where json_type(sense.value, '$.generation') is not null
+         )
+      `).all();
       db.transaction(() => {
         db.exec(`
           create temp table retained_english_examples as
@@ -98,8 +108,14 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
           insert into english_entries select * from english_release.entries;
           insert into english_senses select * from english_release.senses;
           insert into english_imported_entries select id from english_release.entries;
+        `);
+        for (const collision of generatedCollisions) {
+          mergeGeneratedEnglishSenses(db, collision.lookup_term, collision.entry_json);
+        }
+        db.exec(`
           insert or ignore into english_examples
-            select retained.* from retained_english_examples retained
+            select retained.sense_id, sense.entry_id, retained.example_json
+              from retained_english_examples retained
             join english_senses sense on sense.id = retained.sense_id;
           drop table retained_english_examples;
         `);
@@ -114,6 +130,41 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
     return true;
   } finally {
     db.close();
+  }
+}
+
+function mergeGeneratedEnglishSenses(db: Database, lookupTerm: string, previousJson: string): void {
+  const row = db.query<{ entry_json: string }, [string]>(
+    "select entry_json from english_entries where lookup_term = ?"
+  ).get(lookupTerm);
+  if (!row) return;
+  const incoming = JSON.parse(row.entry_json) as EnglishEntry;
+  const previous = JSON.parse(previousJson) as EnglishEntry;
+  const generated = previous.senses.filter((sense) => sense.generation);
+  if (generated.length === 0) return;
+
+  const known = new Set(incoming.senses.map((sense) => sense.id));
+  const retained = generated
+    .filter((sense) => !known.has(sense.id))
+    .map((sense, index) => ({ ...sense, position: incoming.senses.length + index + 1 }));
+  if (retained.length === 0) return;
+
+  const merged: EnglishEntry = { ...incoming, senses: [...incoming.senses, ...retained] };
+  db.prepare("update english_entries set entry_json = ? where id = ?")
+    .run(JSON.stringify(merged), incoming.id);
+  const insertSense = db.prepare(`
+    insert into english_senses (id, entry_id, position, part_of_speech, definition, sense_json)
+    values (?, ?, ?, ?, ?, ?)
+  `);
+  for (const sense of retained) {
+    insertSense.run(
+      sense.id,
+      incoming.id,
+      sense.position,
+      sense.partOfSpeech,
+      sense.definition,
+      JSON.stringify(sense)
+    );
   }
 }
 

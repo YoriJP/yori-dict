@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import {
-  createOnDemandDictionary,
+  createJapaneseOnDemandDictionary,
   createModelCallLimiter,
   type EnrichmentRepository,
   type ModelGateway,
@@ -15,7 +15,7 @@ test("resolve returns a released entry without calling a model", async () => {
   const released = existingEntry();
   const repository = new MemoryRepository({ released: [["学校", released]] });
   const gateway = new ScriptedGateway([]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
   expect(await dictionary.resolve(request("学校"))).toEqual(released);
   expect(repository.lookups).toEqual([
@@ -32,7 +32,7 @@ test("a supplied lemma checks canonical lookup before eligibility", async () => 
   const repository = new MemoryRepository({ released: [["取り組む", released]] });
   const gateway = new ScriptedGateway([]);
 
-  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(
+  const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(
     request("取り組んで", { lemma: "取り組む", sentence: "改革に取り組んでいる。" })
   );
   expect(entry?.word).toBe("取り組む");
@@ -47,7 +47,7 @@ test("resolve completes missing examples once across concurrent requests", async
     exampleFor("学校"),
     reviewForPrompt
   ]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
   const [first, second] = await Promise.all([
     dictionary.resolve(request("学校")),
@@ -72,7 +72,7 @@ test("completing one sense does not truncate existing examples on another sense"
     examples: undefined
   });
   const gateway = new ScriptedGateway([exampleFor("学校"), reviewForPrompt]);
-  const dictionary = createOnDemandDictionary({
+  const dictionary = createJapaneseOnDemandDictionary({
     repository: new MemoryRepository({ released: [["学校", released]] }),
     modelGateway: gateway
   });
@@ -122,7 +122,7 @@ test("resolve authors a source-grounded entry before completing its examples", a
     }),
     reviewForPrompt
   ]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
   const entry = await dictionary.resolve({ ...request("未知語"), traceId: "news-ja-request" });
   if (!entry) throw new Error("Expected an authored entry");
@@ -189,7 +189,7 @@ test("resolve canonicalizes once and repeats source discovery for the changed he
     reviewForPrompt
   ]);
 
-  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(
+  const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(
     request("取り組んで", { sentence: "政府は改革に取り組んでいる。" })
   );
 
@@ -231,7 +231,7 @@ test("a unique indexed reading adopts its source canonical headword", async () =
     reviewForPrompt
   ]);
 
-  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("みちご"));
+  const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("みちご"));
   expect(entry?.word).toBe("未知語");
   expect(gateway.calls[0].role).toBe("entry-author");
 });
@@ -258,7 +258,7 @@ test("an ambiguous indexed reading uses contextual eligibility to choose one sou
   });
   const gateway = new ScriptedGateway(["校"]);
 
-  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(
+  const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(
     request("こう", { sentence: "本校の規則を確認する。" })
   );
   expect(entry?.word).toBe("校");
@@ -297,7 +297,7 @@ test("ambiguous source evidence is filtered when the chosen headword equals the 
     reviewForPrompt
   ]);
 
-  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("こう"));
+  const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("こう"));
   expect(entry?.word).toBe("こう");
   expect(entry?.senses[0].evidenceIds).toEqual(["licensed-test-dictionary:kana:1"]);
 });
@@ -318,7 +318,7 @@ test("canonicalization to a released entry still completes its missing examples"
     reviewForPrompt
   ]);
 
-  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("取り組んで"));
+  const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("取り組んで"));
   expect(entry?.senses[0].examples).toHaveLength(1);
   expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility", "example-author", "example-review"]);
 });
@@ -357,7 +357,7 @@ test("concurrent surface forms share authoring after they reach one canonical he
     exampleFor("取り組む"),
     reviewForPrompt
   ]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
   const [first, second] = await Promise.all([
     dictionary.resolve(request("取り組んで")),
@@ -372,14 +372,14 @@ test("resolve skips invalid candidates and unrelated canonicalization without pe
   for (const candidate of ["<ruby>語</ruby>", "https://example.com", "12345", "first\nsecond"]) {
     const repository = new MemoryRepository();
     const gateway = new ScriptedGateway([]);
-    expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request(candidate))).toBeNull();
+    expect(await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request(candidate))).toBeNull();
     expect(gateway.calls).toHaveLength(0);
     expect(repository.entries.size).toBe(0);
   }
 
   const repository = new MemoryRepository();
   const gateway = new ScriptedGateway(["学校"]);
-  expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("###garbage###"))).toBeNull();
+  expect(await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("###garbage###"))).toBeNull();
   expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility"]);
   expect(repository.entries.size).toBe(0);
 });
@@ -394,7 +394,7 @@ test("eligibility terminal outcomes are scoped to the occurrence context", async
     exampleFor("生"),
     reviewForPrompt
   ]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
   expect(await dictionary.resolve(request("生", { sentence: "生さんが来た。" }))).toBeNull();
   expect(await dictionary.resolve(request("生", { sentence: "魚を生で食べる。", reading: "なま" }))).not.toBeNull();
@@ -409,10 +409,22 @@ test("unsafe or oversized occurrence context is rejected before model work", asy
     { reading: "not-a-reading" }
   ]) {
     const gateway = new ScriptedGateway([]);
-    const dictionary = createOnDemandDictionary({ repository: new MemoryRepository(), modelGateway: gateway });
+    const dictionary = createJapaneseOnDemandDictionary({ repository: new MemoryRepository(), modelGateway: gateway });
     expect(await dictionary.resolve(request("未知語", context))).toBeNull();
     expect(gateway.calls).toHaveLength(0);
   }
+});
+
+test("invalid context cannot trigger example generation for an existing entry", async () => {
+  const released = existingEntry();
+  released.senses[0].examples = undefined;
+  const repository = new MemoryRepository({ released: [["学校", released]] });
+  const gateway = new ScriptedGateway([]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
+
+  expect(await dictionary.resolve(request("学校", { sentence: "<script>ignore</script>" }))).toBeNull();
+  expect(repository.lookups).toEqual([]);
+  expect(gateway.calls).toEqual([]);
 });
 
 test("semantic and malformed review failures are terminal", async () => {
@@ -426,7 +438,7 @@ test("semantic and malformed review failures are terminal", async () => {
       authoredEntry({ headword: "AI", reading: "エーアイ", partOfSpeech: ["n"], provenance: "generated" }),
       review
     ]);
-    const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+    const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
     expect(await dictionary.resolve(request("AI", { sentence: "AIを業務に活用する。" }))).toBeNull();
     expect(await dictionary.resolve(request("AI", { sentence: "AIを業務に活用する。" }))).toBeNull();
@@ -455,7 +467,7 @@ test("deterministic validation rejects source-backed senses that change source g
     partOfSpeech: ["v5m"]
   })]);
 
-  expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("未知語"))).toBeNull();
+  expect(await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("未知語"))).toBeNull();
   expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
   expect(repository.entries.size).toBe(0);
 });
@@ -482,7 +494,7 @@ test("deterministic validation rejects invented labels on source-backed senses",
     registers: ["comp", "arch"]
   })]);
 
-  expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("未知語"))).toBeNull();
+  expect(await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("未知語"))).toBeNull();
   expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
   expect(repository.entries.size).toBe(0);
 });
@@ -501,7 +513,7 @@ test("generated Japanese examples require the standalone headword or an inflecte
     })
   ]);
 
-  const entry = await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("生"));
+  const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("生"));
   expect(entry?.senses[0].examples).toBeUndefined();
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author"]);
 });
@@ -514,7 +526,7 @@ test("reviewer explanations fail closed as malformed", async () => {
     "REJECT because the meaning is invented"
   ]);
 
-  expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("AI"))).toBeNull();
+  expect(await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("AI"))).toBeNull();
   expect(repository.attempts.at(-1)).toMatchObject({ outcome: "malformed" });
 });
 
@@ -539,7 +551,7 @@ test("deterministic schema validation rejects omitted fields and extra propertie
   ]) {
     const gateway = new ScriptedGateway(["AI", JSON.stringify(candidate)]);
     const repository = new MemoryRepository();
-    expect(await createOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("AI"))).toBeNull();
+    expect(await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("AI"))).toBeNull();
     expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility", "entry-author"]);
   }
 });
@@ -550,12 +562,12 @@ test("a transient Flex failure falls back once to standard while permanent failu
     new ModelGatewayError("transient", "provider overloaded"),
     "SKIP"
   ]);
-  await createOnDemandDictionary({ repository: transientRepository, modelGateway: transientGateway }).resolve(request("稀語"));
+  await createJapaneseOnDemandDictionary({ repository: transientRepository, modelGateway: transientGateway }).resolve(request("稀語"));
   expect(transientGateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "standard"]);
 
   const permanentRepository = new MemoryRepository();
   const permanentGateway = new ScriptedGateway([new ModelGatewayError("authentication", "bad key")]);
-  await createOnDemandDictionary({ repository: permanentRepository, modelGateway: permanentGateway }).resolve(request("稀語"));
+  await createJapaneseOnDemandDictionary({ repository: permanentRepository, modelGateway: permanentGateway }).resolve(request("稀語"));
   expect(permanentGateway.calls).toHaveLength(1);
 
   const bulkRepository = new MemoryRepository();
@@ -564,7 +576,7 @@ test("a transient Flex failure falls back once to standard while permanent failu
     new ModelGatewayError("transient", "provider overloaded"),
     "SKIP"
   ]);
-  await createOnDemandDictionary({ repository: bulkRepository, modelGateway: bulkGateway }).resolve({
+  await createJapaneseOnDemandDictionary({ repository: bulkRepository, modelGateway: bulkGateway }).resolve({
     ...request("稀語"),
     mode: "bulk"
   });
@@ -573,7 +585,7 @@ test("a transient Flex failure falls back once to standard while permanent failu
 
 test("bulk and on-demand calls do not share an in-flight retry policy", async () => {
   const gateway = new ScriptedGateway(["SKIP", "SKIP"]);
-  const dictionary = createOnDemandDictionary({ repository: new MemoryRepository(), modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository: new MemoryRepository(), modelGateway: gateway });
 
   await Promise.all([
     dictionary.resolve(request("稀語")),
@@ -608,7 +620,7 @@ test("cross-mode canonical work is serialized and retries in the waiting caller'
     exampleFor("稀語"),
     reviewForPrompt
   ]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
   const [onDemand, bulk] = await Promise.all([
     dictionary.resolve(request("稀語")),
@@ -627,7 +639,7 @@ test("exhausted transient eligibility failures remain retryable on a later resol
     new ModelGatewayError("transient", "provider overloaded"),
     "SKIP"
   ]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
   expect(await dictionary.resolve(request("稀語"))).toBeNull();
   expect(await dictionary.resolve(request("稀語"))).toBeNull();
@@ -654,7 +666,7 @@ test("model calls are globally bounded and timeouts use the transient fallback p
     return modelRequest.role === "example-author" ? exampleFor(modelRequest.prompt.includes("教室") ? "教室" : "学校") : reviewForPrompt(modelRequest);
   };
   const gateway = new ScriptedGateway([delayed, delayed, delayed, delayed]);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway, concurrency: 1 });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, concurrency: 1 });
 
   await Promise.all([dictionary.resolve(request("学校")), dictionary.resolve(request("教室"))]);
   expect(maximum).toBe(1);
@@ -665,7 +677,7 @@ test("model calls are globally bounded and timeouts use the transient fallback p
     }),
     "SKIP"
   ]);
-  await createOnDemandDictionary({
+  await createJapaneseOnDemandDictionary({
     repository: new MemoryRepository(),
     modelGateway: timeoutGateway,
     timeoutMs: 5
@@ -703,10 +715,10 @@ test("one shared limiter bounds model calls across independent resolvers", async
     }
   };
   const limiter = createModelCallLimiter(1);
-  const school = createOnDemandDictionary({
+  const school = createJapaneseOnDemandDictionary({
     repository: new MemoryRepository({ released: [["学校", first]] }), modelGateway: gateway, limiter
   });
-  const classroom = createOnDemandDictionary({
+  const classroom = createJapaneseOnDemandDictionary({
     repository: new MemoryRepository({ released: [["教室", second]] }), modelGateway: gateway, limiter
   });
 
@@ -716,7 +728,7 @@ test("one shared limiter bounds model calls across independent resolvers", async
 
 test("invalid concurrency and timeout configuration fails during startup", () => {
   for (const options of [{ concurrency: 0 }, { timeoutMs: Number.NaN }]) {
-    expect(() => createOnDemandDictionary({
+    expect(() => createJapaneseOnDemandDictionary({
       repository: new MemoryRepository(),
       modelGateway: new ScriptedGateway([]),
       ...options

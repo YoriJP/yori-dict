@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { createOpenRouterModelGateway } from "../src/model-gateway";
 import {
-  createOnDemandDictionary,
+  createJapaneseOnDemandDictionary,
   onDemandEvaluationContracts,
   type AttemptRecord,
   type EnrichmentRepository,
@@ -88,7 +88,7 @@ async function evaluateProductionPath(test: EligibilityCase, gateway: ReturnType
     }))
   };
   const repository = new EvaluationRepository(source);
-  const dictionary = createOnDemandDictionary({ repository, modelGateway: gateway, timeoutMs: 60_000 });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, timeoutMs: 60_000 });
   const entry = await dictionary.resolve({ query: test.candidate, targetDictionary: "ja" });
   return Boolean(
     entry

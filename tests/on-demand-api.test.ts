@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import type { LookupDb } from "../src/db";
+import { createOnDemandDictionary } from "../src/on-demand-dictionary";
 import type {
   EnglishOnDemandDictionary,
+  JapaneseOnDemandDictionary,
   OnDemandDictionary,
   ResolveRequest
 } from "../src/on-demand-dictionary";
@@ -12,13 +14,13 @@ import type { PublicLookupItem } from "../src/types";
 test("public lookup stays model-free while authenticated enrichment delegates through resolve", async () => {
   const calls: ResolveRequest[] = [];
   const generated = generatedEntry();
-  const onDemand: OnDemandDictionary = {
+  const onDemand: JapaneseOnDemandDictionary = {
     async resolve(request) {
       calls.push(request);
       return generated;
     }
   };
-  const app = createApp(emptyDb(), { onDemand, enrichmentToken: "secret" });
+  const app = createApp(emptyDb(), { onDemand: japaneseResolver(onDemand), enrichmentToken: "secret" });
 
   expect((await app.request("/v1/lookup?q=%E6%9C%AA%E7%9F%A5%E8%AA%9E")).status).toBe(200);
   expect(calls).toHaveLength(0);
@@ -47,13 +49,13 @@ test("public lookup stays model-free while authenticated enrichment delegates th
 
 test("batch enrichment accepts contextual candidates while preserving string queries", async () => {
   const calls: ResolveRequest[] = [];
-  const onDemand: OnDemandDictionary = {
+  const onDemand: JapaneseOnDemandDictionary = {
     async resolve(request) {
       calls.push(request);
       return generatedEntry();
     }
   };
-  const app = createApp(emptyDb(), { onDemand, enrichmentToken: "secret" });
+  const app = createApp(emptyDb(), { onDemand: japaneseResolver(onDemand), enrichmentToken: "secret" });
   const response = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer secret" },
@@ -121,7 +123,7 @@ test("English batch lookup uses the independent dictionary and authenticated res
       lookupQueries.push(query);
       return ["bank", "news"].includes(query.toLowerCase()) ? entry : null;
     },
-    englishOnDemand,
+    onDemand: englishResolver(englishOnDemand),
     logger: (event) => events.push(event)
   });
 
@@ -188,6 +190,17 @@ test("English batch lookup uses the independent dictionary and authenticated res
     context: { lemma: "florp", sentence: "The florp moved quickly." }
   }]);
 });
+
+function japaneseResolver(japanese: JapaneseOnDemandDictionary): OnDemandDictionary {
+  return createOnDemandDictionary({ japanese });
+}
+
+function englishResolver(english: EnglishOnDemandDictionary): OnDemandDictionary {
+  return createOnDemandDictionary({
+    japanese: { resolve: async () => null },
+    english
+  });
+}
 
 function emptyDb(): LookupDb {
   return {

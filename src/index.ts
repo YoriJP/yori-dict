@@ -5,6 +5,7 @@ import { openEnglishEnrichmentRepository } from "./english-enrichment-repository
 import { createOpenRouterModelGateway } from "./model-gateway";
 import {
   createEnglishOnDemandDictionary,
+  createJapaneseOnDemandDictionary,
   createModelCallLimiter,
   createOnDemandDictionary
 } from "./on-demand-dictionary";
@@ -24,7 +25,7 @@ const repository = openEnrichmentRepository(
   releasedDb,
   sourceIndex.lookup
 );
-const onDemand = createOnDemandDictionary({
+const japaneseOnDemand = createJapaneseOnDemandDictionary({
   repository,
   modelGateway,
   limiter: modelLimiter,
@@ -45,10 +46,10 @@ const englishOnDemand = englishModels
       logger
     })
   : undefined;
+const onDemand = createOnDemandDictionary({ japanese: japaneseOnDemand, english: englishOnDemand });
 const app = createApp(releasedDb, {
   onDemand,
   englishLookup: (query) => englishRepository.find(query),
-  englishOnDemand,
   logger,
   enrichmentToken: process.env.YORI_ENRICHMENT_TOKEN
 });

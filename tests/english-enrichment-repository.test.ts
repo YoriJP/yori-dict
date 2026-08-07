@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openEnglishEnrichmentRepository } from "../src/english-enrichment-repository";
-import { buildEnglishRelease } from "../src/english-release";
+import { buildEnglishRelease, buildEnglishReleaseFromProduction, openEnglishDictionary } from "../src/english-release";
 import { importEnglishRelease, migrateProductionDatabase } from "../src/production-database";
 import type { AttemptRecord } from "../src/on-demand-dictionary";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "../src/english-types";
@@ -33,27 +33,45 @@ test("English source and accepted enrichment share the canonical production data
   first.saveTerminalOutcome("request:en:nope", "skipped");
   first.close();
 
-  const nextRelease = await buildEnglishRelease([source], {
+  const nextRelease = await buildEnglishRelease([source, sourceRecord("lead")], {
     outputDirectory: join(root, "next-release"), version: "test-2", createdAt: "2026-08-07T00:00:00.000Z"
   });
   expect(importEnglishRelease(path, nextRelease.sqlite)).toBe(true);
 
   const reopened = openEnglishEnrichmentRepository(path);
   expect(reopened.find("bank")?.headword).toBe("bank");
-  expect(reopened.find("lead")?.senses[0].examples).toEqual([example]);
-  expect(reopened.acceptedEntries()).toEqual([{ ...entry, senses: [{ ...entry.senses[0], examples: [example] }] }]);
+  const refreshedLead = reopened.find("lead")!;
+  expect(refreshedLead.sources.map(({ sourceEntryId }) => sourceEntryId)).toEqual(["lead"]);
+  expect(refreshedLead.senses.map(({ definition }) => definition)).toEqual([
+    "an element used to connect an electrical circuit",
+    "to guide"
+  ]);
+  expect(refreshedLead.senses[1]).toMatchObject({ provenance: "generated", examples: [example] });
+  expect(reopened.acceptedEntries()).toEqual([refreshedLead]);
   expect(reopened.attemptRecords()).toEqual([attempt]);
   expect(reopened.terminalOutcome("request:en:nope")).toBe("skipped");
   reopened.close();
+
+  const canonical = await buildEnglishReleaseFromProduction(path, {
+    outputDirectory: join(root, "canonical-release"),
+    version: "canonical-test",
+    createdAt: "2026-08-07T00:00:00.000Z"
+  });
+  const published = openEnglishDictionary(canonical.sqlite);
+  expect(published.lookup("bank")?.headword).toBe("bank");
+  expect(published.lookup("lead")?.senses).toEqual(refreshedLead.senses);
+  published.close();
 });
 
-function sourceRecord(): EnglishSourceRecord {
+function sourceRecord(headword = "bank"): EnglishSourceRecord {
+  const isLead = headword === "lead";
   return {
-    source: "open-english-wordnet", sourceVersion: "2025", sourceEntryId: "bank",
-    license: "CC-BY-4.0", attribution: "Open English WordNet contributors", rawRecord: { id: "bank" },
-    headword: "bank", pronunciations: [], senses: [{
-      evidenceId: "open-english-wordnet:bank:1", partOfSpeech: "noun", definition: "a financial institution",
-      registers: [], regions: [], domains: ["finance"], dated: false, usage: [], examples: []
+    source: "open-english-wordnet", sourceVersion: "2025", sourceEntryId: headword,
+    license: "CC-BY-4.0", attribution: "Open English WordNet contributors", rawRecord: { id: headword },
+    headword, pronunciations: [], senses: [{
+      evidenceId: `open-english-wordnet:${headword}:1`, partOfSpeech: "noun",
+      definition: isLead ? "an element used to connect an electrical circuit" : "a financial institution",
+      registers: [], regions: [], domains: isLead ? ["electronics"] : ["finance"], dated: false, usage: [], examples: []
     }]
   };
 }

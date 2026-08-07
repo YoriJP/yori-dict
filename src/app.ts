@@ -7,7 +7,6 @@ import type { EnglishEntry } from "./english-types";
 import { dataReleaseUrl } from "./data-release";
 import { publicEntryForLanguage } from "./public-entry";
 import type {
-  EnglishOnDemandDictionary,
   OnDemandDictionary,
   ResolveRequest,
   TargetDictionary
@@ -16,7 +15,6 @@ import type {
 type AppOptions = {
   onDemand?: OnDemandDictionary;
   englishLookup?: (query: string) => EnglishEntry | null;
-  englishOnDemand?: EnglishOnDemandDictionary;
   enrichmentToken?: string;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -66,10 +64,9 @@ export function createApp(
     if (wantsEnrichment && !isAuthorized(c.req.header("authorization"), options.enrichmentToken)) {
       return c.json({ error: "Enrichment requires a valid bearer token" }, 401);
     }
-    const resolver = dictionary === "en" ? options.englishOnDemand : options.onDemand;
     const traceId = c.req.header("x-yori-request-id") ?? crypto.randomUUID();
-    const enriched = wantsEnrichment && resolver
-      ? await resolver.resolve(resolveRequest(query, dictionary, {
+    const enriched = wantsEnrichment && options.onDemand
+      ? await options.onDemand.resolve(resolveRequest(query, dictionary, {
           lemma: c.req.query("lemma"),
           reading: c.req.query("reading"),
           sentence: c.req.query("context")
@@ -117,9 +114,8 @@ export function createApp(
               reading: candidate.reading,
               sentence: candidate.context
             }, "bulk", traceId);
-        const resolver = dictionary === "en" ? options.englishOnDemand : options.onDemand;
-        const enriched = body.enrich && resolver
-          ? await resolver.resolve(request).catch(() => null)
+        const enriched = body.enrich && options.onDemand
+          ? await options.onDemand.resolve(request).catch(() => null)
           : null;
         if (dictionary === "en") {
           const lemma = request.context?.lemma;

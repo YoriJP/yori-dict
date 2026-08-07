@@ -144,6 +144,43 @@ export function openLookupDb(path: string): LookupDb {
   };
 }
 
+export function visitLookupItems(path: string, visit: (entry: PublicLookupItem) => void): void {
+  const db = new Database(path, { readonly: true });
+  const generatedRecord = db.query<{ entry_json: string }, [string]>(
+    "select entry_json from japanese_generated_records where entry_id = ?"
+  );
+  try {
+    let after = "";
+    while (true) {
+      const ids = db.query<{ id: string }, [string]>(
+        "select id from entries where id > ? order by id limit 1000"
+      ).all(after).map(({ id }) => id);
+      if (ids.length === 0) return;
+      for (const normalized of readEntries(db, ids, undefined)) {
+        const stored = normalized.source === "generated"
+          ? generatedRecord.get(normalized.id)?.entry_json
+          : null;
+        if (!stored) {
+          visit(toLookupItem(normalized, []));
+          continue;
+        }
+        const generated = JSON.parse(stored) as PublicLookupItem;
+        const examples = new Map(normalized.senses.map((sense) => [sense.id, sense.examples]));
+        visit({
+          ...generated,
+          senses: generated.senses.map((sense) => ({
+            ...sense,
+            ...(examples.get(sense.id)?.length ? { examples: examples.get(sense.id) } : {})
+          }))
+        });
+      }
+      after = ids.at(-1)!;
+    }
+  } finally {
+    db.close();
+  }
+}
+
 function lookup(db: Database, query: string, requestedLang: ApiLang | null): LookupResponse {
   const normalizedQuery = normalizeQuery(query);
   const lang = requestedLang ?? "en";
@@ -232,7 +269,7 @@ function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): Pub
   };
 }
 
-function readEntries(db: Database, entryIds: string[], lang: ApiLang): PublicEntry[] {
+function readEntries(db: Database, entryIds: string[], lang: ApiLang | undefined): PublicEntry[] {
   if (entryIds.length === 0) return [];
 
   const entryQuery = db.query<EntryRow, [string]>(
@@ -271,7 +308,7 @@ function readHeadwords(db: Database, entryId: string): PublicHeadword[] {
     }));
 }
 
-function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[] {
+function readSenses(db: Database, entryId: string, lang: ApiLang | undefined): PublicSense[] {
   return db
     .query<SenseRow, [string]>(
       `select * from senses
@@ -337,12 +374,15 @@ function whenPresent<K extends string, T>(key: K, values: T[]): Partial<Record<K
 
 // `select *` so that databases built before a column was added still load:
 // missing columns read back as undefined and fall through to their defaults.
-function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {
-  return db
-    .query<Partial<GlossRow>, [string, ApiLang]>(
-      "select * from glosses where sense_id = ? and lang = ? order by rowid"
-    )
-    .all(senseId, lang)
+function readGlosses(db: Database, senseId: string, lang: ApiLang | undefined): PublicGloss[] {
+  const rows = lang
+    ? db.query<Partial<GlossRow>, [string, ApiLang]>(
+        "select * from glosses where sense_id = ? and lang = ? order by rowid"
+      ).all(senseId, lang)
+    : db.query<Partial<GlossRow>, [string]>(
+        "select * from glosses where sense_id = ? order by lang, rowid"
+      ).all(senseId);
+  return rows
     .map((row) => ({
       text: row.text ?? "",
       source: row.source === "ai-assisted" ? "generated" : row.source ?? "jmdict",
