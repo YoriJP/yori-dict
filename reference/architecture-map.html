@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yori Dict architecture map</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Reference · post–issue #18</p>
+    <h1>Yori Dict architecture map</h1>
+    <p class="lede">The compressed version: ownership, request flows, and the release loop.</p>
+  </header>
+
+  <div class="mental-model">Two independent published dictionaries. One model-free read path. One authenticated gap-filling path. One staging-to-release loop.</div>
+
+  <h2>Component ownership</h2>
+  <table>
+    <thead><tr><th>Component</th><th>Owns</th><th>Does not own</th></tr></thead>
+    <tbody>
+      <tr><td><code>src/app.ts</code></td><td>HTTP parsing, dictionary choice, auth, response</td><td>Enrichment stages</td></tr>
+      <tr><td>Released stores</td><td>Stable published Japanese or English data</td><td>Runtime mutation</td></tr>
+      <tr><td>Production repository</td><td>Canonical entries, examples, terminal outcomes, attempts</td><td>Model decisions</td></tr>
+      <tr><td><code>OnDemandDictionary.resolve</code></td><td>Complete enrichment policy and orchestration</td><td>Provider transport</td></tr>
+      <tr><td><code>ModelGateway</code></td><td>Programmatic provider calls and error classification</td><td>Dictionary workflow</td></tr>
+      <tr><td>Shared limiter</td><td>Global Japanese + English model concurrency</td><td>Per-word deduplication</td></tr>
+      <tr><td>Export/release code</td><td>Deterministic SQLite, JSONL, manifests, Yomitan adapter</td><td>Live lookup</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Read path</h2>
+  <p><strong>Request → API → canonical production database → entry or null.</strong> No model call.</p>
+
+  <h2>Enrichment path</h2>
+  <p><strong>Auth → cheap checks → canonical/source search → headword or SKIP → second source search → author → code validation → one-word independent review → canonical write → missing examples → response.</strong></p>
+
+  <h2>Release loop</h2>
+  <p><strong>Canonical database → deterministic snapshot → validation → independent dictionary release → SQLite + JSONL + Yomitan v3.</strong></p>
+
+  <h2>Failure rules</h2>
+  <table>
+    <thead><tr><th>Failure</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td>Invalid request, <code>SKIP</code>, malformed candidate</td><td>Stop; do not regenerate</td></tr>
+      <tr><td>Deterministic or semantic rejection</td><td>Terminal for that candidate</td></tr>
+      <tr><td>Transient on-demand provider failure</td><td>Flex once, then one Standard fallback</td></tr>
+      <tr><td>Transient bulk provider failure</td><td>At most three Flex attempts</td></tr>
+      <tr><td>Example failure</td><td>Keep and return the accepted entry without that example</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Vocabulary</h2>
+  <table>
+    <tbody>
+      <tr><td><strong>Source evidence</strong></td><td>Licensed facts that establish minimum coverage.</td></tr>
+      <tr><td><strong>Canonical entry</strong></td><td>Yori’s clean dictionary representation of one lexical item.</td></tr>
+      <tr><td><strong>Overlay</strong></td><td>Writable staging between releases; not the source of truth.</td></tr>
+      <tr><td><strong>Generated sense</strong></td><td>An established sense added beyond source evidence, marked with generation provenance.</td></tr>
+      <tr><td><strong>Attempt record</strong></td><td>Private operational record of one model call.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="next-links"><a href="../lessons/0001-post-spec-18-architecture.html">Return to lesson 0001</a></div>
+  <footer>Primary source: <a href="../docs/adr/0007-on-demand-enrichment-is-one-deep-module.md">ADR 0007</a>.</footer>
+</main>
+</body>
+</html>

@@ -1,5 +1,7 @@
 # The service loads a pinned data release instead of building one
 
+> Superseded for runtime deployment by [ADR-0009](0009-one-persistent-production-database.md). Pinned releases remain bootstrap and publication artifacts; ordinary deployments retain the production database.
+
 `railway.json` built the database during every deploy: download JMdict, expand 248 MB of JSON, insert ~1.2M glosses, produce a 333 MB SQLite. That welded two things with completely different cadences — code changes often, dictionary data changes monthly — so fixing a typo in a route description rebuilt the entire dictionary, deploys and rollbacks were slow, and shipping a hotfix depended on GitHub being reachable. The `healthcheckTimeout: 300` was the symptom.
 
 So the data build and the service deploy are separate. The data build runs on demand, validates via `release:check`, and publishes a versioned artifact via `package-release.ts` — both of which already existed and were only used for the public download. The service downloads the release named in `DATA_VERSION` and starts.

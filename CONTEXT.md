@@ -1,11 +1,33 @@
 # Yori Dict
 
-Yori Dict is an open Japanese dictionary, served as an API and published as a SQLite release. The domain distinguishes what JMdict supplies from what Yori adds, and what a human wrote from what a model wrote.
+Yori Dict publishes open dictionary data for other tools and people. Its Japanese and English dictionaries are independent data products with independent sources, schemas, and releases. The hosted backend consumes the same data for Yori products, but is not the primary product.
+
+## Dictionaries and Sources
+
+**Dictionary**:
+One independently released lexical dataset, such as the Japanese dictionary or the English dictionary.
+_Avoid_: Track, locale, translation
+
+**Source Dataset**:
+An outside dictionary or corpus whose license permits Yori Dict to import and redistribute selected material.
+_Avoid_: Provider, model source
+
+**Source Evidence**:
+The combined senses, labels, pronunciations, and examples supplied to generation from licensed source datasets. It establishes minimum coverage but is not text to translate mechanically.
+_Avoid_: Prompt context, source gloss
+
+**Canonical Entry**:
+Yori Dict's clean representation of one lexical item, authored from source evidence and, when necessary, model knowledge. Imported source records remain intact underneath it.
+_Avoid_: Generated translation, merged source
+
+**Generated Sense**:
+An established sense added from model knowledge because the available source evidence missed it. It carries generation and review provenance and never masquerades as imported source material.
+_Avoid_: Hallucinated sense, translated sense
 
 ## Entries and Senses
 
 **Entry**:
-A single dictionary word, identified across releases by its JMdict source id.
+A single lexical item inside one dictionary, with a stable Yori Dict id. Source identifiers remain attached as provenance rather than defining the entry's identity.
 _Avoid_: Word, term, headword
 
 **Headword**:
@@ -39,12 +61,24 @@ _Avoid_: Conjugation table, stored form
 ## Enrichment
 
 **Enrich-on-Lookup**:
-Filling a gap at the moment a lookup reveals it, so the dictionary grows from real use rather than from a scope decided in advance.
+Filling a missing entry, sense, gloss, or example when an authorized lookup reveals the gap, so real use determines growth.
 _Avoid_: Batch enrichment, backfill, demand list
 
-**Enrichment Overlay**:
-The small writable store holding enrichment produced since the last data release. Staging only: the committed source files remain the durable record, and losing the overlay costs at most the unexported window.
-_Avoid_: Cache, database, source of truth
+**Entry Candidate**:
+The surface text and sentence context sent by a consumer such as Yori News when lookup misses. It is untrusted and may be an inflection, another language, a fragment, or extraction noise.
+_Avoid_: Entry, headword
+
+**Canonical Headword Decision**:
+The eligibility result produced after lookup and source discovery miss: one canonical headword, or `SKIP`. It never contains an explanation.
+_Avoid_: Classification, rejection report
+
+**Source-Grounded Authoring**:
+Creating a canonical entry from source evidence plus lexical knowledge. The author may clarify, split, or add established senses, but must preserve every supported meaning and its provenance.
+_Avoid_: Direct translation, free generation
+
+**Production Database**:
+The persistent canonical SQLite store used by lookup and authenticated enrichment. It holds both dictionaries, accepted generated content, source provenance, and private attempt records; published releases are immutable snapshots of it.
+_Avoid_: Overlay, release artifact, cache
 
 **Sense Example**:
 A sentence illustrating one specific sense, attached to that sense rather than to the entry.
@@ -67,7 +101,7 @@ A JLPT band taken from an unofficial published list. No official JLPT vocabulary
 _Avoid_: JLPT level, official level, difficulty
 
 **Data Release**:
-A versioned, published SQLite artifact. The service loads a pinned release rather than building its own, so the API serves exactly what the public downloads.
+A versioned, immutable snapshot exported from one dictionary's canonical production tables. Japanese and English releases remain independently consumable even though runtime uses one physical database.
 _Avoid_: Build output, database, deploy
 
 ## Review
@@ -77,12 +111,8 @@ Pure-code validation that runs before any model sees a candidate: the target wor
 _Avoid_: Model review, linting, literal string match
 
 **Reviewer**:
-A model that accepts or rejects a candidate with a reason code, and never rewrites it.
+A separately trained model family that returns exactly `ACCEPT` or `REJECT` and never rewrites a candidate. Any other response is malformed and fails closed.
 _Avoid_: Editor, fixer, corrector
-
-**Reason Code**:
-The fixed vocabulary a reviewer rejects with — wrong-sense, unnatural, translation-mismatch, too-complex, off-topic — chosen so rejections can be counted.
-_Avoid_: Review comment, free-text feedback
 
 **Review Status**:
 Whether a gloss or example came from the source dictionary untouched, or passed Yori's own review.
@@ -95,3 +125,7 @@ _Avoid_: Traditional Chinese, zh-TW correctness, character conversion
 **Generation Provenance**:
 The full record of what produced a candidate: model snapshot, reasoning effort, and serving provider. A floating model alias makes provenance meaningless, so none is used.
 _Avoid_: Model name, model version
+
+**Attempt Record**:
+The observable record of one provider call: role, prompt version, model snapshot, reasoning effort, provider, requested and effective service tier, request id, duration, token use, and classified outcome.
+_Avoid_: Debug log, trace dump

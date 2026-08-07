@@ -23,6 +23,11 @@ beforeAll(async () => {
       "それは高かったです。",
       JSON.stringify([{ lang: "en", text: "It was expensive." }])
     );
+  writableDb
+    .prepare(
+      "insert into glosses (sense_id, lang, text, source, review_status) values (?, 'zh-tw', ?, 'ai-assisted', 'checked')"
+    )
+    .run("yori:s_jmdict_1358280_1", "吃");
   writableDb.close();
   lookupDb = openLookupDb(testDbPath);
   app = createApp(lookupDb);
@@ -38,7 +43,7 @@ test("returns API index links from the root route", async () => {
   expect(res.status).toBe(200);
   const body = await res.json();
   expect(body.name).toBe("Yori Dict");
-  expect(body.description).toBe("Open Japanese dictionary API and SQLite database with multilingual lookup support.");
+  expect(body.description).toBe("Open Japanese and English dictionary lookup backed by independent data releases.");
   expect(body.health).toBe("/health");
   expect(body.meta).toBe("/v1/meta");
   expect(body.docs).toBe("/doc");
@@ -72,12 +77,12 @@ test("returns metadata", async () => {
   expect(body.apiVersion).toBe("v1");
   expect(body.dictionaryVersion).toBe("2026-06-08");
   expect(body.sources).toContainEqual({
-    name: "Yori AI-assisted zh-CN glosses",
+    name: "Yori generated zh-CN glosses (legacy records)",
     license: "CC-BY-SA-4.0",
     url: "sources/ai-glosses/zh-cn.jsonl"
   });
   expect(body.sources).toContainEqual({
-    name: "Yori AI-assisted Korean glosses",
+    name: "Yori generated Korean glosses (legacy records)",
     license: "CC-BY-SA-4.0",
     url: "sources/ai-glosses/ko.jsonl"
   });
@@ -92,7 +97,7 @@ test("looks up an exact Japanese headword", async () => {
   expect(body.item.id).toBe("yori:e_jmdict_1358280");
   expect(body.item.word).toBe("食べる");
   expect(body.item.reading).toBe("たべる");
-  expect(body.item.senses).toEqual([]);
+  expect(body.item.senses).toHaveLength(1);
 });
 
 test("defaults lookup glosses to English", async () => {
@@ -100,6 +105,16 @@ test("defaults lookup glosses to English", async () => {
   expect(res.status).toBe(200);
   const body = await res.json();
   expect(body.item.senses[0].glosses[0].text).toBe("to eat");
+});
+
+test("maps legacy ai-assisted storage to generated public provenance", async () => {
+  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-tw");
+  const body = await res.json();
+  expect(body.item.senses[0].glosses[0]).toEqual({
+    text: "吃",
+    source: "generated",
+    reviewStatus: "checked"
+  });
 });
 
 test("returns headword language, sourced sense examples, and the easiest estimated level", async () => {

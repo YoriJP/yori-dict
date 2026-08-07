@@ -1,0 +1,96 @@
+{
+  "generation": [
+    {
+      "id": "bank-polysemy",
+      "headword": "bank",
+      "context": "The bank raised rates while the river bank flooded.",
+      "sourceEvidence": [
+        {
+          "source": "open-english-wordnet",
+          "sourceVersion": "2025",
+          "sourceEntryId": "bank-eval",
+          "license": "CC-BY-4.0",
+          "attribution": "Open English WordNet contributors",
+          "rawRecord": {},
+          "headword": "bank",
+          "pronunciations": [],
+          "senses": [
+            {
+              "evidenceId": "bank:finance",
+              "partOfSpeech": "noun",
+              "definition": "a financial institution",
+              "registers": [],
+              "regions": [],
+              "domains": ["finance"],
+              "dated": false,
+              "usage": [],
+              "examples": []
+            },
+            {
+              "evidenceId": "bank:river",
+              "partOfSpeech": "noun",
+              "definition": "land alongside a river",
+              "registers": [],
+              "regions": [],
+              "domains": ["geography"],
+              "dated": false,
+              "usage": [],
+              "examples": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sanction-contrast",
+      "headword": "sanction",
+      "context": "The committee sanctioned the project but imposed sanctions on the supplier.",
+      "sourceEvidence": [
+        {
+          "source": "wiktionary",
+          "sourceVersion": "2026-07-06",
+          "sourceEntryId": "sanction-eval",
+          "license": "CC-BY-SA-4.0 AND GFDL-1.1-or-later",
+          "attribution": "English Wiktionary contributors",
+          "rawRecord": {},
+          "headword": "sanction",
+          "pronunciations": [],
+          "senses": [
+            {
+              "evidenceId": "sanction:approve",
+              "partOfSpeech": "verb",
+              "definition": "to give official permission or approval",
+              "registers": ["formal"],
+              "regions": [],
+              "domains": [],
+              "dated": false,
+              "usage": [],
+              "examples": []
+            },
+            {
+              "evidenceId": "sanction:penalty",
+              "partOfSpeech": "noun",
+              "definition": "a penalty imposed for disobeying a rule or law",
+              "registers": ["formal"],
+              "regions": [],
+              "domains": ["law"],
+              "dated": false,
+              "usage": [],
+              "examples": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reviewer": [
+    { "id": "valid", "expected": "accept", "defect": null },
+    { "id": "omission", "expected": "reject", "defect": "omission" },
+    { "id": "invented-sense", "expected": "reject", "defect": "invented-sense" },
+    { "id": "wrong-pronunciation", "expected": "reject", "defect": "wrong-pronunciation" },
+    { "id": "merged-senses", "expected": "reject", "defect": "merged-senses" },
+    { "id": "circular-definition", "expected": "reject", "defect": "circular-definition" },
+    { "id": "unsupported-label", "expected": "reject", "defect": "unsupported-label" },
+    { "id": "misleading-example", "expected": "reject", "defect": "misleading-example" }
+  ]
+}
