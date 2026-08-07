@@ -76,9 +76,9 @@ _Avoid_: Classification, rejection report
 Creating a canonical entry from source evidence plus lexical knowledge. The author may clarify, split, or add established senses, but must preserve every supported meaning and its provenance.
 _Avoid_: Direct translation, free generation
 
-**Enrichment Overlay**:
-The small writable store holding accepted entries and examples produced since the last data release. Staging only: committed source files and releases remain durable records.
-_Avoid_: Cache, database, source of truth
+**Production Database**:
+The persistent canonical SQLite store used by lookup and authenticated enrichment. It holds both dictionaries, accepted generated content, source provenance, and private attempt records; published releases are immutable snapshots of it.
+_Avoid_: Overlay, release artifact, cache
 
 **Sense Example**:
 A sentence illustrating one specific sense, attached to that sense rather than to the entry.
@@ -101,7 +101,7 @@ A JLPT band taken from an unofficial published list. No official JLPT vocabulary
 _Avoid_: JLPT level, official level, difficulty
 
 **Data Release**:
-A versioned, published SQLite artifact. The service loads a pinned release rather than building its own, so the API serves exactly what the public downloads.
+A versioned, immutable snapshot exported from one dictionary's canonical production tables. Japanese and English releases remain independently consumable even though runtime uses one physical database.
 _Avoid_: Build output, database, deploy
 
 ## Review
@@ -111,15 +111,8 @@ Pure-code validation that runs before any model sees a candidate: the target wor
 _Avoid_: Model review, linting, literal string match
 
 **Reviewer**:
-A separately trained model family that accepts or rejects a candidate and never rewrites it. Any reported material problem means rejection.
+A separately trained model family that returns exactly `ACCEPT` or `REJECT` and never rewrites a candidate. Any other response is malformed and fails closed.
 _Avoid_: Editor, fixer, corrector
-
-**Reason Code**:
-The fixed vocabulary a reviewer rejects with — missing-source-meaning, invented-meaning,
-merged-senses, wrong-part-of-speech, wrong-pronunciation, unsupported-label,
-source-provenance, wrong-sense, unnatural, translation-mismatch, taiwan-terminology,
-too-complex, off-topic, factual-error, or unsafe — chosen so rejections can be counted.
-_Avoid_: Review comment, free-text feedback
 
 **Review Status**:
 Whether a gloss or example came from the source dictionary untouched, or passed Yori's own review.

@@ -6,17 +6,18 @@ artifacts, and release cadence.
 
 ## Build and lookup
 
-The pinned source archives are committed under `sources/english/raw/`. Build a release
-without downloading or calling a model:
+The pinned source archives are committed under `sources/english/raw/`. Build a source import
+artifact without downloading or calling a model:
 
 ```sh
 bun run english:build -- --version 2026.08.1
 ```
 
-This verifies both SHA-256 checksums and writes independently named SQLite, JSONL,
-manifest, and Yomitan v3 files under `releases/english/`. Repeating a build with the same
-version and inputs produces byte-identical data artifacts. `openEnglishDictionary` reads
-the SQLite artifact directly; normal lookup is case-normalized and never calls a model.
+This verifies both SHA-256 checksums. Import it with `bun run db:import -- --english <sqlite>`.
+Publish the complete canonical dictionary, including accepted generated entries and examples,
+with `bun run english:release -- --version 2026.08.1`. Repeating a release with the same
+version and canonical data produces byte-identical data artifacts. `openEnglishDictionary`
+reads the SQLite artifact directly; normal lookup is case-normalized and never calls a model.
 
 The published English schema keeps pronunciations and sense-level part of speech,
 register, region, domain, dated status, usage, examples, evidence IDs, and provenance
@@ -29,8 +30,8 @@ flatten the canonical schema.
 
 ## On-demand enrichment
 
-`createEnglishOnDemandDictionary` implements the same `DictionaryResolver.resolve`
-contract as Japanese with `targetDictionary: "en"`. English tables live in the single
+`createEnglishOnDemandDictionary` is the internal English adapter behind the shared
+`OnDemandDictionary.resolve` interface. English tables live in the single
 production SQLite database while remaining logically independent from Japanese. Source
 imports, accepted entries, examples, attempts, and terminal outcomes persist across
 application deployments; published English artifacts remain independently versioned.

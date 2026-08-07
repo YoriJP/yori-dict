@@ -70,27 +70,27 @@ Sources:
 - https://tatoeba.org/en/terms_of_use
 - https://github.com/scriptin/jmdict-simplified
 
-## AI-Assisted Example Sentences
+## Generated Example Sentences
 
-Accepted generated examples are exported from the service staging overlay to
-`sources/ai-examples/generated.jsonl`. Every candidate passes deterministic sentence,
-word-presence, translation, and Taiwanese-terminology checks before a separate model family
-may accept it. The committed row retains generation and review provenance and is folded into
-the next SQLite release. These additions are distributed under CC BY-SA 4.0.
+Accepted generated examples are written directly to the canonical production database.
+Every candidate passes deterministic sentence, word-presence, translation, and
+Taiwanese-terminology checks before a separate model family may accept it. Japanese and
+English release commands include those canonical examples in their next immutable snapshots.
+These additions are distributed under CC BY-SA 4.0.
 
 ## Source-Grounded Generated Entries
 
-Authenticated on-demand lookup may stage a new canonical Japanese entry when
-released data and indexed licensed sources do not already provide one. The
+Authenticated on-demand lookup may add a new canonical Japanese entry when
+existing data and indexed licensed sources do not already provide one. The
 authoring prompt receives source evidence where available, deterministic checks
 require every cited source meaning to remain represented, and a separate model
 family performs reject-only review. Any additional model-known sense is marked
 `generated` and cannot claim a source evidence ID.
 
-`bun run enrichment:export` writes deterministic Japanese JSONL, SQLite, and
-Yomitan v3 artifacts from accepted overlay rows. The export includes concise
-generation provenance; these project-authored additions are distributed under
-CC BY-SA 4.0.
+`bun run japanese:release -- --version <version>` snapshots every canonical Japanese entry
+as SQLite, JSONL, and Yomitan v3 artifacts. `bun run english:release -- --version <version>`
+does the same for English. Generated senses remain distinguishable through their generation
+provenance; these project-authored additions are distributed under CC BY-SA 4.0.
 
 ## Independent English Dictionary
 

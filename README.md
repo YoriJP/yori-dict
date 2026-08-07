@@ -34,8 +34,8 @@ canonical JSONL, and Yomitan v3 artifacts. See [docs/english-dictionary.md](docs
 - Sense annotations from JMdict: usage tags, field of application, dialect, notes,
   cross-references, and loanword origin.
 - Human-written Tatoeba examples attached to individual senses.
-- Reviewed generated examples staged by authorised enrichment lookups.
-- Source-grounded generated Japanese entries staged by authorised enrichment lookups.
+- Reviewed generated examples accepted through authorised enrichment lookups.
+- Source-grounded generated Japanese entries accepted through authorised enrichment lookups.
 - Unofficial JLPT-band estimates joined by JMdict source ID.
 - An inflection path explaining how a conjugated lookup reached its dictionary form.
 
@@ -234,25 +234,28 @@ sources/ai-glosses/zh-cn.jsonl
 sources/ai-glosses/ko.jsonl
 ```
 
-Build the independent English dictionary from its committed, checksummed source archives:
+Build a source-only English import artifact from its committed, checksummed archives:
 
 ```sh
 bun run english:build -- --version 2026.08.1
 ```
 
-This writes English SQLite, canonical JSONL, manifest, and Yomitan v3 artifacts under
-`releases/english/`. The English build and release version do not rebuild or change the
-Japanese dictionary.
+This source build is used to seed or explicitly refresh the production database. Publish the
+complete canonical English dictionary, including accepted generated content, with:
+
+```sh
+bun run english:release -- --version 2026.08.1
+```
+
+Both commands write independently named SQLite, JSONL, manifest, and Yomitan v3 artifacts
+under `releases/english/`. Neither changes the Japanese dictionary.
 
 ## Data Release
 
-Rebuilding from source remains available independently of service deploys. Prepare a release
-SQLite artifact with the existing validation and packaging pipeline:
+Publish an immutable Japanese snapshot from the canonical production database:
 
 ```sh
-bun run download:jmdict
-bun run release:check
-bun run scripts/package-release.ts --version 2026-08-04.3
+YORI_DB_PATH=/data/yori.sqlite bun run japanese:release -- --version 2026-08-04.3
 ```
 
 This writes ignored release files under `releases/`:
@@ -261,10 +264,12 @@ This writes ignored release files under `releases/`:
 releases/yori-dict-<artifactVersion>.sqlite
 releases/yori-dict-<artifactVersion>.sqlite.gz
 releases/yori-dict-<artifactVersion>.sqlite.gz.sha256
+releases/yori-dict-<artifactVersion>.jsonl
+releases/yori-dict-<artifactVersion>.yomitan.zip
 releases/yori-dict-<artifactVersion>.json
 ```
 
-Upload the `.sqlite.gz`, `.sha256`, and `.json` files as GitHub release assets.
+Upload the `.sqlite.gz`, `.sha256`, `.jsonl`, `.yomitan.zip`, and manifest `.json` files as GitHub release assets.
 Users can decompress the SQLite file and use it directly.
 
 After publishing the `data-<version>` GitHub release, update `version` and `sha256` in
@@ -350,8 +355,8 @@ fall back to standard once.
 
 Configure `OPENROUTER_API_KEY`, `YORI_ENRICHMENT_TOKEN`, `YORI_DB_PATH`, and comma-separated
 `YORI_JA_SOURCE_EVIDENCE_PATHS`. `YORI_ENRICHMENT_CONCURRENCY` is one
-global limit shared by both dictionaries. Export accepted generated data with
-`bun run enrichment:export`; run the paid regression corpus only with
+global limit shared by both dictionaries. Publish canonical snapshots with
+`bun run japanese:release -- --version <version>` or `bun run english:release -- --version <version>`; run the paid regression corpus only with
 `bun run enrichment:eval -- --run`.
 
 ## Legacy Generated Glosses

@@ -99,7 +99,7 @@
   <h2>5. How working data becomes a release</h2>
   <ol class="flow">
     <li>Real authenticated lookups create accepted canonical rows.</li>
-    <li><code>bun run enrichment:export</code> produces deterministic artifacts with provenance.</li>
+    <li><code>bun run japanese:release</code> or <code>bun run english:release</code> produces a complete deterministic snapshot with provenance.</li>
     <li>The artifacts are validated as an independent Japanese or English snapshot.</li>
     <li>A release publishes SQLite and JSONL without changing the running database.</li>
     <li>Yomitan v3 is produced as an adapter, not as the canonical schema.</li>

@@ -1,6 +1,6 @@
 # On-demand dictionary enrichment
 
-Japanese and English implementations use one `DictionaryResolver.resolve` contract. Public lookup remains model-free; authenticated lookup may enrich the canonical production database. Their schemas, source policies, and releases remain independent even though they share one SQLite file.
+Callers use one `OnDemandDictionary.resolve` interface. It routes internally to Japanese or English logic while public lookup remains model-free; authenticated lookup may enrich the canonical production database. Their schemas, source policies, and releases remain independent even though they share one SQLite file.
 
 ## Interface
 
@@ -52,7 +52,7 @@ publishing prompts or model traces.
 
 ## Production data and release path
 
-`YORI_DB_PATH` selects the single persistent SQLite database. Drizzle migrations change its schema during startup; they never seed or replace content. `bun run db:import -- --japanese <sqlite>` and `--english <sqlite>` explicitly import refreshed source releases while preserving accepted generated content. `bun run enrichment:export` writes deterministic generated JSONL, SQLite, and Yomitan v3 artifacts with public provenance. Japanese and English publication remain independent snapshot operations.
+`YORI_DB_PATH` selects the single persistent SQLite database. Drizzle migrations change its schema during startup; they never seed or replace content. `bun run db:import -- --japanese <sqlite>` and `--english <sqlite>` explicitly import refreshed source releases while preserving accepted generated content. `bun run japanese:release -- --version <version>` and `bun run english:release -- --version <version>` write complete canonical SQLite, JSONL, and Yomitan v3 snapshots. Publication remains independent by dictionary.
 
 ## Runtime configuration
 
