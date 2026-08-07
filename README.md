@@ -60,7 +60,7 @@ or the [OpenAPI specification](https://yori-dict-production.up.railway.app/opena
 
 ## Japanese SQLite Release
 
-The latest published Japanese data release is
+This example uses the pinned
 [`data-2026-08-04.3`](https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3).
 Download and verify it with:
 
@@ -70,6 +70,13 @@ curl -LO "https://github.com/YoriJP/yori-dict/releases/download/data-${version}/
 curl -LO "https://github.com/YoriJP/yori-dict/releases/download/data-${version}/yori-dict-${version}.sqlite.gz.sha256"
 shasum -a 256 -c "yori-dict-${version}.sqlite.gz.sha256"
 gunzip "yori-dict-${version}.sqlite.gz"
+```
+
+Inspect a dictionary form with the `sqlite3` CLI:
+
+```sh
+sqlite3 "yori-dict-${version}.sqlite" \
+  "SELECT text, reading, kind, common FROM forms WHERE text = '食べる';"
 ```
 
 Exact record counts and source metadata are recorded in the release manifest:
@@ -92,3 +99,8 @@ them into the Japanese schema.
 The source code is licensed under MIT. Published dictionary data and SQLite
 releases are distributed under CC BY-SA 4.0, with upstream attribution and
 license details documented in [DATA_SOURCES.md](DATA_SOURCES.md).
+
+## Support
+
+Found incorrect dictionary data, an API problem, or a broken release artifact?
+[Open an issue](https://github.com/YoriJP/yori-dict/issues).
