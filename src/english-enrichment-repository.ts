@@ -68,13 +68,6 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
   const saveAttempt = db.prepare(
     "insert into model_attempts (dictionary, attempt_json, created_at) values ('en', ?, ?)"
   );
-  const readTerminal = db.query<{ outcome: string }, [string]>(
-    "select outcome from terminal_outcomes where dictionary = 'en' and outcome_key = ?"
-  );
-  const saveTerminal = db.prepare(`
-    insert into terminal_outcomes (dictionary, outcome_key, outcome) values ('en', ?, ?)
-    on conflict(dictionary, outcome_key) do update set outcome = excluded.outcome
-  `);
 
   function recordGeneration(generation: GenerationProvenance | undefined): string | null {
     if (!generation) return null;
@@ -251,12 +244,6 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
     },
     recordAttempt(attempt) {
       saveAttempt.run(JSON.stringify(attempt), new Date().toISOString());
-    },
-    terminalOutcome(key) {
-      return readTerminal.get(key)?.outcome ?? null;
-    },
-    saveTerminalOutcome(key, outcome) {
-      saveTerminal.run(key, outcome);
     },
     acceptedEntries(lang) {
       return db.query<{ id: string }, [string]>(`

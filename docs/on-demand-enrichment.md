@@ -24,7 +24,7 @@ type OnDemandDictionary = {
 };
 ```
 
-`lang` is the requested explanation language. It scopes the request key, the canonical entry key, the example key, the in-flight deduplication key, and every persisted terminal outcome, so work for one language never blocks or answers for another. Japanese authors en, de, zh-tw, zh-cn, and ko; English authors en, ja, and zh-tw. Each is an independent group written directly in that language; no language is produced by translating or character-converting another. Any other requested language resolves to `null` without a model call.
+`lang` is the requested explanation language. It scopes the canonical entry key, the example key, and the in-flight deduplication key, so work for one language never blocks or answers for another. Japanese authors en, de, zh-tw, zh-cn, and ko; English authors en, ja, and zh-tw. Each is an independent group written directly in that language; no language is produced by translating or character-converting another. Any other requested language resolves to `null` without a model call.
 
 The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call, and the HTTP layer answers with an error. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted meanings and the example stays missing and retryable.
 
@@ -52,16 +52,16 @@ Public lookup and owner-authorized enrichment are one route family at v1. `GET /
 
 ## Failure policy
 
-- `SKIP`, deterministic rejection, semantic rejection, and malformed content are terminal for an entry-language group.
-- A rejected example is not terminal: it is never saved, it never removes accepted meanings, and a later owner-authorized lookup may try exactly one fresh candidate. A malformed example response stays terminal.
-- Authoring and review are atomic per entry and language, and terminal outcomes are stored per explanation language, so a rejection in one language leaves another language's accepted content untouched.
-- Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008. An exhausted retry is an operational failure, not a terminal outcome, and stays retryable.
+- `SKIP`, deterministic rejection, semantic rejection, and malformed content all end the attempt and produce nothing. None of them is recorded, so the next lookup for that word tries again.
+- A refusal is logged as `enrichment_refused` with the stage, headword, and the rule that refused it. That log line is the only record.
+- Authoring and review are atomic per entry and language, so work in one language never disturbs another language's accepted content.
+- Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008.
 - Concurrent requests for the same canonical headword or sense share one in-flight operation.
 - A failed or rejected candidate is observable but never becomes dictionary data.
 
 ## Production data and release path
 
-A first start bootstraps a missing database from the release pinned in `data-release.json`. That pin still names a pre-`ja-2` artifact, so bootstrapping fails with an explicit error until a Japanese release built by `bun run japanese:release` is published and re-pinned; `bun run build:db` builds one locally in the meantime.
+A first start bootstraps a missing database from the release pinned in `data-release.json`. A release that predates the `ja-2` schema is refused with an explicit error rather than served.
 
 `YORI_DB_PATH` selects the single persistent SQLite database. Drizzle migrations change its schema during startup; they never seed or replace content. `bun run db:import -- --japanese <sqlite>` and `--english <sqlite>` explicitly import refreshed source releases while preserving accepted generated content. `bun run japanese:release -- --version <version>` and `bun run english:release -- --version <version>` write complete canonical SQLite, JSONL, and Yomitan v3 snapshots. Publication remains independent by dictionary.
 

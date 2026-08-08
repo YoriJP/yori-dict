@@ -36,6 +36,13 @@
       "when": 1786134959682,
       "tag": "0004_drop-blob-english-store",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786180000000,
+      "tag": "0005_drop-terminal-outcomes",
+      "breakpoints": true
     }
   ]
 }

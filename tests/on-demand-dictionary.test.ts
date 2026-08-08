@@ -426,24 +426,72 @@ test("invalid context cannot trigger example generation for an existing entry", 
   expect(gateway.calls).toEqual([]);
 });
 
-test("semantic and malformed review failures are terminal", async () => {
+test("a refused entry is never recorded, so the next lookup authors it again", async () => {
   for (const review of [
     "REJECT",
     "reject"
   ]) {
     const repository = new MemoryRepository();
-    const gateway = new ScriptedGateway([
+    const round = () => [
       "AI",
       authoredEntry({ headword: "AI", reading: "エーアイ", partOfSpeech: ["n"], provenance: "generated" }),
       review
-    ]);
+    ];
+    const gateway = new ScriptedGateway([...round(), ...round()]);
     const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
     expect(await dictionary.resolve(request("AI", { sentence: "AIを業務に活用する。" }))).toBeNull();
     expect(await dictionary.resolve(request("AI", { sentence: "AIを業務に活用する。" }))).toBeNull();
-    expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility", "entry-author", "entry-review"]);
+    // The refusal left no record, so the second lookup repeats the whole run
+    // rather than answering from a stored outcome.
+    expect(gateway.calls.map(({ role }) => role)).toEqual([
+      "eligibility", "entry-author", "entry-review",
+      "eligibility", "entry-author", "entry-review"
+    ]);
     expect(repository.entries.size).toBe(0);
   }
+});
+
+test("the author schema enumerates the dictionary's own label codes", async () => {
+  const repository = new MemoryRepository();
+  const gateway = new ScriptedGateway([
+    "AI",
+    authoredEntry({ headword: "AI", reading: "エーアイ", partOfSpeech: ["n"], provenance: "generated" }),
+    "ACCEPT"
+  ]);
+
+  await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolve(request("AI", { sentence: "AIを業務に活用する。" }));
+
+  const author = gateway.calls.find((call) => call.role === "entry-author");
+  const sense = (author?.responseSchema?.schema as any).properties.senses.items.properties;
+  // The codes are a closed set, so the schema carries them and the prompt does
+  // not have to describe them. This is what stops the model rendering a label
+  // in the explanation language.
+  expect(sense.partOfSpeech.items.enum).toEqual([...repository.labelVocabulary().partOfSpeech].sort());
+  expect(sense.dialect.items.enum).toEqual([...repository.labelVocabulary().dialect].sort());
+  expect(author?.prompt).not.toContain("adj-i =");
+});
+
+test("a refusal is logged with the rule that rejected it", async () => {
+  const repository = new MemoryRepository();
+  const refusals: Array<Record<string, unknown>> = [];
+  const gateway = new ScriptedGateway([
+    "AI",
+    // `名詞` is the Japanese word for "noun", not a label code. The author
+    // schema enumerates the codes, so this is the failure the log must explain.
+    authoredEntry({ headword: "AI", reading: "エーアイ", partOfSpeech: ["名詞"], provenance: "generated" })
+  ]);
+  const dictionary = createJapaneseOnDemandDictionary({
+    repository,
+    modelGateway: gateway,
+    logger: (event) => { if (event.event === "enrichment_refused") refusals.push(event); }
+  });
+
+  expect(await dictionary.resolve(request("AI", { sentence: "AIを業務に活用する。" }))).toBeNull();
+  expect(refusals).toHaveLength(1);
+  expect(refusals[0]!.stage).toBe("entry");
+  expect(refusals[0]!.reason).toBe("Unknown part of speech: 名詞");
 });
 
 test("deterministic validation rejects source-backed senses that change source grammar", async () => {
@@ -841,7 +889,6 @@ class MemoryRepository implements EnrichmentRepository {
   readonly attempts: unknown[] = [];
   readonly entries = new Map<string, PublicLookupItem>();
   readonly examples = new Map<string, PublicLookupItem["senses"][number]["examples"]>();
-  readonly terminal = new Map<string, string>();
   private readonly released: Map<string, PublicLookupItem>;
   private readonly sources: Map<string, SourceEvidence[]>;
 
@@ -890,15 +937,12 @@ class MemoryRepository implements EnrichmentRepository {
     this.attempts.push(attempt);
   }
 
-  terminalOutcome(key: string) {
-    return this.terminal.get(key) ?? null;
-  }
-
-  saveTerminalOutcome(key: string, outcome: string) {
-    this.terminal.set(key, outcome);
-  }
-
-  knownLabels() {
-    return new Set(["n", "v5m", "col", "arch", "comp"]);
+  labelVocabulary() {
+    return {
+      partOfSpeech: new Set(["n", "v5m", "v1", "adj-i", "adj-na", "adv", "int"]),
+      misc: new Set(["col", "arch"]),
+      field: new Set(["comp"]),
+      dialect: new Set(["ksb"])
+    };
   }
 }

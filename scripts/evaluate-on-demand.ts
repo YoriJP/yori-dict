@@ -104,7 +104,6 @@ async function evaluateProductionPath(test: EligibilityCase, gateway: ReturnType
 class EvaluationRepository implements EnrichmentRepository {
   readonly attempts: AttemptRecord[] = [];
   private entry: PublicLookupItem | null = null;
-  private readonly terminal = new Map<string, string>();
 
   constructor(private readonly source: SourceEvidence) {}
 
@@ -119,9 +118,14 @@ class EvaluationRepository implements EnrichmentRepository {
     };
   }
   recordAttempt(attempt: AttemptRecord) { this.attempts.push(attempt); }
-  terminalOutcome(key: string) { return this.terminal.get(key) ?? null; }
-  saveTerminalOutcome(key: string, outcome: string) { this.terminal.set(key, outcome); }
-  knownLabels() { return new Set(["n", "adj-na", "adj-i", "adv", "int", "v1", "v5m", "col", "comp"]); }
+  labelVocabulary() {
+    return {
+      partOfSpeech: new Set(["n", "adj-na", "adj-i", "adv", "int", "v1", "v5m"]),
+      misc: new Set(["col"]),
+      field: new Set(["comp"]),
+      dialect: new Set<string>()
+    };
+  }
 }
 
 function flag(name: string): string | null {

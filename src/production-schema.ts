@@ -1,4 +1,4 @@
-import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // The canonical `ja_*` and `en_*` dictionary tables are installed by their own
 // dictionary rebuilds. Drizzle owns the production-only tables around them.
@@ -15,8 +15,3 @@ export const modelAttempts = sqliteTable("model_attempts", {
   createdAt: text("created_at").notNull()
 });
 
-export const terminalOutcomes = sqliteTable("terminal_outcomes", {
-  dictionary: text("dictionary").notNull(),
-  outcomeKey: text("outcome_key").notNull(),
-  outcome: text("outcome").notNull()
-}, (table) => [primaryKey({ columns: [table.dictionary, table.outcomeKey] })]);

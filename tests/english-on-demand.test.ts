@@ -280,7 +280,6 @@ class MemoryEnglishRepository implements EnglishEnrichmentRepository {
   readonly savedExamples: Array<[string, EnglishExample]> = [];
   private readonly released: Map<string, EnglishEntry>;
   private readonly sources: Map<string, EnglishSourceRecord[]>;
-  private readonly terminal = new Map<string, string>();
   constructor(options: {
     released?: Array<[string, EnglishEntry]>;
     sources?: Array<[string, EnglishSourceRecord[]]>;
@@ -309,8 +308,6 @@ class MemoryEnglishRepository implements EnglishEnrichmentRepository {
     ) };
   }
   recordAttempt(attempt: AttemptRecord) { this.attempts.push(attempt); }
-  terminalOutcome(key: string) { return this.terminal.get(key) ?? null; }
-  saveTerminalOutcome(key: string, outcome: string) { this.terminal.set(key, outcome); }
 }
 
 function sourceRecord(): EnglishSourceRecord {

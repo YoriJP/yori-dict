@@ -4,7 +4,7 @@
 
 Yori Dict is an internal lookup and background-enrichment backend whose products are independently published Japanese and English dictionary artifacts. Runtime therefore needs one durable working database, not an immutable release database plus writable overlays.
 
-Railway mounts one volume at `/data`. `YORI_DB_PATH=/data/yori.sqlite` contains the Japanese and English canonical tables, accepted generated content, model attempts, terminal outcomes, and the Drizzle migration journal. Application deployment runs pending migrations and starts; it never reseeds or replaces existing dictionary data.
+Railway mounts one volume at `/data`. `YORI_DB_PATH=/data/yori.sqlite` contains the Japanese and English canonical tables, accepted generated content, model attempts, and the Drizzle migration journal. Application deployment runs pending migrations and starts; it never reseeds or replaces existing dictionary data.
 
 The first start bootstraps a missing database from the pinned Japanese release and a rebuild of the checksummed English sources. Later starts only apply unapplied migrations. Source refreshes are explicit and idempotent through `bun run db:import`; they preserve accepted generated content. `bun run japanese:release` and `bun run english:release` publish independent snapshots from accepted canonical data.
 

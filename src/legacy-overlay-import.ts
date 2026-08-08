@@ -83,11 +83,6 @@ function importJapaneseOverlay(productionPath: string, overlayPath: string): boo
         repository.recordAttempt(JSON.parse(row.attempt_json) as AttemptRecord);
       }
     }
-    if (hasTable(legacy, "on_demand_terminal_outcomes")) {
-      for (const row of legacy.query<{ outcome_key: string; outcome: string }, []>(
-        "select outcome_key, outcome from on_demand_terminal_outcomes order by outcome_key"
-      ).all()) repository.saveTerminalOutcome(row.outcome_key, row.outcome);
-    }
     markImported(productionPath, "legacyJapaneseOverlay", overlayPath);
     return true;
   } finally {
@@ -116,11 +111,6 @@ function importEnglishOverlay(productionPath: string, overlayPath: string): bool
       for (const row of legacy.query<{ attempt_json: string }, []>("select attempt_json from english_attempts order by id").all()) {
         repository.recordAttempt(JSON.parse(row.attempt_json) as AttemptRecord);
       }
-    }
-    if (hasTable(legacy, "english_terminal_outcomes")) {
-      for (const row of legacy.query<{ outcome_key: string; outcome: string }, []>(
-        "select outcome_key, outcome from english_terminal_outcomes order by outcome_key"
-      ).all()) repository.saveTerminalOutcome(row.outcome_key, row.outcome);
     }
     markImported(productionPath, "legacyEnglishOverlay", overlayPath);
     return true;

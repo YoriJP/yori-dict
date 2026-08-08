@@ -112,8 +112,8 @@ never flattens two explanation languages into one pack.
 `createEnglishOnDemandDictionary` is the internal English adapter behind the shared
 `OnDemandDictionary.resolve` interface. The `en_*` tables live in the single production
 SQLite database while remaining logically independent from Japanese. Accepted entries,
-examples, attempts, and terminal outcomes persist across application deployments; published
-English artifacts remain independently versioned.
+examples, and attempts persist across application deployments; published English artifacts
+remain independently versioned.
 
 Enrichment is language scoped, like Japanese: `saveEntry(entry, lang, generation)` writes
 exactly one entry-language group atomically. Owner-authorized lookup fills only a missing
@@ -121,13 +121,13 @@ entry, a missing explanation-language group, or a missing generated example — 
 imported meanings are never rewritten, and short imported content is not treated as
 missing. One author request writes the complete missing group and one separate reviewer
 accepts or rejects it; examples are authored and reviewed independently, one meaning at a
-time, and one useful learner example per meaning is enough. A rejected example is not saved
-and stays retryable on a later owner lookup; a malformed model response is terminal so a
-candidate the model cannot form does not loop.
+time, and one useful learner example per meaning is enough. A refused example is not saved and stays
+retryable on a later owner lookup, and so does a response the parser could not read: no
+refusal is recorded.
 
 `ja` and `zh-tw` groups are siblings of the English group, not translations of it. Each has
-its own author request, reviewer, retries, terminal outcome and persistence key, keyed by
-entry *and* language, so the two may run concurrently and one rejection publishes nothing
+its own author request, reviewer, retries, and persistence key, keyed by entry *and*
+language, so the two may run concurrently and one rejection publishes nothing
 and leaves the other untouched. The author reads the English facts as reference but writes
 the group itself, and may divide meanings differently from English.
 
