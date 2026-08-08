@@ -69,13 +69,23 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
     try {
       production.transaction(() => {
         production.exec(`
-          -- An accepted language group authored for an imported entry is the
-          -- usual shape of enrichment. It is carried across the graft whole,
-          -- with its glosses, examples, and generation provenance.
+          -- A headword first accepted as a generated entry, and now supplied by
+          -- the release, is promoted to the release's own identity. Without
+          -- this it would keep source = 'generated' forever, and every later
+          -- graft would skip it because deletion targets imported rows.
+          create temp table promoted_en_entries as
+            select entry.id as id from en_entries entry
+            where entry.source = 'generated'
+              and entry.id in (select id from english_release.en_entries);
+
+          -- An accepted language group authored for an entry the release
+          -- supplies is the usual shape of enrichment. It is carried across the
+          -- graft whole, with its glosses, examples, and generation provenance.
           create temp table retained_en_senses as
             select sense.* from en_senses sense
             join en_entries entry on entry.id = sense.entry_id
-            where sense.generation_id is not null and entry.source <> 'generated';
+            where sense.generation_id is not null
+              and (entry.source <> 'generated' or entry.id in (select id from promoted_en_entries));
           create temp table retained_en_glosses as
             select gloss.* from en_glosses gloss
             where gloss.sense_id in (select id from retained_en_senses);
@@ -83,21 +93,34 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
             select example.* from en_examples example
             join en_senses sense on sense.id = example.sense_id
             join en_entries entry on entry.id = sense.entry_id
-            where entry.source <> 'generated'
+            where (entry.source <> 'generated' or entry.id in (select id from promoted_en_entries))
               and (example.source = 'generated' or sense.generation_id is not null);
           delete from en_examples where sense_id in (
             select sense.id from en_senses sense join en_entries entry on entry.id = sense.entry_id
-            where entry.source <> 'generated'
+            where entry.source <> 'generated' or entry.id in (select id from promoted_en_entries)
           );
           delete from en_glosses where sense_id in (
             select sense.id from en_senses sense join en_entries entry on entry.id = sense.entry_id
-            where entry.source <> 'generated'
+            where entry.source <> 'generated' or entry.id in (select id from promoted_en_entries)
           );
-          delete from en_senses where entry_id in (select id from en_entries where source <> 'generated');
-          delete from en_pronunciations where entry_id in (select id from en_entries where source <> 'generated');
-          delete from en_entry_sources where entry_id in (select id from en_entries where source <> 'generated');
-          delete from en_lookup_terms where entry_id in (select id from en_entries where source <> 'generated');
-          delete from en_entries where source <> 'generated';
+          delete from en_senses where entry_id in (
+            select id from en_entries where source <> 'generated'
+            union select id from promoted_en_entries
+          );
+          delete from en_pronunciations where entry_id in (
+            select id from en_entries where source <> 'generated'
+            union select id from promoted_en_entries
+          );
+          delete from en_entry_sources where entry_id in (
+            select id from en_entries where source <> 'generated'
+            union select id from promoted_en_entries
+          );
+          delete from en_lookup_terms where entry_id in (
+            select id from en_entries where source <> 'generated'
+            union select id from promoted_en_entries
+          );
+          delete from en_entries
+           where source <> 'generated' or id in (select id from promoted_en_entries);
           delete from en_metadata;
 
           insert into en_metadata select * from english_release.en_metadata;
@@ -125,6 +148,7 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
           insert or ignore into en_examples
             select retained.* from retained_en_examples retained
             join en_senses sense on sense.id = retained.sense_id;
+          drop table promoted_en_entries;
           drop table retained_en_senses;
           drop table retained_en_glosses;
           drop table retained_en_examples;
@@ -168,13 +192,23 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
     try {
       production.transaction(() => {
         production.exec(`
-          -- An accepted language group authored for an imported entry is the
-          -- usual shape of enrichment. It is carried across the graft whole,
-          -- with its glosses, examples, and generation provenance.
+          -- A headword first accepted as a generated entry, and now supplied by
+          -- the release, is promoted to the release's own identity. Without
+          -- this it would keep source = 'generated' forever, and every later
+          -- graft would skip it because deletion targets imported rows.
+          create temp table promoted_ja_entries as
+            select entry.id as id from ja_entries entry
+            where entry.source = 'generated'
+              and entry.id in (select id from japanese_release.ja_entries);
+
+          -- An accepted language group authored for an entry the release
+          -- supplies is the usual shape of enrichment. It is carried across the
+          -- graft whole, with its glosses, examples, and generation provenance.
           create temp table retained_ja_senses as
             select sense.* from ja_senses sense
             join ja_entries entry on entry.id = sense.entry_id
-            where sense.generation_id is not null and entry.source <> 'generated';
+            where sense.generation_id is not null
+              and (entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries));
           create temp table retained_ja_glosses as
             select gloss.* from ja_glosses gloss
             where gloss.sense_id in (select id from retained_ja_senses);
@@ -182,20 +216,30 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
             select example.* from ja_examples example
             join ja_senses sense on sense.id = example.sense_id
             join ja_entries entry on entry.id = sense.entry_id
-            where entry.source <> 'generated'
+            where (entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries))
               and (example.source = 'generated' or sense.generation_id is not null);
           delete from ja_examples where sense_id in (
             select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
-            where entry.source <> 'generated'
+            where entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries)
           );
           delete from ja_glosses where sense_id in (
             select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
-            where entry.source <> 'generated'
+            where entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries)
           );
-          delete from ja_senses where entry_id in (select id from ja_entries where source <> 'generated');
-          delete from ja_forms where entry_id in (select id from ja_entries where source <> 'generated');
-          delete from ja_lookup_terms where entry_id in (select id from ja_entries where source <> 'generated');
-          delete from ja_entries where source <> 'generated';
+          delete from ja_senses where entry_id in (
+            select id from ja_entries where source <> 'generated'
+            union select id from promoted_ja_entries
+          );
+          delete from ja_forms where entry_id in (
+            select id from ja_entries where source <> 'generated'
+            union select id from promoted_ja_entries
+          );
+          delete from ja_lookup_terms where entry_id in (
+            select id from ja_entries where source <> 'generated'
+            union select id from promoted_ja_entries
+          );
+          delete from ja_entries
+           where source <> 'generated' or id in (select id from promoted_ja_entries);
           delete from ja_metadata;
 
           insert into ja_metadata select * from japanese_release.ja_metadata;
@@ -222,6 +266,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           insert or ignore into ja_examples
             select retained.* from retained_ja_examples retained
             join ja_senses sense on sense.id = retained.sense_id;
+          drop table promoted_ja_entries;
           drop table retained_ja_senses;
           drop table retained_ja_glosses;
           drop table retained_ja_examples;

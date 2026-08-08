@@ -7,6 +7,10 @@ import { basename, join } from "node:path";
 import { buildEnglishRelease } from "../src/english-release";
 import { rebuildEnglishDictionary, type EnglishSourceInput } from "../src/english-rebuild";
 import { createStoredZip, openZipFile } from "../src/stored-zip";
+import { openEnglishEnrichmentRepository } from "../src/english-enrichment-repository";
+import { openEnglishLookupDb } from "../src/english-dictionary";
+import { importEnglishRelease, migrateProductionDatabase } from "../src/production-database";
+import type { ApiLang } from "../src/types";
 
 test("the English release is deterministic and keeps the source's meaning order end to end", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-release-"));
@@ -169,4 +173,77 @@ async function fixtureWiktionary(root: string): Promise<EnglishSourceInput> {
 /** Reads one file out of a produced Yomitan pack. */
 async function packEntry(path: string, name: string): Promise<string> {
   return (await openZipFile(path)).text(name);
+}
+
+test("a release that starts covering an authored headword takes over its entry", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-en-graft-"));
+  const production = join(root, "production.sqlite");
+  migrateProductionDatabase(production);
+
+  const generation = {
+    model: "gpt-5.6-luna", provider: "openrouter", reasoningEffort: "minimal",
+    promptVersion: "english-entry-author-v1", serviceTier: "flex",
+    reviewOutcome: "accepted", createdAt: "2026-08-08T00:00:00.000Z"
+  };
+  const sense = (id: string, lang: ApiLang, text: string) => ({
+    id, lang, position: 1, partOfSpeech: "noun",
+    glosses: [{ text, source: "generated", reviewStatus: "checked" as const }],
+    registers: [], regions: [], domains: [], dated: false, usage: [],
+    examples: [], evidenceIds: [], provenance: "generated" as const, generation
+  });
+
+  // The dictionary authored this headword before any source carried it.
+  const repository = openEnglishEnrichmentRepository(production);
+  const authored = {
+    id: "yori:en:e_authored_florp", dictionary: "en" as const, headword: "florp",
+    pronunciations: [], sources: [],
+    senses: [sense("yori:en:s_authored_florp_en", "en", "a fictional test object")]
+  };
+  repository.saveEntry(authored, "en", generation);
+  repository.saveEntry({ ...authored, senses: [sense("yori:en:s_authored_florp_ja", "ja", "架空の試験用の物。")] }, "ja", generation);
+  repository.close();
+
+  // A later release supplies the same headword under the same stable identity.
+  const releaseDb = join(root, "release.sqlite");
+  await rebuildEnglishDictionary({
+    sources: [await fixtureFlorp(root)], out: releaseDb, version: "release-1", retainFrom: null
+  });
+  const db = new Database(releaseDb);
+  db.prepare("update en_entries set id = ? where lookup_term = 'florp'").run("yori:en:e_authored_florp");
+  db.prepare("update en_senses set entry_id = ? where lang = 'en'").run("yori:en:e_authored_florp");
+  db.prepare("update en_lookup_terms set entry_id = ? where term = 'florp'").run("yori:en:e_authored_florp");
+  db.close();
+
+  expect(importEnglishRelease(production, releaseDb)).toBe(true);
+
+  const graftedDb = new Database(production, { readonly: true });
+  // The entry belongs to the release now; leaving it marked generated would
+  // make every later graft skip it forever.
+  expect(graftedDb.query<{ source: string }, []>(
+    "select source from en_entries where lookup_term = 'florp'"
+  ).get()?.source).toBe("open-english-wordnet");
+  graftedDb.close();
+
+  const lookup = openEnglishLookupDb(production);
+  expect(lookup.lookup("florp", "en")?.senses.map((s) => s.glosses[0].text)).toEqual(["a small imaginary widget"]);
+  // The accepted Japanese group is not source content and survives the takeover.
+  expect(lookup.lookup("florp", "ja")?.senses.map((s) => s.glosses[0].text)).toEqual(["架空の試験用の物。"]);
+  lookup.close();
+});
+
+async function fixtureFlorp(root: string): Promise<EnglishSourceInput> {
+  const file = join(root, "wordnet-florp.zip");
+  await Bun.write(file, createStoredZip([
+    {
+      name: "entries-a.json",
+      content: JSON.stringify({ florp: { n: { sense: [{ id: "florp%1:06:00::", synset: "s-florp" }] } } })
+    },
+    {
+      name: "noun.fixture.json",
+      content: JSON.stringify({
+        "s-florp": { definition: ["a small imaginary widget"], members: ["florp"], partOfSpeech: "n" }
+      })
+    }
+  ]));
+  return { source: "open-english-wordnet", version: "2025-fixture", file };
 }

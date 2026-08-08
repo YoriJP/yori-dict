@@ -993,10 +993,18 @@ function restoreRetained(
   db.transaction(() => {
     for (const record of retained.entries) {
       const id = String(record.entry.id);
-      if (db.query<{ id: string }, [string]>("select id from en_entries where id = ?").get(id)) continue;
-      if (db.query<{ id: string }, [string]>(
-        "select id from en_entries where lookup_term = ?"
-      ).get(String(record.entry.lookup_term))) continue;
+      const existing = db.query<{ id: string }, [string]>("select id from en_entries where id = ?").get(id)
+        ?? db.query<{ id: string }, [string]>(
+          "select id from en_entries where lookup_term = ?"
+        ).get(String(record.entry.lookup_term));
+      if (existing) {
+        // The sources now provide this headword, so the imported entry is the
+        // canonical one. The accepted language groups the entry was enriched
+        // with are not source content, so they move onto it rather than being
+        // dropped with the entry row they used to hang from.
+        groups += reattachGroups(db, record, existing.id);
+        continue;
+      }
       insertRow(db, "en_entries", record.entry, false);
       for (const generation of record.generations) insertRow(db, "en_generations", generation, true);
       for (const source of record.sources) insertRow(db, "en_entry_sources", source, true);
@@ -1039,6 +1047,41 @@ function restoreRetained(
   return { entries, groups, examples };
 }
 
+
+/**
+ * Moves a retained entry's accepted language groups onto an entry the rebuilt
+ * sources now provide. A language the sources already explain is left alone:
+ * imported content wins, and a retained group never reorders it.
+ */
+function reattachGroups(db: Database, record: RetainedEntry, entryId: string): number {
+  const byLang = new Map<string, Array<Record<string, unknown>>>();
+  for (const sense of record.senses) {
+    const lang = String(sense.lang);
+    if (!byLang.has(lang)) byLang.set(lang, []);
+    byLang.get(lang)!.push(sense);
+  }
+
+  let moved = 0;
+  for (const [lang, senses] of byLang) {
+    // Only accepted enrichment travels; it is marked by its generation row.
+    if (!senses.some((sense) => sense.generation_id !== null && sense.generation_id !== undefined)) continue;
+    if (db.query<{ id: string }, [string, string]>(
+      "select id from en_senses where entry_id = ? and lang = ? limit 1"
+    ).get(entryId, lang)) continue;
+
+    const senseIds = new Set(senses.map((sense) => String(sense.id)));
+    for (const generation of record.generations) insertRow(db, "en_generations", generation, true);
+    for (const sense of senses) insertRow(db, "en_senses", { ...sense, entry_id: entryId }, false);
+    for (const gloss of record.glosses) {
+      if (senseIds.has(String(gloss.sense_id))) insertRow(db, "en_glosses", gloss, false);
+    }
+    for (const example of record.examples) {
+      if (senseIds.has(String(example.sense_id))) insertRow(db, "en_examples", example, false);
+    }
+    moved += 1;
+  }
+  return moved;
+}
 
 function defaultLicense(source: string): string {
   return source === englishSourcePolicy.primary ? oewnLicense : wiktionaryLicense;

@@ -214,6 +214,51 @@ test("a rebuild retains accepted generated content and does not reorder imported
   lookup.close();
 });
 
+test("a headword the sources start providing keeps the groups it was enriched with", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-en-promote-"));
+  const out = join(root, "english.sqlite");
+  await rebuildEnglishDictionary({
+    sources: [await fixtureWordNet(root)], out, version: "test", retainFrom: null
+  });
+  migrateProductionDatabase(out);
+
+  const repository = openEnglishEnrichmentRepository(out);
+  repository.saveEntry(generatedEntry(), "en", generation);
+  const florp = repository.find("florp", "en")!;
+  repository.saveEntry({
+    ...florp,
+    senses: [{
+      id: "yori:en:s_generated_florp_ja",
+      lang: "ja",
+      position: 1,
+      partOfSpeech: "noun",
+      glosses: [{ text: "架空の試験用の物。", source: "generated", reviewStatus: "checked" }],
+      registers: [], regions: [], domains: [], dated: false, usage: [],
+      examples: [],
+      evidenceIds: [],
+      provenance: "generated",
+      generation
+    }]
+  }, "ja", generation);
+  repository.close();
+
+  // The next pinned source carries the headword the dictionary had authored.
+  await rebuildEnglishDictionary({ sources: [await fixtureWordNetWithFlorp(root)], out, version: "test" });
+
+  const lookup = openEnglishLookupDb(out);
+  const english = lookup.lookup("florp", "en")!;
+  // The source owns the English group now; it is not left marked generated.
+  expect(english.senses.map((sense) => sense.glosses[0].text)).toEqual(["a small imaginary widget"]);
+  expect(english.senses[0].provenance).toBe("source");
+  // The accepted Japanese group is not source content, so it moved onto the
+  // entry the source now provides instead of disappearing with the old row.
+  const japanese = lookup.lookup("florp", "ja")!;
+  expect(japanese.id).toBe(english.id);
+  expect(japanese.senses.map((sense) => sense.glosses[0].text)).toEqual(["架空の試験用の物。"]);
+  expect(japanese.senses[0].provenance).toBe("generated");
+  lookup.close();
+});
+
 test("a failed rebuild leaves the previous database usable", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-failure-"));
   const out = join(root, "english.sqlite");
@@ -313,6 +358,24 @@ async function fixtureWordNet(root: string): Promise<EnglishSourceInput> {
       name: "verb.fixture.json",
       content: JSON.stringify({
         "s-deposit": { definition: ["put into a bank account"], members: ["bank", "deposit"], partOfSpeech: "v" }
+      })
+    }
+  ]));
+  return { source: "open-english-wordnet", version: "2025-fixture", file };
+}
+
+/** The pinned source, once it starts carrying the previously authored headword. */
+async function fixtureWordNetWithFlorp(root: string): Promise<EnglishSourceInput> {
+  const file = join(root, "wordnet-florp.zip");
+  await Bun.write(file, createStoredZip([
+    {
+      name: "entries-a.json",
+      content: JSON.stringify({ florp: { n: { sense: [{ id: "florp%1:06:00::", synset: "s-florp" }] } } })
+    },
+    {
+      name: "noun.fixture.json",
+      content: JSON.stringify({
+        "s-florp": { definition: ["a small imaginary widget"], members: ["florp"], partOfSpeech: "n" }
       })
     }
   ]));
