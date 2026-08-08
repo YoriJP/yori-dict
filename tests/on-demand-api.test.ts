@@ -282,9 +282,10 @@ function englishEntry(): EnglishEntry {
     pronunciations: [],
     senses: [{
       id: "yori:en:s_bank_1",
+      lang: "en",
       position: 1,
       partOfSpeech: "noun",
-      definition: "a financial institution",
+      glosses: [{ text: "a financial institution", source: "open-english-wordnet", reviewStatus: "source" }],
       registers: [],
       regions: [],
       domains: ["finance"],

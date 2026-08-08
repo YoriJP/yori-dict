@@ -16,7 +16,8 @@ import type { OnDemandDictionary, OnDemandEntry, ResolveRequest } from "./on-dem
 
 type AppOptions = {
   onDemand?: OnDemandDictionary;
-  englishLookup?: (query: string) => EnglishEntry | null;
+  /** Reads a published English entry in one explanation language. Never calls a model. */
+  englishLookup?: (query: string, lang: ApiLang) => EnglishEntry | null;
   enrichmentToken?: string;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -164,8 +165,8 @@ function readEntry(
 ): LookupEntry | null {
   if (dictionary === "en") {
     const entry = asEnglishEntry(enriched)
-      ?? options.englishLookup?.(query)
-      ?? (lemma && lemma !== query ? options.englishLookup?.(lemma) : null)
+      ?? options.englishLookup?.(query, lang)
+      ?? (lemma && lemma !== query ? options.englishLookup?.(lemma, lang) : null)
       ?? null;
     return entry ? englishLookupEntry(entry, lang) : null;
   }

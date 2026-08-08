@@ -83,7 +83,7 @@ function importEnglishOverlay(productionPath: string, overlayPath: string): bool
   try {
     if (hasTable(legacy, "english_entries")) {
       for (const row of legacy.query<{ entry_json: string }, []>("select entry_json from english_entries order by entry_id").all()) {
-        repository.saveEntry(JSON.parse(row.entry_json) as EnglishEntry);
+        repository.saveEntry(legacyEnglishEntry(JSON.parse(row.entry_json) as LegacyEnglishEntry), "en");
       }
     }
     if (hasTable(legacy, "english_examples")) {
@@ -107,6 +107,37 @@ function importEnglishOverlay(productionPath: string, overlayPath: string): bool
     repository.close();
     legacy.close();
   }
+}
+
+type LegacyEnglishEntry = Omit<EnglishEntry, "senses" | "pronunciations"> & {
+  pronunciations: Array<{ ipa: string; region?: string; evidenceIds?: string[] }>;
+  senses: Array<Omit<EnglishEntry["senses"][number], "lang" | "glosses"> & { definition: string }>;
+};
+
+/**
+ * A legacy overlay record held one flat meaning list with a single definition
+ * string. It is read back as an English-explained group so that the meaning,
+ * not the table, carries the explanation language.
+ */
+function legacyEnglishEntry(entry: LegacyEnglishEntry): EnglishEntry {
+  return {
+    ...entry,
+    pronunciations: entry.pronunciations.map((pronunciation) => ({
+      ipa: pronunciation.ipa,
+      ...(pronunciation.region ? { region: pronunciation.region } : {}),
+      source: pronunciation.evidenceIds?.[0]?.split(":")[0] ?? "legacy",
+      ...(pronunciation.evidenceIds?.[0] ? { sourceRef: pronunciation.evidenceIds[0] } : {})
+    })),
+    senses: entry.senses.map(({ definition, ...sense }) => ({
+      ...sense,
+      lang: "en" as const,
+      glosses: [{
+        text: definition,
+        source: sense.provenance === "generated" ? "generated" : sense.evidenceIds[0]?.split(":")[0] ?? "legacy",
+        reviewStatus: sense.provenance === "generated" ? ("checked" as const) : ("source" as const)
+      }]
+    }))
+  };
 }
 
 function canImport(productionPath: string, overlayPath: string, marker: string): boolean {

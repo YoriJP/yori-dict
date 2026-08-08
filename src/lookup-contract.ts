@@ -142,32 +142,40 @@ export function japaneseLookupEntry(item: PublicLookupItem, lang: ApiLang): Look
 
 /**
  * Projects a stored English entry into the requested explanation language.
- * English content is currently authored in English only, so any other
- * requested language has no content rather than a translated substitute.
+ * Meanings carry their own explanation language, so a request for a language
+ * the entry does not explain returns nothing rather than a substitute.
  */
 export function englishLookupEntry(entry: EnglishEntry, lang: ApiLang): LookupEntry | null {
-  if (lang !== "en") return null;
-  const meanings = entry.senses.map<LookupMeaning>((sense) => {
-    const { definition, examples, evidenceIds, partOfSpeech, provenance, generation: _generation, ...rest } = sense;
-    return {
-      ...rest,
-      partOfSpeech: [partOfSpeech],
-      glosses: [{
-        text: definition,
-        source: provenance === "generated" ? "generated" : sourceName(evidenceIds) ?? "source",
-        reviewStatus: provenance === "generated" ? "checked" : "source"
-      }],
-      examples: examples.map((example) => ({
-        text: example.text,
-        translations: [],
-        source: example.source,
-        reviewStatus: example.reviewStatus,
-        ...(example.sourceId ? { sourceId: example.sourceId } : {})
-      })),
-      sources: evidenceIds,
-      provenance
-    };
-  });
+  const meanings = entry.senses
+    .filter((sense) => sense.lang === lang)
+    .map<LookupMeaning>((sense) => {
+      const {
+        lang: _lang,
+        glosses,
+        examples,
+        evidenceIds,
+        partOfSpeech,
+        provenance,
+        source: _source,
+        generation: _generation,
+        ...rest
+      } = sense;
+      return {
+        ...rest,
+        partOfSpeech: [partOfSpeech],
+        glosses: glosses.map((gloss) => ({ ...gloss })),
+        examples: examples.map((example) => ({
+          text: example.text,
+          translations: example.translations ?? [],
+          source: example.source,
+          reviewStatus: example.reviewStatus,
+          ...(example.sourceName ? { sourceName: example.sourceName } : {}),
+          ...(example.sourceId ? { sourceId: example.sourceId } : {})
+        })),
+        sources: evidenceIds,
+        provenance
+      };
+    });
   if (meanings.length === 0) return null;
   return {
     id: entry.id,
@@ -182,9 +190,4 @@ export function englishLookupEntry(entry: EnglishEntry, lang: ApiLang): LookupEn
       ...(pronunciation.region ? { region: pronunciation.region } : {})
     }))
   };
-}
-
-function sourceName(evidenceIds: string[]): string | null {
-  const [evidenceId] = evidenceIds;
-  return evidenceId ? evidenceId.split(":")[0] : null;
 }

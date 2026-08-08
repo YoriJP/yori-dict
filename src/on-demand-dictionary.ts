@@ -149,11 +149,17 @@ export type OnDemandEntry = PublicLookupItem | EnglishEntry;
 export type OnDemandDictionary = DictionaryResolver<OnDemandEntry>;
 export type JapaneseOnDemandDictionary = DictionaryResolver<PublicLookupItem>;
 
+/**
+ * English enrichment persistence is scoped to one explanation language, the
+ * same contract Japanese uses. `saveEntry` writes exactly one entry-language
+ * group, so a rejection or a retry in one language can never disturb another
+ * language's accepted content for the same English headword.
+ */
 export type EnglishEnrichmentRepository = {
-  find(query: string): EnglishEntry | null;
+  find(query: string, lang: ApiLang): EnglishEntry | null;
   findSources(query: string): EnglishSourceRecord[];
-  saveEntry(entry: EnglishEntry): void;
-  saveExample(senseId: string, example: EnglishExample): void;
+  saveEntry(entry: EnglishEntry, lang: ApiLang, generation?: GenerationProvenance): void;
+  saveExample(senseId: string, example: EnglishExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
   terminalOutcome(key: string): string | null;
   saveTerminalOutcome(key: string, outcome: string): void;
@@ -1164,9 +1170,9 @@ export function createEnglishOnDemandDictionary(options: {
       if (request.targetDictionary !== "en" || !englishAuthoredLanguages.has(request.lang)) return null;
       const surface = normalizeEnglishHeadword(request.query);
       const lemma = request.context?.lemma ? normalizeEnglishHeadword(request.context.lemma) : "";
-      const existing = options.repository.find(surface)
+      const existing = options.repository.find(surface, request.lang)
         ?? (lemma && lemma !== surface
-          ? options.repository.find(lemma)
+          ? options.repository.find(lemma, request.lang)
           : null);
       if (existing && existing.senses.every((sense) => sense.examples.length > 0)) return existing;
       if (invalidEnglishRequest(request)) return null;
@@ -1183,12 +1189,15 @@ export function createEnglishOnDemandDictionary(options: {
   };
 }
 
+/**
+ * A canonical entry is never rewritten. Imported meanings stay exactly as the
+ * pinned sources wrote them; only a missing generated example is filled in.
+ */
 function completeCanonicalEnglishEntry(
   entry: EnglishEntry,
   request: ResolveRequest,
   options: EnglishRuntimeOptions
 ): Promise<EnglishEntry> {
-  options.repository.saveEntry(entry);
   return completeEnglishExamples(entry, request, options);
 }
 
@@ -1212,14 +1221,14 @@ async function resolveMissingEnglish(
     const decision = await englishEligibility(request, options);
     if (!decision || !relatedEnglishHeadword(request, decision)) return null;
     headword = decision;
-    const existing = options.repository.find(headword);
+    const existing = options.repository.find(headword, request.lang);
     if (existing) return existing;
     sources = options.repository.findSources(headword);
   }
   const key = entryOutcomeKey(request, normalizeEnglishHeadword(headword));
   if (options.repository.terminalOutcome(key)) return null;
   return serializeByKey(options.locks, key, async () => {
-    const existing = options.repository.find(headword);
+    const existing = options.repository.find(headword, request.lang);
     if (existing) return existing;
     if (options.repository.terminalOutcome(key)) return null;
     return authorEnglishEntry(request, headword, sources, key, options);
@@ -1262,7 +1271,7 @@ async function authorEnglishEntry(
   );
   let entry: EnglishEntry;
   try {
-    entry = parseEnglishEntry(authored.text, entryId, headword, sources, authored.attempt);
+    entry = parseEnglishEntry(authored.text, entryId, headword, request.lang, sources, authored.attempt);
   } catch {
     englishRecordOutcome(options.repository, authored.attempt, "malformed");
     options.repository.saveTerminalOutcome(terminalKey, "malformed-entry");
@@ -1282,7 +1291,10 @@ async function authorEnglishEntry(
     options.repository.saveTerminalOutcome(terminalKey, outcome);
     return null;
   }
-  options.repository.saveEntry(entry);
+  // One author request produced one complete entry-language group and one
+  // reviewer accepted it, so the group is persisted atomically for this
+  // language alone.
+  options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
   return completeEnglishExamples(entry, request, options);
 }
 
@@ -1298,7 +1310,7 @@ async function completeEnglishExamples(
     if (options.repository.terminalOutcome(terminalKey)) return null;
     return serializeByKey(options.exampleLocks, terminalKey, async () => {
       if (options.repository.terminalOutcome(terminalKey)) return null;
-      const canonical = options.repository.find(entry.headword)
+      const canonical = options.repository.find(entry.headword, request.lang)
         ?.senses.find((candidate) => candidate.id === sense.id)?.examples[0];
       if (canonical) return canonical;
       return completeEnglishExample(entry, sense, candidateId, terminalKey, request.mode, options);
@@ -1345,17 +1357,27 @@ async function completeEnglishExample(
     const outcome = reviewOutcome(reviewed.text);
     englishRecordOutcome(options.repository, reviewed.attempt, outcome);
     if (outcome !== "accepted") {
-      options.repository.saveTerminalOutcome(terminalKey, outcome);
+      // A rejected example is never saved and never removes accepted meanings.
+      // It stays missing and retryable, so a later owner-authorized lookup may
+      // try exactly one fresh candidate. A malformed response is terminal so a
+      // candidate the model cannot form does not loop.
+      if (outcome !== "rejected") options.repository.saveTerminalOutcome(terminalKey, outcome);
       return null;
     }
-    options.repository.saveExample(sense.id, example);
+    options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
     return example;
 }
 
+/**
+ * Parses one authored entry-language group for an English headword. The author
+ * writes meanings for a single explanation language; nothing here derives one
+ * language from another, and nothing rewrites an imported meaning.
+ */
 function parseEnglishEntry(
   text: string,
   entryId: string,
   expectedHeadword: string,
+  lang: ApiLang,
   sources: EnglishSourceRecord[],
   authorAttempt: AttemptRecord
 ): EnglishEntry {
@@ -1410,9 +1432,14 @@ function parseEnglishEntry(
     if (new Set(supported.map(englishSourceSenseIdentity)).size > 1) throw new Error("Distinct source senses were merged");
     return {
       id: englishStableId("sense", englishSenseIdentity(entryId, sense, evidenceIds)),
+      lang,
       position: index + 1,
       partOfSpeech: sense.partOfSpeech.trim(),
-      definition: sense.definition.trim(),
+      glosses: [{
+        text: sense.definition.trim(),
+        source: sense.provenance === "generated" ? "generated" : evidenceSourceName(evidenceIds),
+        reviewStatus: sense.provenance === "generated" ? "checked" : "source"
+      }],
       registers,
       regions,
       domains,
@@ -1421,7 +1448,7 @@ function parseEnglishEntry(
       examples: [],
       evidenceIds,
       provenance: sense.provenance,
-      ...(sense.provenance === "generated" ? { generation: englishGenerationProvenance(authorAttempt) } : {})
+      ...(sense.provenance === "generated" ? { generation: acceptedGeneration(authorAttempt) } : {})
     } as EnglishEntry["senses"][number];
   });
   if (Array.from(knownSenseEvidence.keys()).some((id) => !usedEvidence.has(id))) throw new Error("Source meaning was omitted");
@@ -1441,7 +1468,12 @@ function parseEnglishEntry(
       }
       usedPronunciationEvidence.add(id);
     }
-    return { ipa: item.ipa.trim(), ...(nonemptyString(item.region) ? { region: item.region.trim() } : {}), evidenceIds };
+    return {
+      ipa: item.ipa.trim(),
+      ...(nonemptyString(item.region) ? { region: item.region.trim() } : {}),
+      source: evidenceSourceName(evidenceIds),
+      ...(evidenceIds[0] ? { sourceRef: evidenceIds[0] } : {})
+    };
   });
   if (Array.from(knownPronunciationEvidence.keys()).some((id) => !usedPronunciationEvidence.has(id))) {
     throw new Error("Source pronunciation was omitted");
@@ -1494,7 +1526,9 @@ function englishEntryAuthorPrompt(
     `candidateId: ${candidateId}`,
     `headword: ${headword}`,
     `context: ${request.context?.sentence ?? ""}`,
-    `source_evidence: ${JSON.stringify(sources.map(({ rawRecord: _raw, ...source }) => source))}`
+    // Concise canonical evidence only; a complete raw source payload is never
+    // put in front of a model.
+    `source_evidence: ${JSON.stringify(sources)}`
   ].join("\n");
 }
 
@@ -1559,14 +1593,8 @@ function englishRequestKey(request: ResolveRequest): string {
   })).digest("hex").slice(0, 20)}`;
 }
 
-function englishGenerationProvenance(attempt: AttemptRecord) {
-  return {
-    model: attempt.model,
-    provider: attempt.provider,
-    reasoningEffort: attempt.reasoningEffort,
-    promptVersion: attempt.promptVersion,
-    serviceTier: attempt.effectiveServiceTier ?? attempt.requestedServiceTier
-  };
+function evidenceSourceName(evidenceIds: string[]): string {
+  return evidenceIds[0]?.split(":")[0] ?? "generated";
 }
 
 function englishSenseIdentity(
@@ -1591,7 +1619,7 @@ function englishSenseIdentity(
 
 function englishSourceSenseIdentity(sense: EnglishSourceRecord["senses"][number]): string {
   return JSON.stringify([
-    sense.definition.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " "),
+    sense.glosses.map((gloss) => gloss.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ")),
     sense.partOfSpeech,
     [...sense.registers].sort(),
     [...sense.regions].sort(),

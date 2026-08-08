@@ -9,6 +9,7 @@ import {
   type ModelResponse
 } from "../src/on-demand-dictionary";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "../src/english-types";
+import type { ApiLang } from "../src/types";
 
 const englishModels = { author: "test/english-author", reviewer: "test/english-reviewer" };
 
@@ -44,7 +45,11 @@ test("English resolve completes missing examples on released senses", async () =
   expect(completed?.senses[0].examples).toEqual([{
     text: "She deposited her salary at the bank.", source: "generated", reviewStatus: "checked"
   }]);
-  expect(repository.entry).toEqual(completed);
+  // Only the missing example was written; the canonical entry was not rewritten.
+  expect(repository.savedLangs).toEqual([]);
+  expect(repository.savedExamples).toEqual([["yori:en:s_bank", {
+    text: "She deposited her salary at the bank.", source: "generated", reviewStatus: "checked"
+  }]]);
 });
 
 test("generated English examples require a complete lexical match", async () => {
@@ -271,6 +276,8 @@ class ScriptedGateway implements ModelGateway {
 class MemoryEnglishRepository implements EnglishEnrichmentRepository {
   entry: EnglishEntry | null = null;
   readonly attempts: AttemptRecord[] = [];
+  readonly savedLangs: ApiLang[] = [];
+  readonly savedExamples: Array<[string, EnglishExample]> = [];
   private readonly released: Map<string, EnglishEntry>;
   private readonly sources: Map<string, EnglishSourceRecord[]>;
   private readonly terminal = new Map<string, string>();
@@ -281,12 +288,21 @@ class MemoryEnglishRepository implements EnglishEnrichmentRepository {
     this.released = new Map(options.released ?? []);
     this.sources = new Map(options.sources ?? []);
   }
-  find(query: string) {
-    return this.entry?.headword === query.toLowerCase() ? this.entry : this.released.get(query.toLowerCase()) ?? null;
+  find(query: string, lang: ApiLang) {
+    const entry = this.entry?.headword === query.toLowerCase()
+      ? this.entry
+      : this.released.get(query.toLowerCase()) ?? null;
+    if (!entry) return null;
+    const senses = entry.senses.filter((sense) => sense.lang === lang);
+    return senses.length > 0 ? { ...entry, senses } : null;
   }
   findSources(query: string) { return structuredClone(this.sources.get(query.toLowerCase()) ?? []); }
-  saveEntry(entry: EnglishEntry) { this.entry = structuredClone(entry); }
+  saveEntry(entry: EnglishEntry, lang: ApiLang) {
+    this.savedLangs.push(lang);
+    this.entry = structuredClone(entry);
+  }
   saveExample(senseId: string, example: EnglishExample) {
+    this.savedExamples.push([senseId, example]);
     if (!this.entry) return;
     this.entry = { ...this.entry, senses: this.entry.senses.map((sense) =>
       sense.id === senseId ? { ...sense, examples: [example] } : sense
@@ -301,10 +317,10 @@ function sourceRecord(): EnglishSourceRecord {
   return {
     source: "wiktionary", sourceVersion: "2026-07-06", sourceEntryId: "en:lead:verb:1",
     license: "CC-BY-SA-4.0 AND GFDL-1.1-or-later", attribution: "English Wiktionary contributors",
-    rawRecord: { word: "lead" }, headword: "lead",
+    headword: "lead",
     pronunciations: [{ ipa: "/liːd/", region: "US", evidenceId: "wiktionary:en:lead:verb:1:pronunciation:1" }],
     senses: [{
-      evidenceId: "wiktionary:en:lead:verb:1:1", partOfSpeech: "verb", definition: "to guide or conduct",
+      evidenceId: "wiktionary:en:lead:verb:1:1", partOfSpeech: "verb", glosses: ["to guide or conduct"],
       registers: [], regions: [], domains: [], dated: false, usage: ["transitive"], examples: []
     }]
   };
@@ -314,7 +330,8 @@ function releasedEntry(): EnglishEntry {
   return {
     id: "yori:en:e_bank", dictionary: "en", headword: "bank", pronunciations: [], sources: [],
     senses: [{
-      id: "yori:en:s_bank", position: 1, partOfSpeech: "noun", definition: "a financial institution",
+      id: "yori:en:s_bank", lang: "en", position: 1, partOfSpeech: "noun",
+      glosses: [{ text: "a financial institution", source: "open-english-wordnet", reviewStatus: "source" }],
       registers: [], regions: [], domains: ["finance"], dated: false, usage: [], examples: [{
         text: "The bank approved the loan.", source: "sourced", sourceId: "fixture:1", reviewStatus: "source"
       }],

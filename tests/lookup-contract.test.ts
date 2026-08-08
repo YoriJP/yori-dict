@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../src/app";
 import { openLookupDb, type LookupDb } from "../src/db";
-import { buildEnglishRelease } from "../src/english-release";
+import { rebuildEnglishDictionary, type EnglishSourceInput } from "../src/english-rebuild";
+import { createStoredZip } from "../src/stored-zip";
 import { openEnglishEnrichmentRepository } from "../src/english-enrichment-repository";
 import { openEnrichmentRepository } from "../src/enrichment-repository";
 import { importEnglishRelease, migrateProductionDatabase } from "../src/production-database";
@@ -18,7 +19,6 @@ import {
   type ModelRequest,
   type ModelResponse
 } from "../src/on-demand-dictionary";
-import type { EnglishSourceRecord } from "../src/english-types";
 
 /**
  * The lookup contract is verified at the HTTP seam over a temporary real
@@ -90,12 +90,13 @@ beforeAll(async () => {
     .run("yori:s_jmdict_1358280_1:zh-tw", "吃");
   writable.close();
 
-  const release = await buildEnglishRelease([englishSource()], {
-    outputDirectory: join(root, "english"),
+  const english = await rebuildEnglishDictionary({
+    sources: [await englishSource(root)],
+    out: join(root, "english.sqlite"),
     version: "test",
-    createdAt: "2026-08-06T00:00:00.000Z"
+    retainFrom: null
   });
-  importEnglishRelease(dbPath, release.sqlite);
+  importEnglishRelease(dbPath, english.path);
 
   lookupDb = openLookupDb(dbPath);
   const japaneseRepository = openEnrichmentRepository(dbPath, lookupDb);
@@ -106,7 +107,7 @@ beforeAll(async () => {
   };
   app = createApp(lookupDb, {
     enrichmentToken: "owner-token",
-    englishLookup: (query) => englishRepository.find(query),
+    englishLookup: (query, lang) => englishRepository.find(query, lang),
     onDemand: createOnDemandDictionary({
       japanese: createJapaneseOnDemandDictionary({ repository: japaneseRepository, modelGateway: gateway }),
       english: createEnglishOnDemandDictionary({
@@ -177,7 +178,7 @@ test("Japanese and English lookup share one base entry shape with their own extr
   expect(japanese).not.toHaveProperty("pronunciations");
   expect(english.pronunciations).toEqual([{ ipa: "/bæŋk/" }]);
   expect(english.meanings[0].glosses[0].text).toBe("a financial institution");
-  expect(english.sources).toEqual(["open-english-wordnet:oewn-bank"]);
+  expect(english.sources).toEqual(["open-english-wordnet:bank:n"]);
   expect(gateway.calls).toEqual([]);
 });
 
@@ -286,26 +287,29 @@ test("a failed database read is an error, not a null entry", async () => {
   expect(response.status).toBe(500);
 });
 
-function englishSource(): EnglishSourceRecord {
-  return {
-    source: "open-english-wordnet",
-    sourceVersion: "2024",
-    sourceEntryId: "oewn-bank",
-    license: "CC-BY-4.0",
-    attribution: "Open English WordNet",
-    rawRecord: { untouched: "oewn" },
-    headword: "bank",
-    pronunciations: [{ ipa: "/bæŋk/", evidenceId: "open-english-wordnet:oewn-bank:pronunciation:1" }],
-    senses: [{
-      evidenceId: "open-english-wordnet:oewn-bank:1",
-      partOfSpeech: "noun",
-      definition: "a financial institution",
-      registers: [],
-      regions: [],
-      domains: ["finance"],
-      dated: false,
-      usage: [],
-      examples: []
-    }]
-  };
+async function englishSource(directory: string): Promise<EnglishSourceInput> {
+  const file = join(directory, "wordnet.zip");
+  await Bun.write(file, createStoredZip([
+    {
+      name: "entries-a.json",
+      content: JSON.stringify({
+        bank: {
+          n: { pronunciation: [{ value: "/b\u00e6\u014bk/" }], sense: [{ id: "bank%1:14:00::", synset: "s-finance" }] }
+        }
+      })
+    },
+    {
+      name: "noun.fixture.json",
+      content: JSON.stringify({
+        "s-finance": {
+          definition: ["a financial institution"],
+          domain_topic: ["s-domain-finance"],
+          members: ["bank"],
+          partOfSpeech: "n"
+        },
+        "s-domain-finance": { definition: ["the business of banking"], members: ["finance"], partOfSpeech: "n" }
+      })
+    }
+  ]));
+  return { source: "open-english-wordnet", version: "2024", file };
 }

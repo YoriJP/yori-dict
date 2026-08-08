@@ -1,44 +1,88 @@
 import { expect, test } from "bun:test";
 import {
-  importOpenEnglishWordNet,
+  importOpenEnglishWordNetEntry,
   importWiktionaryEntry
 } from "../src/english-import";
 
-test("Open English WordNet import preserves synset identity, labels, and examples", () => {
-  const records = importOpenEnglishWordNet({
-    "08420278-n": {
-      definition: ["a financial institution that accepts deposits"],
-      domain_topic: ["finance"],
-      example: ["She deposited the cheque at the bank."],
-      ili: "i81520",
-      members: ["bank", "depository financial institution"],
-      partOfSpeech: "n"
-    }
-  }, "2025");
+const synsets: Record<string, Record<string, unknown>> = {
+  "08420278-n": {
+    definition: ["a financial institution that accepts deposits"],
+    domain_topic: ["13333833-n"],
+    example: ["She deposited the cheque at the bank."],
+    ili: "i81520",
+    members: ["bank", "depository financial institution"],
+    partOfSpeech: "n"
+  },
+  "09236472-n": {
+    definition: ["sloping land beside a body of water"],
+    members: ["bank"],
+    partOfSpeech: "n"
+  },
+  "13333833-n": { definition: ["the commercial activity of banking"], members: ["finance"], partOfSpeech: "n" }
+};
 
-  expect(records).toHaveLength(2);
+test("Open English WordNet import keeps the lexical entry's own sense order and labels", () => {
+  const records = importOpenEnglishWordNetEntry(
+    "bank",
+    {
+      n: {
+        pronunciation: [{ value: "b\u00e6\u014bk", variety: "GB" }],
+        form: ["banks"],
+        // The archive lists the financial sense first for this entry, even
+        // though its synset identifier sorts after the other one.
+        sense: [{ id: "bank%1:14:00::", synset: "08420278-n" }, { id: "bank%1:17:01::", synset: "09236472-n" }]
+      }
+    },
+    (id) => synsets[id],
+    "2025"
+  );
+
+  expect(records).toHaveLength(1);
   expect(records[0]).toMatchObject({
     source: "open-english-wordnet",
     sourceVersion: "2025",
-    sourceEntryId: "08420278-n:bank",
+    sourceEntryId: "bank:n",
     license: "CC-BY-4.0",
     headword: "bank",
-    pronunciations: [],
-    senses: [{
-      evidenceId: "open-english-wordnet:08420278-n:bank:1",
-      partOfSpeech: "noun",
-      domains: ["finance"],
-      definition: "a financial institution that accepts deposits",
-      examples: [{
-        text: "She deposited the cheque at the bank.",
-        source: "sourced",
-        sourceId: "08420278-n:example:1",
-        reviewStatus: "source"
-      }]
+    forms: ["banks"],
+    pronunciations: [{
+      ipa: "b\u00e6\u014bk",
+      region: "GB",
+      evidenceId: "open-english-wordnet:bank:n:pronunciation:1"
     }]
   });
-  expect(Object.isFrozen(records[0])).toBe(true);
-  expect(Object.isFrozen(records[0].senses[0])).toBe(true);
+  // The stable evidence identifier is the source's own sense key.
+  expect(records[0].senses.map(({ evidenceId }) => evidenceId)).toEqual([
+    "open-english-wordnet:bank%1:14:00::",
+    "open-english-wordnet:bank%1:17:01::"
+  ]);
+  expect(records[0].senses[0]).toEqual({
+    evidenceId: "open-english-wordnet:bank%1:14:00::",
+    partOfSpeech: "noun",
+    glosses: ["a financial institution that accepts deposits"],
+    registers: [],
+    regions: [],
+    // A domain topic is a synset reference; it is resolved to its own label.
+    domains: ["finance"],
+    dated: false,
+    usage: [],
+    examples: [{
+      text: "She deposited the cheque at the bank.",
+      source: "sourced",
+      sourceName: "open-english-wordnet",
+      sourceId: "08420278-n:example:1",
+      reviewStatus: "source"
+    }]
+  });
+});
+
+test("Open English WordNet import drops a sense whose synset has no definition", () => {
+  expect(importOpenEnglishWordNetEntry(
+    "florp",
+    { n: { sense: [{ id: "florp%1:00:00::", synset: "missing" }] } },
+    () => undefined,
+    "2025"
+  )).toEqual([]);
 });
 
 test("Wiktionary import keeps pronunciation and usage distinctions structured", () => {
@@ -76,6 +120,7 @@ test("Wiktionary import keeps pronunciation and usage distinctions structured", 
   expect(records[0].senses).toEqual([
     expect.objectContaining({
       evidenceId: "wiktionary:en:lead:verb:1:1",
+      glosses: ["To guide or conduct."],
       registers: ["figurative"],
       regions: [],
       domains: ["management"],
