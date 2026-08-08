@@ -173,6 +173,15 @@ export type EnglishOnDemandDictionary = DictionaryResolver<EnglishEntry>;
 
 export type ModelCallLimiter = <T>(work: () => Promise<T>) => Promise<T>;
 
+/**
+ * Model work is bounded once for both dictionaries. These were runtime
+ * variables that nothing ever set, so the deployed values were always these.
+ * Changing them is a code change, which is how the deployed value stays
+ * visible to a reader.
+ */
+export const enrichmentConcurrency = 4;
+export const modelTimeoutMs = 15_000;
+
 export type ModelRunSummary = {
   event: "model_run_summary";
   traceId: string;
@@ -290,8 +299,8 @@ export function createJapaneseOnDemandDictionary(options: {
   limiter?: ModelCallLimiter;
   logger?: EnrichmentLogger;
 }): JapaneseOnDemandDictionary {
-  const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
-  const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
+  const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
+  const timeoutMs = positiveInteger(options.timeoutMs ?? modelTimeoutMs, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const entryInFlight = new Map<string, Promise<PublicLookupItem | null>>();
   const canonicalInFlight = new Map<string, Promise<unknown>>();
@@ -1262,8 +1271,8 @@ export function createEnglishOnDemandDictionary(options: {
   limiter?: ModelCallLimiter;
   logger?: EnrichmentLogger;
 }): EnglishOnDemandDictionary {
-  const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
-  const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
+  const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
+  const timeoutMs = positiveInteger(options.timeoutMs ?? modelTimeoutMs, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const inFlight = new Map<string, Promise<EnglishEntry | null>>();
   const canonicalInFlight = new Map<string, Promise<unknown>>();

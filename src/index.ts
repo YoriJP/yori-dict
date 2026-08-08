@@ -7,15 +7,16 @@ import {
   createEnglishOnDemandDictionary,
   createJapaneseOnDemandDictionary,
   createModelCallLimiter,
-  createOnDemandDictionary
+  createOnDemandDictionary,
+  enrichmentConcurrency,
+  modelTimeoutMs
 } from "./on-demand-dictionary";
 import { openSourceEvidenceIndex } from "./source-index";
 
 const dbPath = process.env.YORI_DB_PATH ?? "data/yori.sqlite";
 const logger = (event: Record<string, unknown>) => console.info(JSON.stringify(event));
 const modelGateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY });
-const modelLimiter = createModelCallLimiter(Number(process.env.YORI_ENRICHMENT_CONCURRENCY ?? "4"));
-const modelTimeoutMs = Number(process.env.YORI_MODEL_TIMEOUT_MS ?? "15000");
+const modelLimiter = createModelCallLimiter(enrichmentConcurrency);
 const releasedDb = openLookupDb(dbPath);
 const sourceIndex = await openSourceEvidenceIndex(
   (process.env.YORI_JA_SOURCE_EVIDENCE_PATHS ?? "").split(",").map((path) => path.trim()).filter(Boolean)

@@ -69,15 +69,21 @@ The Japanese canonical store uses concise `ja_*` tables. `ja_senses` carries the
 
 ## Runtime configuration
 
-- `OPENROUTER_API_KEY` authenticates the official `@openrouter/sdk` client.
-- `YORI_ENRICHMENT_TOKEN` protects `enrich=true` lookup requests.
+Four variables, and no others. A value that is the same everywhere is a constant
+in code, where a reader can see what actually runs.
+
+- `OPENROUTER_API_KEY` authenticates the official `@openrouter/sdk` client. Revoking it
+  is what stops all model work; there is no separate enrichment switch.
+- `YORI_ENRICHMENT_TOKEN` protects `enrich=true` lookup requests. Unset refuses every
+  enrichment request rather than allowing it.
 - `YORI_DB_PATH` selects the canonical production SQLite database; Railway uses `/data/yori.sqlite`.
-- `YORI_ENGLISH_DICTIONARY_VERSION` selects the English source version used only when a new database is bootstrapped.
-- English enrichment is always on and needs no variable; the author and reviewer
-  models are pinned in code exactly as Japanese.
-- `YORI_JA_SOURCE_EVIDENCE_PATHS` is a comma-separated list of indexed source-evidence JSONL files.
-- `YORI_ENRICHMENT_CONCURRENCY` globally bounds combined Japanese and English model work;
-  `YORI_MODEL_TIMEOUT_MS` bounds each attempt.
+- `YORI_JA_SOURCE_EVIDENCE_PATHS` is a comma-separated list of indexed source-evidence
+  JSONL files for the source-grounded authoring in ADR-0006. Nothing publishes one yet, so
+  it is unset in production and authoring runs without source evidence. A path that does
+  not exist fails the start.
+
+Model concurrency, attempt timeout, the author and reviewer models, and the English source
+version are pinned in code.
 
 All model calls request Flex first. On-demand transient failures fall back to standard once; bulk calls make at most three Flex attempts. The SDK retry mechanism is disabled so this policy has one owner.
 

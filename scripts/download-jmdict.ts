@@ -73,8 +73,8 @@ console.log(`Wrote JLPT vocabulary CSVs to ${jlptDir}`);
 
 function parseArgs(argv: string[]): Args {
   const outDir = readFlag(argv, "--out-dir") ?? "data/raw";
-  const tag = readFlag(argv, "--tag") ?? process.env.JMDICT_SIMPLIFIED_TAG ?? defaultReleaseTag;
-  const jlptCommit = readFlag(argv, "--jlpt-commit") ?? process.env.JLPT_VOCAB_COMMIT ?? defaultJlptCommit;
+  const tag = readFlag(argv, "--tag") ?? defaultReleaseTag;
+  const jlptCommit = readFlag(argv, "--jlpt-commit") ?? defaultJlptCommit;
   return { outDir, tag, jlptCommit };
 }
 
