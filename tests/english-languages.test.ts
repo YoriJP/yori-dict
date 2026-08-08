@@ -360,6 +360,28 @@ test("a language group must be written in its own language and may not copy the 
   }
 });
 
+test("the reviewer is told what an explanation group is before it judges one", async () => {
+  const { gateway, dictionary, close } = await enrichable([
+    languageGroup([{ definition: "会計の記録。", partOfSpeech: "noun" }]) as string,
+    "ACCEPT"
+  ]);
+
+  try {
+    await dictionary.resolve({ query: "ledger", targetDictionary: "en", lang: "ja" });
+    const review = gateway.calls.find((call) => call.role === "entry-review");
+    // A group is authored, so it has no evidence ids, and pronunciations belong
+    // to the entry, so it has none. Asked to check provenance and pronunciation,
+    // a reviewer finds both missing and refuses content that is exactly as
+    // specified. Every test scripts the reviewer's answer, so only the prompt
+    // itself can catch that.
+    expect(review?.prompt).toContain("provenance generated with no evidence ids");
+    expect(review?.prompt).toContain("carries no pronunciations");
+    expect(review?.prompt).not.toContain("Check coverage, sense structure, pronunciation, labels, source provenance");
+  } finally {
+    close();
+  }
+});
+
 test("the English author schema closes the labels and the language group's provenance", async () => {
   const { gateway, dictionary, close } = await enrichable([
     languageGroup([{ definition: "会計の記録。", partOfSpeech: "noun" }]) as string,
