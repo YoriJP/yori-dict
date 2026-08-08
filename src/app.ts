@@ -7,6 +7,7 @@ import { dataReleaseUrl } from "./data-release";
 import {
   englishLookupEntry,
   japaneseLookupEntry,
+  lookupLanguages,
   parseLookupDictionary,
   parseLookupLang,
   type LookupDictionary,
@@ -60,7 +61,15 @@ export function createApp(
 
   app.get("/health", (c) => c.json({ ok: true }));
 
-  app.get("/v1/meta", (c) => c.json(db.meta()));
+  // Both dictionaries ship, so metadata names the explanation languages each
+  // one answers in. The remaining fields describe the Japanese dictionary,
+  // whose version, tags, and credits come from its own release.
+  app.get("/v1/meta", (c) => c.json({
+    ...db.meta(),
+    dictionaries: Object.fromEntries(
+      Object.entries(lookupLanguages).map(([dictionary, languages]) => [dictionary, { languages }])
+    )
+  }));
 
   app.get("/v1/lookup", async (c) => {
     const query = c.req.query("q");

@@ -99,6 +99,11 @@ test("returns metadata", async () => {
   const body = await res.json();
   expect(body.apiVersion).toBe("v1");
   expect(body.dictionaryVersion).toBe("2026-06-08");
+  // Both dictionaries ship, so metadata names what each one can be asked for.
+  expect(body.dictionaries).toEqual({
+    ja: { languages: ["en", "de", "zh-tw", "zh-cn", "ko"] },
+    en: { languages: ["en", "ja", "zh-tw"] }
+  });
   expect(body.sources).toContainEqual({
     name: "Yori generated zh-CN glosses (legacy records)",
     license: "CC-BY-SA-4.0",

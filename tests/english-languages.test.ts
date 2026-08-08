@@ -324,6 +324,12 @@ test("missing ja and zh-tw groups are independent concurrent candidates and one 
       source: "generated",
       reviewStatus: "checked"
     }]);
+
+    // The enriched response carries the entry's own facts, exactly as a later
+    // read does. The author writes meanings; pronunciations belong to the entry.
+    expect(taiwanese?.id).toBe(english.id);
+    expect(taiwanese?.pronunciations).toEqual(english.pronunciations);
+    expect(taiwanese?.sources).toEqual(english.sources);
   } finally {
     close();
   }
@@ -477,7 +483,11 @@ async function fixtureWordNet(root: string): Promise<EnglishSourceInput> {
         water: entry("water%1:27:00::", "oewn-07935152-n"),
         interface: entry("interface%1:06:00::", "oewn-03187595-n"),
         network: entry("network%1:06:00::", "oewn-08434661-n"),
-        ledger: entry("ledger%1:10:00::", "oewn-06481320-n")
+        // ledger carries a pronunciation so that an authored non-English group
+        // can be checked to answer with the entry's own facts.
+        ledger: {
+          n: { sense: [{ id: "ledger%1:10:00::", synset: "oewn-06481320-n" }], pronunciation: [{ value: "/ˈlɛdʒə/" }] }
+        }
       })
     },
     {

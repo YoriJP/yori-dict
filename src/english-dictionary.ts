@@ -262,11 +262,32 @@ export function visitEnglishEntries(path: string, visit: (record: EnglishEntryGr
   }
 }
 
-/** Structural problems that must never reach a published English release. */
-export function validateEnglishDictionary(entries: EnglishEntryGroups[]): string[] {
-  const problems: string[] = [];
+/**
+ * Structural problems that must never reach a published English release.
+ *
+ * The dictionary is validated as it streams, so identity checks live in the
+ * validator rather than in one call: a duplicate entry or meaning id is only
+ * visible to a checker that remembers the ids it has already seen.
+ */
+export function createEnglishDictionaryValidator(): {
+  check(entries: EnglishEntryGroups[]): string[];
+} {
   const entryIds = new Set<string>();
   const senseIds = new Set<string>();
+  return { check: (entries) => validateEntries(entries, entryIds, senseIds) };
+}
+
+/** Validates a whole English dictionary held in memory. */
+export function validateEnglishDictionary(entries: EnglishEntryGroups[]): string[] {
+  return validateEntries(entries, new Set<string>(), new Set<string>());
+}
+
+function validateEntries(
+  entries: EnglishEntryGroups[],
+  entryIds: Set<string>,
+  senseIds: Set<string>
+): string[] {
+  const problems: string[] = [];
   for (const { entry, groups } of entries) {
     if (entry.dictionary !== "en") problems.push(`${entry.id}: wrong dictionary`);
     if (!entry.headword.trim()) problems.push(`${entry.id}: empty headword`);

@@ -6,7 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { Database } from "bun:sqlite";
 import {
-  validateEnglishDictionary,
+  createEnglishDictionaryValidator,
   visitEnglishEntries,
   type EnglishEntryGroups
 } from "./english-dictionary";
@@ -80,10 +80,11 @@ export async function buildEnglishRelease(
   const sequence = new Map<string, number>(Object.keys(coverage).map((lang) => [lang, 0]));
   const writer = Bun.file(artifacts.jsonl).writer();
   const problems: string[] = [];
+  const validator = createEnglishDictionaryValidator();
   let entries = 0;
 
   visitEnglishEntries(artifacts.sqlite, (record) => {
-    problems.push(...validateEnglishDictionary([record]));
+    problems.push(...validator.check([record]));
     writer.write(`${JSON.stringify(canonicalRecord(record))}\n`);
     entries += 1;
     for (const group of record.groups) {

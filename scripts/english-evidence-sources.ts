@@ -1,3 +1,4 @@
+import { taiwanTermPairKey } from "./english-evidence";
 import type { EvidenceCorroboration, MappedSourceMeta } from "./english-evidence";
 
 /**
@@ -327,8 +328,9 @@ export function taiwanCorroborationIndex(
 ): Map<string, EvidenceCorroboration> {
   const index = new Map<string, EvidenceCorroboration>();
   for (const row of evidence) {
-    if (index.has(row.termPair.chinese)) continue;
-    index.set(row.termPair.chinese, {
+    const key = taiwanTermPairKey(row.termPair.english, row.termPair.chinese);
+    if (index.has(key)) continue;
+    index.set(key, {
       source: "taiwan-terminology",
       version: row.version,
       detail: `${row.agency}/${row.dataset}/${row.domain}`

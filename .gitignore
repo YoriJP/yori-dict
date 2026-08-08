@@ -14,3 +14,4 @@ data/*.sqlite-shm
 data/*.sqlite-wal
 /releases/
 .DS_Store
+sources/english/evidence/

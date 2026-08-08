@@ -141,7 +141,7 @@ export async function buildJapaneseRelease(
     jmdictSimplifiedVersion: metadata.jmdictSimplifiedVersion,
     entries,
     coverage,
-    sources: japaneseSources
+    sources: japaneseSources(metadata)
   }, null, 2)}\n`);
   return artifacts;
 }
@@ -226,9 +226,22 @@ async function fileSha256(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-const japaneseSources = [
-  { name: "JMdict", version: "pinned by jmdictSimplifiedVersion", license: "CC-BY-SA-4.0", url: "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project" },
-  { name: "Tatoeba example sentences", license: "CC-BY-2.0-FR", url: "https://tatoeba.org/en/terms_of_use" },
-  { name: "yomitan-jlpt-vocab", license: "CC-BY-SA-4.0", url: "https://github.com/stephenmk/yomitan-jlpt-vocab" },
-  { name: "Yori generated dictionary content", license: "CC-BY-SA-4.0" }
-];
+/**
+ * Every source records the version the release was actually built from. A
+ * version the rebuild does not pin is omitted rather than described in prose,
+ * so a reader never mistakes a placeholder for recorded provenance.
+ */
+function japaneseSources(metadata: { jmdictSimplifiedVersion: string | null; dictionaryVersion: string | null }) {
+  return [
+    {
+      name: "JMdict",
+      ...(metadata.jmdictSimplifiedVersion ? { version: metadata.jmdictSimplifiedVersion } : {}),
+      ...(metadata.dictionaryVersion ? { dictDate: metadata.dictionaryVersion } : {}),
+      license: "CC-BY-SA-4.0",
+      url: "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
+    },
+    { name: "Tatoeba example sentences", license: "CC-BY-2.0-FR", url: "https://tatoeba.org/en/terms_of_use" },
+    { name: "yomitan-jlpt-vocab", license: "CC-BY-SA-4.0", url: "https://github.com/stephenmk/yomitan-jlpt-vocab" },
+    { name: "Yori generated dictionary content", license: "CC-BY-SA-4.0" }
+  ];
+}

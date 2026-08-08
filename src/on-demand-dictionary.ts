@@ -1346,7 +1346,11 @@ async function authorEnglishEntry(
   // reviewer accepted it, so the group is persisted atomically for this
   // language alone.
   options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
-  return completeEnglishExamples(entry, request, options);
+  // Read the group back so an authored language group answers with the entry's
+  // own pronunciations and source facts, exactly as a later lookup would. The
+  // author writes meanings only; it never writes those entry-level facts.
+  const stored = options.repository.find(entry.headword, request.lang) ?? entry;
+  return completeEnglishExamples(stored, request, options);
 }
 
 async function completeEnglishExamples(

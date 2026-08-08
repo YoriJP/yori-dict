@@ -11,6 +11,7 @@ import {
   type JapaneseWordNetRecord,
   type TaiwanTerminologyRecord
 } from "../scripts/english-evidence-sources";
+import { taiwanTermPairKey } from "../scripts/english-evidence";
 
 const wordNetMeta = {
   version: "1.1",
@@ -92,11 +93,16 @@ test("Taiwan terminology keeps agency, dataset, domain, version, attribution, an
   expect(imported.rejected).toEqual([
     { recordId: "nict-2019-000433", reason: "incomplete-provenance:agency" }
   ]);
-  expect(taiwanCorroborationIndex(imported.accepted).get("介面")).toEqual({
+  const index = taiwanCorroborationIndex(imported.accepted);
+  expect(index.get(taiwanTermPairKey("interface", "介面"))).toEqual({
     source: "taiwan-terminology",
     version: "2024-03",
     detail: "國家教育研究院/雙語詞彙、學術名詞暨辭書資訊網/資訊科技"
   });
+  // The dataset vouches for one term pair, not for the Chinese string alone.
+  // Another English entry that happens to translate to 介面 gets no Taiwan
+  // support from this row.
+  expect(index.get(taiwanTermPairKey("facade", "介面"))).toBeUndefined();
 });
 
 test("reverse and Simplified Chinese sources remain supporting evidence", () => {

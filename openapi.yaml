@@ -95,6 +95,11 @@ paths:
                 apiVersion: v1
                 dictionaryVersion: "2026-06-01"
                 languages: [en, de, zh-tw, zh-cn, ko]
+                dictionaries:
+                  ja:
+                    languages: [en, de, zh-tw, zh-cn, ko]
+                  en:
+                    languages: [en, ja, zh-tw]
                 tags:
                   uk: word usually written using kana alone
                   vt: transitive verb
@@ -290,17 +295,34 @@ components:
       enum: [en, de, zh-tw, zh-cn, ko, ja]
     MetaResponse:
       type: object
-      required: [apiVersion, dictionaryVersion, languages, tags, sources]
+      required: [apiVersion, dictionaryVersion, languages, tags, sources, dictionaries]
       properties:
         apiVersion:
           type: string
           const: v1
         dictionaryVersion:
           type: [string, "null"]
+          description: The Japanese dictionary's release version.
         languages:
           type: array
+          description: >-
+            The Japanese dictionary's explanation languages. Use `dictionaries`
+            to read the supported languages of either dictionary.
           items:
             $ref: "#/components/schemas/ApiLang"
+        dictionaries:
+          type: object
+          description: >-
+            Every headword dictionary this API serves, with the explanation
+            languages it answers in. A lookup names one of each.
+          additionalProperties:
+            type: object
+            required: [languages]
+            properties:
+              languages:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiLang"
         tags:
           type: object
           description: >-

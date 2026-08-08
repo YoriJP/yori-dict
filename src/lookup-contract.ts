@@ -15,7 +15,7 @@ export type LookupDictionary = "ja" | "en";
  * There is no default for either, and no fallback between languages: a lookup
  * returns the requested language's own ordered meaning list or nothing.
  */
-const lookupLanguages: Record<LookupDictionary, ApiLang[]> = {
+export const lookupLanguages: Record<LookupDictionary, ApiLang[]> = {
   ja: ["en", "de", "zh-tw", "zh-cn", "ko"],
   en: ["en", "ja", "zh-tw"]
 };

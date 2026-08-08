@@ -33,6 +33,17 @@ export type EvidenceCorroboration = {
   detail: string;
 };
 
+/**
+ * Taiwan support is a claim about one term pair inside one agency's stated
+ * domain, so it is keyed by both sides of the pair. A Chinese string alone
+ * would let one dataset's term vouch for any English entry whose translation
+ * happens to repeat it, which is the generic-Traditional-Chinese relabelling
+ * the source policy forbids.
+ */
+export function taiwanTermPairKey(english: string, chinese: string): string {
+  return `${english.trim().toLowerCase()}␟${chinese.trim()}`;
+}
+
 export type EvidenceRow = {
   evidenceId: string;
   source: string;
@@ -376,7 +387,11 @@ function buildRow(translation: WiktextractTranslation, options: BuildRowContext)
   }
 
   const qualifiers = qualifiersOf(translation);
-  const taiwanMatch = options.context.corroboration.taiwanTerms.get(term) ?? null;
+  // Taiwan support requires the dataset's own English/Chinese pair, not a bare
+  // Chinese string that any entry's translation might repeat.
+  const taiwanMatch = options.context.corroboration.taiwanTerms.get(
+    taiwanTermPairKey(String(options.entry.word ?? ""), term)
+  ) ?? null;
   const japaneseMatch = options.context.corroboration.japaneseTerms.get(term) ?? null;
   const corroborationMatch = targetLanguage === "ja" ? japaneseMatch : taiwanMatch;
   const ambiguityReasons = ambiguityReasonsFor(term, options);
