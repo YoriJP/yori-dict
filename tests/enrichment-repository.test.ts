@@ -239,6 +239,62 @@ async function productionDatabase(options: { examples?: boolean } = {}): Promise
   return path;
 }
 
+test("a Japanese release that starts carrying an authored headword takes over its entry", async () => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  // Authored before any source carried the word, so its id is its own and can
+  // never equal the JMdict id the release will bring.
+  const authored: PublicLookupItem = {
+    ...generatedEntry(),
+    id: "yori:e_generated_school",
+    word: "学校",
+    reading: "がっこう",
+    sourceId: "yori:e_generated_school",
+    headwords: [{ text: "学校", reading: "がっこう", kind: "kanji", common: false, tags: [] }]
+  };
+  repository.saveEntry(englishGroup(authored), "en", generation);
+  repository.saveEntry({
+    ...authored,
+    senses: [{
+      id: "yori:s_generated_school:zh-tw:1",
+      position: 1,
+      appliesTo: { kanji: ["*"], kana: ["*"] },
+      partOfSpeech: ["n"],
+      glosses: [{ lang: "zh-tw", text: "學校", source: "generated", reviewStatus: "checked" }],
+      provenance: "generated",
+      evidenceIds: []
+    }]
+  }, "zh-tw", generation);
+  repository.close();
+  lookup.close();
+
+  const next = join(mkdtempSync(join(tmpdir(), "yori-takeover-release-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${next}`.quiet();
+  const candidate = new Database(next);
+  candidate.prepare("update ja_metadata set value = 'next' where key = 'dictDate'").run();
+  candidate.close();
+  expect(importJapaneseRelease(path, next)).toBe(true);
+
+  const db = new Database(path, { readonly: true });
+  // One entry for the word, owned by the release. A surviving authored row
+  // would keep answering lookups with its own stale meanings.
+  expect(db.query<{ id: string; source: string }, []>(`
+    select distinct entry.id, entry.source from ja_entries entry
+      join ja_lookup_terms term on term.entry_id = entry.id
+     where term.term = '学校'
+  `).all()).toEqual([{ id: "yori:e_jmdict_1206730", source: "jmdict" }]);
+  db.close();
+
+  const refreshed = openLookupDb(path);
+  expect(refreshed.lookup("学校", "en").item?.senses[0].glosses[0].text).toBe("school");
+  // The accepted group moved onto the entry the release now provides.
+  const taiwanese = refreshed.lookup("学校", "zh-tw").item;
+  expect(taiwanese?.id).toBe("yori:e_jmdict_1206730");
+  expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
+  refreshed.close();
+});
+
 const generation = {
   model: "gpt-5.6-luna",
   provider: "openrouter",

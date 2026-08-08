@@ -194,10 +194,22 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           -- the release, is promoted to the release's own identity. Without
           -- this it would keep source = 'generated' forever, and every later
           -- graft would skip it because deletion targets imported rows.
+          -- An authored Japanese entry and an imported one never share an id, so
+          -- the written forms decide whether the release now carries the word.
+          -- The accepted groups move to the release's entry with it.
           create temp table promoted_ja_entries as
-            select entry.id as id from ja_entries entry
-            where entry.source = 'generated'
-              and entry.id in (select id from japanese_release.ja_entries);
+            select id, min(replacement_id) as replacement_id from (
+              select local.entry_id as id, rel.entry_id as replacement_id
+                from ja_lookup_terms local
+                join ja_entries entry on entry.id = local.entry_id
+                join japanese_release.ja_lookup_terms rel on rel.term = local.term
+               where entry.source = 'generated'
+              union
+              select entry.id as id, entry.id as replacement_id
+                from ja_entries entry
+               where entry.source = 'generated'
+                 and entry.id in (select id from japanese_release.ja_entries)
+            ) group by id;
 
           -- An accepted language group authored for an entry the release
           -- supplies is the usual shape of enrichment. It is carried across the
@@ -207,6 +219,9 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
             join ja_entries entry on entry.id = sense.entry_id
             where sense.generation_id is not null
               and (entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries));
+          update retained_ja_senses
+             set entry_id = (select replacement_id from promoted_ja_entries where id = entry_id)
+           where entry_id in (select id from promoted_ja_entries);
           create temp table retained_ja_glosses as
             select gloss.* from ja_glosses gloss
             where gloss.sense_id in (select id from retained_ja_senses);
@@ -303,31 +318,46 @@ export function hasEnglishDictionary(path: string): boolean {
  * store holding any is refused instead of destroyed.
  */
 export function clearReplaceableLegacyStore(path: string): void {
-  const accepted = countLegacyGeneratedEntries(path);
-  if (accepted > 0) {
+  const accepted = Object.entries(countLegacyAcceptedContent(path)).filter(([, count]) => count > 0);
+  if (accepted.length > 0) {
     throw new Error(
-      `${path} predates the ja-2 canonical schema and holds ${accepted} accepted generated ` +
-        `Japanese ${accepted === 1 ? "entry" : "entries"} that a replacement would destroy. ` +
-        "Export them with bun run japanese:release from a copy of this database, then remove " +
-        "the file so this start can bootstrap from the pinned release."
+      `${path} predates the ja-2 canonical schema and holds accepted content a replacement ` +
+        `would destroy (${accepted.map(([name, count]) => `${count} ${name}`).join(", ")}). ` +
+        "Export it from a copy of this database, then remove the file so this start can " +
+        "bootstrap from the pinned release."
     );
   }
   for (const file of [path, `${path}-wal`, `${path}-shm`]) rmSync(file, { force: true });
 }
 
 /**
- * Accepted generated Japanese entries held by a pre-ja-2 store. They lived in
- * `japanese_generated_records`, which the ja-2 migration drops, so they are the
- * only content a replacement could not rebuild from the pinned sources.
+ * Accepted content in a pre-ja-2 store that a replacement could not rebuild
+ * from the pinned sources. It lived in four places, none of which survive the
+ * ja-2 migration: authored Japanese entries, generated examples on imported
+ * Japanese meanings, authored English entries, and generated English examples.
+ * A table that never existed contributes nothing.
  */
-function countLegacyGeneratedEntries(path: string): number {
+function countLegacyAcceptedContent(path: string): Record<string, number> {
   const db = new Database(path, { readonly: true });
+  const count = (sql: string): number => {
+    try {
+      return db.query<{ count: number }, []>(sql).get()?.count ?? 0;
+    } catch {
+      return 0;
+    }
+  };
   try {
-    return db.query<{ count: number }, []>(
-      "select count(*) as count from japanese_generated_records"
-    ).get()?.count ?? 0;
-  } catch {
-    return 0;
+    return {
+      "Japanese entries": count("select count(*) as count from japanese_generated_records"),
+      "Japanese examples": count("select count(*) as count from examples where source = 'generated'"),
+      // Every other English entry was written by enrichment, and the old
+      // english_examples table had no writer but the enrichment repository.
+      "English entries": count(`
+        select count(*) as count from english_entries
+         where id not in (select entry_id from english_imported_entries)
+      `),
+      "English examples": count("select count(*) as count from english_examples")
+    };
   } finally {
     db.close();
   }
