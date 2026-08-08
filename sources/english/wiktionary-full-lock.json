@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "source": "wiktionary",
+  "edition": "en",
+  "version": "2026-07-06",
+  "url": "https://kaikki.org/dictionary/downloads/en/en-extract.jsonl.gz",
+  "cache": "data/wiktionary/en-extract-2026-07-06.jsonl.gz",
+  "sha256": null,
+  "license": "CC-BY-SA-4.0 AND GFDL-1.1-or-later",
+  "attribution": "English Wiktionary contributors; extracted with Wiktextract",
+  "note": "The full English extract was about 2.65 GiB compressed when researched. It is never committed: bun run english:evidence streams it from the ignored resumable cache above, records the computed sha256 in the evidence manifest, and keeps only the filtered Japanese/Chinese evidence. Pin sha256 here after the first operator download.",
+  "mappedSources": {
+    "japaneseWordNet": {
+      "version": "1.1",
+      "license": "Japanese WordNet License (BSD-style, attribution required)",
+      "attribution": "Japanese WordNet, NICT",
+      "mappingSource": "open-multilingual-wordnet-ili",
+      "mappingVersion": "1.4",
+      "records": "data/wiktionary/mapped/japanese-wordnet.jsonl",
+      "mappings": "data/wiktionary/mapped/japanese-wordnet-ili.jsonl"
+    },
+    "taiwanTerminology": {
+      "license": "Open Government Data License, Taiwan 1.0",
+      "records": "data/wiktionary/mapped/taiwan-terminology.jsonl"
+    }
+  }
+}

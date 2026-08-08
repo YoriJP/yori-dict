@@ -28,17 +28,15 @@ if (!hasEnglishDictionary(path)) {
   } else {
     const outputDirectory = await mkdtemp(join(tmpdir(), "yori-english-bootstrap-"));
     try {
+      const rebuilt = join(outputDirectory, `yori-english-${englishVersion}.sqlite`);
       const process = Bun.spawn([
         "bun", "run", "scripts/build-english-dictionary.ts",
         "--version", englishVersion,
-        "--out-dir", outputDirectory
+        "--out", rebuilt
       ], { stdout: "inherit", stderr: "inherit" });
       const exitCode = await process.exited;
       if (exitCode !== 0) throw new Error(`English bootstrap build failed with exit code ${exitCode}`);
-      installedEnglish = importEnglishRelease(
-        path,
-        join(outputDirectory, `yori-english-${englishVersion}.sqlite`)
-      );
+      installedEnglish = importEnglishRelease(path, rebuilt);
     } finally {
       await rm(outputDirectory, { recursive: true, force: true });
     }

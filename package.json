@@ -6,11 +6,11 @@
   "scripts": {
     "enrichment:eval": "bun run scripts/evaluate-on-demand.ts",
     "english:build": "bun run scripts/build-english-dictionary.ts",
+    "english:evidence": "bun run scripts/build-english-evidence.ts",
     "english:release": "bun run scripts/export-english-release.ts",
     "english:eval": "bun run scripts/evaluate-english.ts",
     "build:db": "bun run import:jmdict:full -- --examples data/raw/jmdict-examples-eng.json --jlpt-vocab data/raw/jlpt-vocab --ai-glosses sources/ai-glosses/zh-tw.jsonl --ai-glosses sources/ai-glosses/zh-cn.jsonl --ai-glosses sources/ai-glosses/ko.jsonl --ai-examples sources/ai-examples/generated.jsonl",
     "data:download": "bun run scripts/download-data-release.ts",
-    "data:prepare": "bun run db:prepare",
     "db:prepare": "bun run scripts/prepare-production-db.ts",
     "db:import": "bun run scripts/import-production-data.ts",
     "dev": "bun run db:prepare && bun run src/index.ts",
@@ -21,7 +21,6 @@
     "lookup:check": "bun run scripts/check-lookup.ts",
     "japanese:release": "bun run release:check && bun run scripts/package-release.ts",
     "release:check": "bun run db:prepare && bun run lookup:check && bun run typecheck && bun test",
-    "release:package": "bun run japanese:release",
     "start": "bun run db:prepare && bun run src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

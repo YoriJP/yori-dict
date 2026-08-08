@@ -2,7 +2,10 @@ openapi: 3.1.0
 info:
   title: Yori Dict API
   version: 1.0.0
-  description: Independent Japanese and English dictionary lookup with authenticated on-demand enrichment.
+  description: >-
+    Independent Japanese and English dictionary lookup with authenticated on-demand
+    enrichment. Every lookup names one dictionary and one explanation language;
+    there is no default and no fallback between languages.
   license:
     name: MIT for code; CC BY-SA 4.0 for dictionary data
     url: https://github.com/YoriJP/yori-dict/blob/main/DATA_SOURCES.md
@@ -31,7 +34,7 @@ paths:
                 description: Open Japanese and English dictionary lookup backed by independent data releases.
                 health: /health
                 meta: /v1/meta
-                lookup: "/v1/lookup?q=食べました&lang=zh-tw"
+                lookup: "/v1/lookup?q=食べました&dictionary=ja&lang=zh-tw"
                 batchLookup: /v1/lookup/batch
                 docs: /doc
                 openapi: /openapi.yaml
@@ -92,6 +95,11 @@ paths:
                 apiVersion: v1
                 dictionaryVersion: "2026-06-01"
                 languages: [en, de, zh-tw, zh-cn, ko]
+                dictionaries:
+                  ja:
+                    languages: [en, de, zh-tw, zh-cn, ko]
+                  en:
+                    languages: [en, ja, zh-tw]
                 tags:
                   uk: word usually written using kana alone
                   vt: transitive verb
@@ -127,21 +135,23 @@ paths:
           schema:
             type: string
           example: 食べました
-        - name: lang
-          in: query
-          required: false
-          description: Gloss language. Defaults to English.
-          schema:
-            $ref: "#/components/schemas/ApiLang"
-          example: zh-tw
         - name: dictionary
           in: query
-          required: false
-          description: Independent dictionary to query. Defaults to Japanese.
+          required: true
+          description: Independent headword dictionary to query. There is no default.
           schema:
             type: string
             enum: [ja, en]
-            default: ja
+        - name: lang
+          in: query
+          required: true
+          description: >-
+            Explanation language of the returned meanings. There is no default and no
+            fallback. `ja` supports en, de, zh-tw, zh-cn, and ko; `en` supports en,
+            ja, and zh-tw. Any other combination is a request error.
+          schema:
+            $ref: "#/components/schemas/ApiLang"
+          example: zh-tw
         - name: enrich
           in: query
           required: false
@@ -169,13 +179,15 @@ paths:
             type: string
       responses:
         "200":
-          description: Best lookup result, or null if no entry matches.
+          description: >-
+            The entry in the requested explanation language, or null when no acceptable
+            content exists for that dictionary and language.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LookupResponse"
+                $ref: "#/components/schemas/LookupResult"
         "400":
-          description: Missing query parameter.
+          description: Missing query, dictionary, or explanation language, or an unsupported combination.
           content:
             application/json:
               schema:
@@ -184,6 +196,14 @@ paths:
                 error: "Missing required query parameter: q"
         "401":
           description: Enrichment was requested without the configured bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: >-
+            A database, persistence, configuration, or model-provider failure. Operational
+            failures stay errors and never become a null entry.
           content:
             application/json:
               schema:
@@ -199,18 +219,21 @@ paths:
             schema:
               $ref: "#/components/schemas/BatchLookupRequest"
             example:
-              queries: [食べました, 学校, 孑々]
+              dictionary: ja
               lang: zh-tw
+              queries: [食べました, 学校, 孑々]
               enrich: false
       responses:
         "200":
-          description: Lookup results in the same order as the input queries.
+          description: >-
+            One entry or null per submitted query, in the same order and with the same
+            length as the input, including duplicate queries. The queries are not repeated.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/BatchLookupResponse"
         "400":
-          description: Invalid JSON body or invalid shape.
+          description: Invalid JSON body, invalid shape, or a missing/unsupported dictionary or language.
           content:
             application/json:
               schema:
@@ -224,6 +247,14 @@ paths:
                     error: Request body must include a non-empty queries array
         "401":
           description: Enrichment was requested without the configured bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: >-
+            An operational failure for any item fails the whole batch instead of hiding
+            the failed item as a null entry.
           content:
             application/json:
               schema:
@@ -261,20 +292,37 @@ components:
           format: uri
     ApiLang:
       type: string
-      enum: [en, de, zh-tw, zh-cn, ko]
+      enum: [en, de, zh-tw, zh-cn, ko, ja]
     MetaResponse:
       type: object
-      required: [apiVersion, dictionaryVersion, languages, tags, sources]
+      required: [apiVersion, dictionaryVersion, languages, tags, sources, dictionaries]
       properties:
         apiVersion:
           type: string
           const: v1
         dictionaryVersion:
           type: [string, "null"]
+          description: The Japanese dictionary's release version.
         languages:
           type: array
+          description: >-
+            The Japanese dictionary's explanation languages. Use `dictionaries`
+            to read the supported languages of either dictionary.
           items:
             $ref: "#/components/schemas/ApiLang"
+        dictionaries:
+          type: object
+          description: >-
+            Every headword dictionary this API serves, with the explanation
+            languages it answers in. A lookup names one of each.
+          additionalProperties:
+            type: object
+            required: [languages]
+            properties:
+              languages:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiLang"
         tags:
           type: object
           description: >-
@@ -295,23 +343,17 @@ components:
                 type: string
               url:
                 type: string
-    LookupResponse:
-      type: object
-      required: [item]
-      properties:
-        item:
-          anyOf:
-            - $ref: "#/components/schemas/LookupItem"
-            - $ref: "#/components/schemas/EnglishEntry"
-            - type: "null"
+    LookupResult:
+      anyOf:
+        - $ref: "#/components/schemas/LookupEntry"
+        - type: "null"
     BatchLookupRequest:
       type: object
-      required: [queries]
+      required: [dictionary, lang, queries]
       properties:
         dictionary:
           type: string
           enum: [ja, en]
-          default: ja
         queries:
           type: array
           minItems: 1
@@ -341,166 +383,100 @@ components:
           type: string
     BatchLookupResponse:
       type: object
-      required: [results]
+      required: [entries]
       properties:
-        results:
+        entries:
           type: array
+          description: >-
+            Same length and order as the submitted queries. Duplicate queries keep
+            separate positions and the submitted query strings are not repeated.
           items:
-            type: object
-            required: [input, item]
-            properties:
-              input:
-                type: string
-              item:
-                anyOf:
-                  - $ref: "#/components/schemas/LookupItem"
-                  - $ref: "#/components/schemas/EnglishEntry"
-                  - type: "null"
-    LookupItem:
+            $ref: "#/components/schemas/LookupResult"
+    LookupEntry:
       type: object
-      required: [id, word, reading, common, source, sourceId, headwordLanguage, headwords, senses]
+      description: >-
+        One base entry shape for both dictionaries. Japanese keeps its reading and
+        inflection details; English keeps its pronunciations.
+      required: [id, dictionary, lang, headword, headwords, meanings, sources]
       properties:
         id:
           type: string
           example: yori:e_jmdict_1358280
-        word:
+        dictionary:
+          type: string
+          enum: [ja, en]
+        lang:
+          $ref: "#/components/schemas/ApiLang"
+        headword:
           type: string
           example: 食べる
-        reading:
-          type: [string, "null"]
-          example: たべる
-        common:
-          type: boolean
-        source:
-          type: string
-          enum: [jmdict, generated]
-        sourceId:
-          type: string
-          example: "1358280"
-        headwordLanguage:
-          type: string
-          description: BCP 47 language of the entry's headwords. Currently always Japanese.
-          const: ja
-        estimatedLevel:
-          type: string
-          description: >-
-            Unofficial estimated JLPT band. Omitted when the pinned source lists do not
-            cover the JMdict source ID; this is not an official JLPT classification.
-          enum: [N1, N2, N3, N4, N5]
-        inflectionPath:
-          type: array
-          description: >-
-            Ordered deinflection steps used for the selected result. Omitted for exact
-            lookups. This metadata does not affect result ranking.
-          items:
-            $ref: "#/components/schemas/InflectionStep"
         headwords:
           type: array
           items:
             $ref: "#/components/schemas/Headword"
-        senses:
+        meanings:
           type: array
-          description: Senses without glosses in the requested language are omitted.
+          minItems: 1
+          description: >-
+            The complete ordered meaning list for the requested explanation language.
+            Meanings without content in that language are absent, and an entry with no
+            such meaning is returned as null instead.
           items:
-            $ref: "#/components/schemas/Sense"
-    EnglishEntry:
-      type: object
-      required: [id, dictionary, headword, pronunciations, senses, sources]
-      properties:
-        id:
+            $ref: "#/components/schemas/Meaning"
+        sources:
+          type: array
+          description: Concise source identifiers, such as `jmdict:1358280` or `generated`.
+          items:
+            type: string
+        reading:
+          type: [string, "null"]
+          description: Japanese only.
+          example: たべる
+        common:
+          type: boolean
+          description: Japanese only.
+        estimatedLevel:
           type: string
-          example: yori:en:e_0123456789abcdef0123
-        dictionary:
-          type: string
-          const: en
-        headword:
-          type: string
-          example: bank
+          description: >-
+            Japanese only. Unofficial estimated JLPT band, omitted when the pinned source
+            lists do not cover the JMdict source ID.
+          enum: [N1, N2, N3, N4, N5]
+        inflectionPath:
+          type: array
+          description: Japanese only. Ordered deinflection steps; omitted for exact lookups.
+          items:
+            $ref: "#/components/schemas/InflectionStep"
         pronunciations:
           type: array
+          description: English only.
           items:
             type: object
-            required: [ipa, evidenceIds]
+            required: [ipa]
             properties:
               ipa:
                 type: string
               region:
                 type: string
-              evidenceIds:
-                type: array
-                items:
-                  type: string
-        senses:
-          type: array
-          items:
-            type: object
-            required: [id, position, partOfSpeech, definition, registers, regions, domains, dated, usage, examples, evidenceIds, provenance]
-            properties:
-              id:
-                type: string
-              position:
-                type: integer
-                minimum: 1
-              partOfSpeech:
-                type: string
-              definition:
-                type: string
-              registers:
-                type: array
-                items: { type: string }
-              regions:
-                type: array
-                items: { type: string }
-              domains:
-                type: array
-                items: { type: string }
-              dated:
-                type: boolean
-              usage:
-                type: array
-                items: { type: string }
-              examples:
-                type: array
-                items:
-                  type: object
-                  required: [text, source, reviewStatus]
-                  properties:
-                    text: { type: string }
-                    source: { type: string, enum: [sourced, generated] }
-                    sourceId: { type: string }
-                    reviewStatus: { type: string, enum: [source, checked] }
-              evidenceIds:
-                type: array
-                items: { type: string }
-              provenance:
-                type: string
-                enum: [source, generated]
-        sources:
-          type: array
-          items:
-            type: object
-            required: [source, sourceVersion, sourceEntryId, license, attribution]
-            properties:
-              source: { type: string }
-              sourceVersion: { type: string }
-              sourceEntryId: { type: string }
-              license: { type: string }
-              attribution: { type: string }
+
     Headword:
       type: object
-      required: [text, reading, kind, common, tags]
+      required: [text]
       properties:
         text:
           type: string
         reading:
           type: [string, "null"]
+          description: Japanese only.
         kind:
           type: string
+          description: Japanese only.
           enum: [kanji, kana]
         common:
           type: boolean
+          description: Japanese only.
         tags:
           type: array
+          description: Japanese only.
           items:
             type: string
     Xref:
@@ -530,12 +506,13 @@ components:
         text:
           type: [string, "null"]
           example: personal computer
-    Sense:
+    Meaning:
       type: object
-      required: [id, position, appliesTo, partOfSpeech, glosses]
+      required: [id, position, partOfSpeech, glosses, examples, sources, provenance]
       description: >-
-        Annotation fields are omitted when JMdict has no values for them. Tag codes in
-        misc, field, dialect, and partOfSpeech are described by `tags` on /v1/meta.
+        One meaning in the requested explanation language. Annotation fields are omitted
+        when the dictionary has no values for them. Japanese tag codes in misc, field,
+        dialect, and partOfSpeech are described by `tags` on /v1/meta.
       properties:
         id:
           type: string
@@ -543,8 +520,33 @@ components:
         position:
           type: integer
           minimum: 1
+        partOfSpeech:
+          type: array
+          items:
+            type: string
+          example: [v1, vt]
+        glosses:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/Gloss"
+        examples:
+          type: array
+          description: Sourced or generated examples, ordered within this meaning. Empty when none exist.
+          items:
+            $ref: "#/components/schemas/Example"
+        sources:
+          type: array
+          description: Concise source evidence identifiers for this meaning. Empty for meanings with no source evidence.
+          items:
+            type: string
+        provenance:
+          type: string
+          description: Whether the meaning is source-backed or added from established model knowledge.
+          enum: [source, generated]
         appliesTo:
           type: object
+          description: Japanese only.
           required: [kanji, kana]
           properties:
             kanji:
@@ -555,75 +557,87 @@ components:
               type: array
               items:
                 type: string
-        partOfSpeech:
-          type: array
-          items:
-            type: string
-          example: [v1, vt]
         misc:
           type: array
-          description: Miscellaneous tags, such as `uk` (usually written in kana) or `col`.
+          description: Japanese only. Miscellaneous tags, such as `uk` (usually written in kana) or `col`.
           items:
             type: string
           example: [uk]
         field:
           type: array
-          description: Fields of application, such as `comp`, `med`, or `finc`.
+          description: Japanese only. Fields of application, such as `comp`, `med`, or `finc`.
           items:
             type: string
           example: [comp]
         dialect:
           type: array
-          description: Dialects the sense belongs to, such as `ksb` (Kansai-ben).
+          description: Japanese only. Dialects the meaning belongs to, such as `ksb` (Kansai-ben).
           items:
             type: string
           example: [ksb]
         info:
           type: array
-          description: Free-text notes about this sense.
+          description: Japanese only. Free-text notes about this meaning.
           items:
             type: string
         related:
           type: array
+          description: Japanese only.
           items:
             $ref: "#/components/schemas/Xref"
         antonym:
           type: array
+          description: Japanese only.
           items:
             $ref: "#/components/schemas/Xref"
         languageSource:
           type: array
-          description: Origin of loanwords and wasei-eigo. Empty for words of Japanese origin.
+          description: Japanese only. Origin of loanwords and wasei-eigo.
           items:
             $ref: "#/components/schemas/LanguageSource"
-        examples:
+        pronunciations:
           type: array
-          description: Human-sourced or generated examples, ordered within this JMdict sense.
-          items:
-            $ref: "#/components/schemas/SenseExample"
-        glosses:
-          type: array
-          minItems: 1
-          items:
-            $ref: "#/components/schemas/Gloss"
-        evidenceIds:
-          type: array
-          description: Licensed source evidence identifiers retained by a generated canonical sense.
+          description: Japanese only. Meaning-specific readings.
           items:
             type: string
-        provenance:
-          type: string
-          description: Whether a generated canonical sense is source-backed or added from established model knowledge.
-          enum: [source, generated]
+        pragmaticFunctions:
+          type: array
+          description: Japanese only.
+          items:
+            type: string
+        registers:
+          type: array
+          description: English only.
+          items:
+            type: string
+        regions:
+          type: array
+          description: English only.
+          items:
+            type: string
+        domains:
+          type: array
+          description: English only.
+          items:
+            type: string
+        dated:
+          type: boolean
+          description: English only.
+        usage:
+          type: array
+          description: English only.
+          items:
+            type: string
     Gloss:
       type: object
       required: [text, source, reviewStatus]
       properties:
         text:
           type: string
+          description: Japanese gloss text, or the English definition.
         source:
           type: string
-          enum: [jmdict, generated]
+          description: Concise source identifier, such as `jmdict`, `open-english-wordnet`, or `generated`.
         reviewStatus:
           type: string
           enum: [source, checked]
@@ -655,21 +669,22 @@ components:
         text:
           type: string
           example: You should eat more fruit.
-    SenseExample:
+    Example:
       type: object
       required: [text, translations, source, reviewStatus]
       properties:
         text:
           type: string
-          description: Japanese example sentence.
+          description: Example sentence in the headword language.
           example: もっと果物を食べるべきです。
         translations:
           type: array
+          description: Paired sentences from the same example. Empty when the example has none.
           items:
             $ref: "#/components/schemas/ExampleTranslation"
         source:
           type: string
-          description: Distinguishes imported human examples from future generated examples.
+          description: Distinguishes imported human examples from generated examples.
           enum: [sourced, generated]
         sourceName:
           type: string

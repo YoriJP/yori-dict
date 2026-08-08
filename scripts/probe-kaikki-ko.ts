@@ -239,10 +239,10 @@ function findSingleSenseMatch(db: Database, word: string): MatchedSense | "no-ma
          e.source_id,
          max(f.common) as common,
          count(distinct s.id) as sense_count
-       from lookup_terms lt
-       join entries e on e.id = lt.entry_id
-       join forms f on f.entry_id = e.id and f.text = lt.term
-       join senses s on s.entry_id = e.id
+       from ja_lookup_terms lt
+       join ja_entries e on e.id = lt.entry_id
+       join ja_forms f on f.entry_id = e.id and f.text = lt.term
+       join ja_senses s on s.entry_id = e.id and s.lang = 'en'
        where lt.term = ?
        group by e.id, e.source_id`
     )
@@ -255,7 +255,7 @@ function findSingleSenseMatch(db: Database, word: string): MatchedSense | "no-ma
   const row = singleSenseRows[0];
   return {
     entry_id: row.entry_id,
-    sense_id: row.sense_id,
+    sense_id: row.sense_id.replace(/:en$/, ""),
     source_id: row.source_id,
     common: row.common
   };
@@ -263,7 +263,9 @@ function findSingleSenseMatch(db: Database, word: string): MatchedSense | "no-ma
 
 function hasExistingKoGlosses(db: Database, senseId: string): boolean {
   const row = db
-    .query<{ count: number }, [string]>("select count(*) as count from glosses where sense_id = ? and lang = 'ko'")
-    .get(senseId);
+    .query<{ count: number }, [string]>(
+      "select count(*) as count from ja_senses where id = ? and lang = 'ko'"
+    )
+    .get(`${senseId}:ko`);
   return (row?.count ?? 0) > 0;
 }

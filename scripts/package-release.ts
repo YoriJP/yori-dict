@@ -10,7 +10,11 @@ const artifacts = await buildJapaneseRelease(
   }
 );
 
-for (const path of Object.values(artifacts)) console.log(`Wrote ${path}`);
+for (const artifact of Object.values(artifacts)) {
+  for (const path of typeof artifact === "string" ? [artifact] : Object.values(artifact)) {
+    console.log(`Wrote ${path}`);
+  }
+}
 
 function readFlag(argv: string[], flag: string): string | null {
   const index = argv.indexOf(flag);

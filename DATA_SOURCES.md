@@ -110,8 +110,9 @@ source versions, URLs, archive checksums, licenses, and attribution text are com
 `sources/english/source-lock.json`. The checksummed source archives are committed beside
 that lock so an English release never changes because an upstream URL moved.
 
-Imported records remain stored as unchanged structured JSON across the English SQLite
-`source_records` and deduplicated `source_payloads` tables.
+Canonical tables keep concise provenance — selected text, source name and version, a
+stable evidence identifier, review status, license, and attribution — and never a complete
+raw upstream record. The pinned archives themselves are the reproducible rebuild input.
 Canonical entries carry separate source evidence IDs and stable `yori:en:*` identities;
 they do not adopt either source's identity. The English SQLite, JSONL, manifest, and
 Yomitan v3 artifacts are distributed under CC BY-SA 4.0 and must retain both source
@@ -124,6 +125,51 @@ Sources:
 - https://kaikki.org/dictionary/rawdata.html
 - https://simple.wiktionary.org/wiki/Wiktionary:Copyrights
 - https://github.com/tatuylonen/wiktextract
+
+## English Multilingual Source Evidence
+
+Japanese and Taiwanese Chinese explanations for English headwords are authored from
+filtered source evidence, not published directly from it. `bun run english:evidence`
+streams the full English Wiktionary Wiktextract archive and writes a bounded filtered
+artifact plus a manifest under `sources/english/evidence/`. Both remain import artifacts
+outside canonical release tables. `docs/english-source-pipeline.md` describes the rules.
+
+The complete archive is never committed. It was about 2.65 GiB compressed when
+researched, and the pipeline reads it from the ignored resumable cache pinned in
+`sources/english/wiktionary-full-lock.json`. The manifest records the archive's URL, dump
+date, compressed checksum and size, HTTP metadata when available, license, attribution,
+and the filter tool version, so the evidence stays reproducible and attributable.
+
+The full English Wiktionary extract is distributed under the Wiktionary terms, CC BY-SA
+4.0 and GFDL 1.1 or later, and credits English Wiktionary contributors and Wiktextract.
+Its translation records are authoring and review evidence: they describe a Japanese or
+Chinese word under an English meaning, not an independently written Japanese or Chinese
+dictionary entry.
+
+Two mapped sources supply stronger evidence:
+
+- Japanese WordNet, credited to NICT and distributed under its BSD-style license, is
+  admitted only through validated Princeton WordNet/ILI mappings. Accepted rows retain
+  the ILI id, PWN synset, mapping source, and mapping version. The project is old and
+  warns that translated definitions and examples may contain errors.
+- Taiwan government terminology, published under the Open Government Data License,
+  Taiwan 1.0, is authoritative only inside its stated domains. Each row retains its
+  agency, dataset, domain, version, attribution, and exact English/Chinese term pair.
+
+`zh-tw` is assigned only where Taiwan terminology corroborates the exact term. Traditional
+characters alone are not Taiwanese localization. Reverse JMdict, CC-CEDICT, and Simplified
+Chinese WordNet records may support review but never become canonical through string or
+reverse-gloss matching. NTU Chinese Wordnet is not imported without a separately
+documented permission grant.
+
+Sources:
+
+- https://kaikki.org/dictionary/downloads/en/
+- https://en.wiktionary.org/wiki/Wiktionary:Copyrights
+- https://bond-lab.github.io/wnja/
+- https://github.com/globalwordnet/cili
+- https://terms.naer.edu.tw/
+- https://data.gov.tw/license
 
 ## Estimated Levels
 
@@ -143,20 +189,23 @@ Sources:
 Release artifacts are generated under `releases/` by:
 
 ```sh
-bun run release:package
+bun run japanese:release
 ```
 
 The release SQLite database contains JMdict-derived dictionary data, Tatoeba
 examples, estimated levels, and project-reviewed AI-assisted glosses. The
-database artifact is distributed under CC BY-SA 4.0; embedded source records
-retain the attribution described above.
+database artifact is distributed under CC BY-SA 4.0. It carries concise
+provenance — source name, version, and evidence identifier — rather than
+complete raw upstream records, so the attribution above still applies.
 
-The release package includes:
+The release package includes one Yomitan pack per explanation language:
 
 ```txt
 yori-dict-<dictDate>.sqlite.gz
 yori-dict-<dictDate>.sqlite.gz.sha256
+yori-dict-<dictDate>.jsonl
 yori-dict-<dictDate>.json
+yori-ja-<lang>.zip
 ```
 
 ## Attribution

@@ -8,8 +8,10 @@ data/example-evaluation/
 data/english-evaluation/
 data/kaikki/
 data/raw/
+data/wiktionary/
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
 /releases/
 .DS_Store
+sources/english/evidence/

@@ -14,20 +14,16 @@ beforeAll(async () => {
   const writableDb = new Database(testDbPath);
   writableDb
     .prepare(
-      `insert into examples
+      `insert into ja_examples
         (sense_id, position, text, translations, source, review_status)
        values (?, 1, ?, ?, 'generated', 'checked')`
     )
     .run(
-      "yori:s_jmdict_1283190_1",
+      "yori:s_jmdict_1283190_1:en",
       "それは高かったです。",
       JSON.stringify([{ lang: "en", text: "It was expensive." }])
     );
-  writableDb
-    .prepare(
-      "insert into glosses (sense_id, lang, text, source, review_status) values (?, 'zh-tw', ?, 'ai-assisted', 'checked')"
-    )
-    .run("yori:s_jmdict_1358280_1", "吃");
+  addTaiwaneseMeaning(writableDb, "yori:s_jmdict_1358280_1", "吃");
   writableDb.close();
   lookupDb = openLookupDb(testDbPath);
   app = createApp(lookupDb);
@@ -38,6 +34,32 @@ afterAll(() => {
   new Database(testDbPath).close();
 });
 
+/**
+ * Legacy accepted Taiwanese content maps onto an exact imported meaning and
+ * becomes that language's own meaning rather than another gloss on the English
+ * meaning.
+ */
+function addTaiwaneseMeaning(db: Database, baseSenseId: string, gloss: string): void {
+  const source = db
+    .query<Record<string, unknown>, [string]>("select * from ja_senses where id = ?")
+    .get(`${baseSenseId}:en`)!;
+  const row: Record<string, unknown> = { ...source, id: `${baseSenseId}:zh-tw`, lang: "zh-tw", position: 1, provenance: "generated", source_name: "yori-legacy", source_ref: baseSenseId };
+  const columns = Object.keys(row);
+  db.prepare(`insert into ja_senses (${columns.join(", ")}) values (${columns.map(() => "?").join(", ")})`)
+    .run(...columns.map((column) => row[column] as never));
+  db.prepare(
+    "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, ?, 'generated', 'checked')"
+  ).run(`${baseSenseId}:zh-tw`, gloss);
+}
+
+async function lookup(query: string, lang = "en", extra = ""): Promise<any> {
+  const res = await app.request(
+    `/v1/lookup?q=${encodeURIComponent(query)}&dictionary=ja&lang=${lang}${extra}`
+  );
+  expect(res.status).toBe(200);
+  return res.json();
+}
+
 test("returns API index links from the root route", async () => {
   const res = await app.request("/");
   expect(res.status).toBe(200);
@@ -46,6 +68,7 @@ test("returns API index links from the root route", async () => {
   expect(body.description).toBe("Open Japanese and English dictionary lookup backed by independent data releases.");
   expect(body.health).toBe("/health");
   expect(body.meta).toBe("/v1/meta");
+  expect(body.lookup).toContain("dictionary=ja");
   expect(body.docs).toBe("/doc");
   expect(body.openapi).toBe("/openapi.yaml");
   expect(body.dataRelease).toBe("https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3");
@@ -76,6 +99,11 @@ test("returns metadata", async () => {
   const body = await res.json();
   expect(body.apiVersion).toBe("v1");
   expect(body.dictionaryVersion).toBe("2026-06-08");
+  // Both dictionaries ship, so metadata names what each one can be asked for.
+  expect(body.dictionaries).toEqual({
+    ja: { languages: ["en", "de", "zh-tw", "zh-cn", "ko"] },
+    en: { languages: ["en", "ja", "zh-tw"] }
+  });
   expect(body.sources).toContainEqual({
     name: "Yori generated zh-CN glosses (legacy records)",
     license: "CC-BY-SA-4.0",
@@ -90,39 +118,31 @@ test("returns metadata", async () => {
   expect(body.tags.vt).toBe("transitive verb");
 });
 
-test("looks up an exact Japanese headword", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-tw");
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(body.item.id).toBe("yori:e_jmdict_1358280");
-  expect(body.item.word).toBe("食べる");
-  expect(body.item.reading).toBe("たべる");
-  expect(body.item.senses).toHaveLength(1);
+test("looks up an exact Japanese headword in the requested language", async () => {
+  const entry = await lookup("食べる", "zh-tw");
+  expect(entry.id).toBe("yori:e_jmdict_1358280");
+  expect(entry.dictionary).toBe("ja");
+  expect(entry.lang).toBe("zh-tw");
+  expect(entry.headword).toBe("食べる");
+  expect(entry.reading).toBe("たべる");
+  expect(entry.sources).toEqual(["jmdict:1358280"]);
+  expect(entry.meanings).toHaveLength(1);
+  expect(entry.meanings[0].glosses[0].text).toBe("吃");
 });
 
-test("defaults lookup glosses to English", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(body.item.senses[0].glosses[0].text).toBe("to eat");
-});
-
-test("maps legacy ai-assisted storage to generated public provenance", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&lang=zh-tw");
-  const body = await res.json();
-  expect(body.item.senses[0].glosses[0]).toEqual({
+test("legacy accepted content reads as generated provenance in its own language", async () => {
+  const entry = await lookup("食べる", "zh-tw");
+  expect(entry.meanings[0].glosses[0]).toEqual({
     text: "吃",
     source: "generated",
     reviewStatus: "checked"
   });
 });
 
-test("returns headword language, sourced sense examples, and the easiest estimated level", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
-  const body = await res.json();
-  expect(body.item.headwordLanguage).toBe("ja");
-  expect(body.item.estimatedLevel).toBe("N5");
-  expect(body.item.senses[0].examples).toEqual([
+test("returns sourced examples and the easiest estimated level", async () => {
+  const entry = await lookup("食べる");
+  expect(entry.estimatedLevel).toBe("N5");
+  expect(entry.meanings[0].examples).toEqual([
     {
       text: "もっと果物を食べるべきです。",
       translations: [{ lang: "en", text: "You should eat more fruit." }],
@@ -135,24 +155,21 @@ test("returns headword language, sourced sense examples, and the easiest estimat
 });
 
 test("matches examples to the exact sense when the source has fewer senses", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%85%8D%E3%81%86");
-  const body = await res.json();
-  expect(body.item.senses[0]).not.toHaveProperty("examples");
-  expect(body.item.senses[1].examples[0].sourceId).toBe("114734");
+  const entry = await lookup("配う");
+  expect(entry.meanings[0].examples).toEqual([]);
+  expect(entry.meanings[1].examples[0].sourceId).toBe("114734");
 });
 
 test("omits an example when identical senses make its attachment ambiguous", async () => {
-  const res = await app.request("/v1/lookup?q=%E3%81%82%E3%81%84%E3%81%BE%E3%81%84%E8%AA%9E");
-  const body = await res.json();
-  expect(body.item.senses).toHaveLength(2);
-  expect(body.item.senses[0]).not.toHaveProperty("examples");
-  expect(body.item.senses[1]).not.toHaveProperty("examples");
+  const entry = await lookup("あいまい語");
+  expect(entry.meanings).toHaveLength(2);
+  expect(entry.meanings[0].examples).toEqual([]);
+  expect(entry.meanings[1].examples).toEqual([]);
 });
 
 test("represents generated examples distinctly without generating them at lookup time", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%AB%98%E3%81%84");
-  const body = await res.json();
-  expect(body.item.senses[0].examples).toEqual([
+  const entry = await lookup("高い");
+  expect(entry.meanings[0].examples).toEqual([
     {
       text: "それは高かったです。",
       translations: [{ lang: "en", text: "It was expensive." }],
@@ -163,134 +180,118 @@ test("represents generated examples distinctly without generating them at lookup
 });
 
 test("omits estimated level when the source lists do not cover an entry", async () => {
-  const res = await app.request("/v1/lookup?q=%E8%AA%AD%E3%82%80");
-  const body = await res.json();
-  expect(body.item).not.toHaveProperty("estimatedLevel");
+  const entry = await lookup("読む");
+  expect(entry).not.toHaveProperty("estimatedLevel");
 });
 
 test("preserves form tags and sense applicability", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%85%8D%E3%81%86");
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(body.item.headwords).toContainEqual({
+  const entry = await lookup("配う");
+  expect(entry.headwords).toContainEqual({
     text: "配う",
     reading: "あしらう",
     kind: "kanji",
     common: false,
     tags: ["sK"]
   });
-  expect(body.item.senses[0].appliesTo).toEqual({
+  expect(entry.meanings[0].appliesTo).toEqual({
     kanji: ["遇う"],
     kana: ["*"]
   });
 });
 
 test("returns sense annotations when JMdict has them", async () => {
-  const res = await app.request("/v1/lookup?q=%E7%B6%BA%E9%BA%97");
-  const body = await res.json();
-  const sense = body.item.senses[0];
-  expect(sense.misc).toEqual(["uk"]);
-  expect(sense.info).toEqual(["also written as 奇麗"]);
-  expect(sense.antonym).toEqual([["汚い", "きたない", 1]]);
-  expect(sense.glosses[1].type).toBe("figurative");
+  const entry = await lookup("綺麗");
+  const meaning = entry.meanings[0];
+  expect(meaning.misc).toEqual(["uk"]);
+  expect(meaning.info).toEqual(["also written as 奇麗"]);
+  expect(meaning.antonym).toEqual([["汚い", "きたない", 1]]);
+  expect(meaning.glosses[1].type).toBe("figurative");
 });
 
 test("returns loanword origin and field tags", async () => {
-  const res = await app.request("/v1/lookup?q=%E3%83%91%E3%82%BD%E3%82%B3%E3%83%B3");
-  const body = await res.json();
-  const sense = body.item.senses[0];
-  expect(sense.field).toEqual(["comp"]);
-  expect(sense.related).toEqual([["パーソナルコンピューター"]]);
-  expect(sense.languageSource).toEqual([
+  const entry = await lookup("パソコン");
+  const meaning = entry.meanings[0];
+  expect(meaning.field).toEqual(["comp"]);
+  expect(meaning.related).toEqual([["パーソナルコンピューター"]]);
+  expect(meaning.languageSource).toEqual([
     { lang: "eng", full: false, wasei: true, text: "personal computer" }
   ]);
 });
 
 test("returns dialect tags", async () => {
-  const res = await app.request("/v1/lookup?q=%E3%81%82%E3%81%8B%E3%82%93");
-  const body = await res.json();
-  expect(body.item.senses[0].dialect).toEqual(["ksb"]);
-  expect(body.item.senses[0].misc).toEqual(["uk", "col"]);
+  const entry = await lookup("あかん");
+  expect(entry.meanings[0].dialect).toEqual(["ksb"]);
+  expect(entry.meanings[0].misc).toEqual(["uk", "col"]);
 });
 
 test("omits empty sense annotations", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
-  const body = await res.json();
-  const sense = body.item.senses[0];
-  expect(sense).not.toHaveProperty("misc");
-  expect(sense).not.toHaveProperty("field");
-  expect(sense).not.toHaveProperty("languageSource");
-  expect(sense.glosses[0]).not.toHaveProperty("type");
+  const entry = await lookup("食べる");
+  const meaning = entry.meanings[0];
+  expect(meaning).not.toHaveProperty("misc");
+  expect(meaning).not.toHaveProperty("field");
+  expect(meaning).not.toHaveProperty("languageSource");
+  expect(meaning.glosses[0]).not.toHaveProperty("type");
 });
 
 test("looks up by reading", async () => {
-  const res = await app.request("/v1/lookup?q=%E3%81%9F%E3%81%B9%E3%82%8B");
-  const body = await res.json();
-  expect(body.item.word).toBe("食べる");
+  expect((await lookup("たべる")).headword).toBe("食べる");
 });
 
-test("returns an item for deinflected ichidan forms", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%81%BE%E3%81%97%E3%81%9F");
-  const body = await res.json();
-  expect(body.item.id).toBe("yori:e_jmdict_1358280");
-  expect(body.item.word).toBe("食べる");
-  expect(body.item.inflectionPath).toEqual([
+test("returns an entry for deinflected ichidan forms", async () => {
+  const entry = await lookup("食べました");
+  expect(entry.id).toBe("yori:e_jmdict_1358280");
+  expect(entry.headword).toBe("食べる");
+  expect(entry.inflectionPath).toEqual([
     { from: "食べました", to: "食べる", reason: "polite past" }
   ]);
 });
 
 test("omits an inflection path for an exact lookup", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B");
-  const body = await res.json();
-  expect(body.item).not.toHaveProperty("inflectionPath");
+  expect(await lookup("食べる")).not.toHaveProperty("inflectionPath");
 });
 
-test("returns an item for deinflected godan forms", async () => {
-  const res = await app.request("/v1/lookup?q=%E8%AA%AD%E3%82%93%E3%81%A0");
-  const body = await res.json();
-  expect(body.item.id).toBe("yori:e_jmdict_1456360");
-  expect(body.item.word).toBe("読む");
+test("returns an entry for deinflected godan forms", async () => {
+  const entry = await lookup("読んだ");
+  expect(entry.id).toBe("yori:e_jmdict_1456360");
+  expect(entry.headword).toBe("読む");
 });
 
-test("returns an item for deinflected godan negative forms", async () => {
-  const res = await app.request("/v1/lookup?q=%E8%A1%8C%E3%81%8B%E3%81%AA%E3%81%8B%E3%81%A3%E3%81%9F");
-  const body = await res.json();
-  expect(body.item.id).toBe("yori:e_jmdict_1578850");
-  expect(body.item.word).toBe("行く");
+test("returns an entry for deinflected godan negative forms", async () => {
+  const entry = await lookup("行かなかった");
+  expect(entry.id).toBe("yori:e_jmdict_1578850");
+  expect(entry.headword).toBe("行く");
 });
 
 test("keeps exact matches ranked first", async () => {
-  const res = await app.request("/v1/lookup?q=%E9%AB%98%E3%81%84");
-  const body = await res.json();
-  expect(body.item.id).toBe("yori:e_jmdict_1283190");
-  expect(body.item.word).toBe("高い");
+  const entry = await lookup("高い");
+  expect(entry.id).toBe("yori:e_jmdict_1283190");
+  expect(entry.headword).toBe("高い");
 });
 
 test("prefers a kana-primary entry for ambiguous kana queries", async () => {
-  const kanaRes = await app.request("/v1/lookup?q=%E3%81%8F%E3%82%89%E3%81%84");
-  const kanaBody = await kanaRes.json();
-  expect(kanaBody.item.id).toBe("yori:e_jmdict_2000002");
-  expect(kanaBody.item.word).toBe("くらい");
+  const kana = await lookup("くらい");
+  expect(kana.id).toBe("yori:e_jmdict_2000002");
+  expect(kana.headword).toBe("くらい");
 
-  const kanjiRes = await app.request("/v1/lookup?q=%E6%9A%97%E3%81%84");
-  const kanjiBody = await kanjiRes.json();
-  expect(kanjiBody.item.id).toBe("yori:e_jmdict_2000001");
-  expect(kanjiBody.item.word).toBe("暗い");
+  const kanji = await lookup("暗い");
+  expect(kanji.id).toBe("yori:e_jmdict_2000001");
+  expect(kanji.headword).toBe("暗い");
 });
 
-test("returns one result per batch query in input order", async () => {
+test("returns one ordered entry per batch query without repeating the queries", async () => {
   const res = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ queries: ["食べました", "学校", "存在しない語"], lang: "zh-tw" })
+    body: JSON.stringify({
+      dictionary: "ja",
+      lang: "zh-tw",
+      queries: ["食べました", "学校", "存在しない語"]
+    })
   });
   const body = await res.json();
-  expect(body.results.map((result: { input: string }) => result.input)).toEqual([
-    "食べました",
-    "学校",
-    "存在しない語"
-  ]);
-  expect(body.results[0].item.id).toBe("yori:e_jmdict_1358280");
-  expect(body.results[1].item.id).toBe("yori:e_jmdict_1206730");
-  expect(body.results[2].item).toBeNull();
+  expect(Object.keys(body)).toEqual(["entries"]);
+  expect(body.entries).toHaveLength(3);
+  expect(body.entries[0].id).toBe("yori:e_jmdict_1358280");
+  expect(body.entries[1]).toBeNull();
+  expect(body.entries[2]).toBeNull();
 });

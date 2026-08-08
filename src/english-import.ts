@@ -4,12 +4,14 @@ import type {
   EnglishSourceSense
 } from "./english-types";
 
-const oewnLicense = "CC-BY-4.0";
-const oewnAttribution = "Open English WordNet contributors";
-const wiktionaryLicense = "CC-BY-SA-4.0 AND GFDL-1.1-or-later";
-const wiktionaryAttribution = "English Wiktionary contributors; extracted with Wiktextract";
+export const oewnLicense = "CC-BY-4.0";
+export const oewnAttribution = "Open English WordNet contributors";
+export const wiktionaryLicense = "CC-BY-SA-4.0 AND GFDL-1.1-or-later";
+export const wiktionaryAttribution =
+  "Simple English Wiktionary contributors; extracted with Wiktextract";
 
-type OewnSynset = {
+/** One synset as the pinned Open English WordNet JSON export writes it. */
+export type OewnSynset = {
   definition?: unknown;
   domain_topic?: unknown;
   example?: unknown;
@@ -17,53 +19,98 @@ type OewnSynset = {
   partOfSpeech?: unknown;
 };
 
-export function importOpenEnglishWordNet(
-  document: Record<string, unknown>,
+/** One lexical entry: part-of-speech blocks, each with its own ordered senses. */
+export type OewnLexicalEntry = Record<string, {
+  sense?: unknown;
+  pronunciation?: unknown;
+  form?: unknown;
+}>;
+
+export type OewnEntryRecord = EnglishSourceRecord & {
+  source: "open-english-wordnet";
+  /** Alternate written forms the source lists for this entry. */
+  forms: string[];
+};
+
+/**
+ * Reads one Open English WordNet lexical entry into source records that keep
+ * the archive's own editorial order: one record per part-of-speech block, and
+ * one meaning per element of that block's `sense` array, in array order. The
+ * synset identifier is only ever used to look a definition up — never to sort.
+ */
+export function importOpenEnglishWordNetEntry(
+  headword: string,
+  entry: OewnLexicalEntry,
+  synsets: (id: string) => OewnSynset | undefined,
   version: string
-): EnglishSourceRecord[] {
-  const records: EnglishSourceRecord[] = [];
-  for (const [synsetId, raw] of Object.entries(document)) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    const synset = raw as OewnSynset;
-    const definitions = stringList(synset.definition);
-    const members = stringList(synset.members);
-    const partOfSpeech = oewnPartOfSpeech(synset.partOfSpeech);
-    if (definitions.length === 0 || members.length === 0 || !partOfSpeech) continue;
-    const immutableRaw = raw;
-    for (const member of members) {
-      const sourceEntryId = `${synsetId}:${member}`;
-      const senses = definitions.map((definition, index): EnglishSourceSense => ({
-        evidenceId: `open-english-wordnet:${sourceEntryId}:${index + 1}`,
+): OewnEntryRecord[] {
+  const records: OewnEntryRecord[] = [];
+  for (const [posKey, block] of Object.entries(entry)) {
+    if (!block || typeof block !== "object") continue;
+    const partOfSpeech = oewnPartOfSpeech(posKey.split("-")[0]);
+    const senseList = Array.isArray(block.sense) ? block.sense : [];
+    if (!partOfSpeech || senseList.length === 0) continue;
+    const sourceEntryId = `${headword}:${posKey}`;
+
+    const senses = senseList.flatMap((raw): EnglishSourceSense[] => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+      const sense = raw as { id?: unknown; synset?: unknown };
+      const senseId = nonempty(sense.id);
+      const synsetId = nonempty(sense.synset);
+      if (!senseId || !synsetId) return [];
+      const synset = synsets(synsetId);
+      const glosses = stringList(synset?.definition);
+      if (glosses.length === 0) return [];
+      return [{
+        evidenceId: `open-english-wordnet:${senseId}`,
+        synset: synsetId,
         partOfSpeech,
-        definition,
+        glosses,
         registers: [],
         regions: [],
-        domains: stringList(synset.domain_topic),
+        domains: stringList(synset?.domain_topic).flatMap((topic) => {
+          const label = stringList(synsets(topic)?.members)[0];
+          return label ? [normalizeMember(label)] : [];
+        }),
         dated: false,
         usage: [],
-        examples: stringList(synset.example).map((text, exampleIndex) => ({
+        // A synset example belongs to exactly the meaning that names the
+        // synset, so it is an exactly mapped imported example.
+        examples: stringList(synset?.example).map((text, index): EnglishExample => ({
           text,
           source: "sourced",
-          sourceId: `${synsetId}:example:${exampleIndex + 1}`,
+          sourceName: "open-english-wordnet",
+          sourceId: `${synsetId}:example:${index + 1}`,
           reviewStatus: "source"
         }))
-      }));
-      records.push(freezeSourceRecord({
-        source: "open-english-wordnet",
-        sourceVersion: version,
-        sourceEntryId,
-        license: oewnLicense,
-        attribution: oewnAttribution,
-        rawRecord: immutableRaw,
-        headword: normalizeMember(member),
-        pronunciations: [],
-        senses
-      }));
-    }
+      }];
+    });
+    if (senses.length === 0) continue;
+
+    records.push({
+      source: "open-english-wordnet",
+      sourceVersion: version,
+      sourceEntryId,
+      license: oewnLicense,
+      attribution: oewnAttribution,
+      headword: normalizeMember(headword),
+      forms: stringList(block.form).map(normalizeMember),
+      pronunciations: pronunciationList(block.pronunciation).map((item, index) => ({
+        ipa: item.ipa,
+        ...(item.region ? { region: item.region } : {}),
+        evidenceId: `open-english-wordnet:${sourceEntryId}:pronunciation:${index + 1}`
+      })),
+      senses
+    });
   }
   return records;
 }
 
+/**
+ * Reads one Simple English Wiktionary extract record. Simple Wiktionary is the
+ * fallback and reference source, so these records only become canonical for a
+ * headword Open English WordNet does not cover, or through an explicit mapping.
+ */
 export function importWiktionaryEntry(
   raw: unknown,
   version: string,
@@ -95,17 +142,16 @@ export function importWiktionaryEntry(
         }];
       })
     : [];
-  return [freezeSourceRecord({
+  return [{
     source: "wiktionary",
     sourceVersion: version,
     sourceEntryId,
     license: wiktionaryLicense,
     attribution: options.attribution ?? wiktionaryAttribution,
-    rawRecord: raw,
     headword: word,
     pronunciations,
     senses
-  })];
+  }];
 }
 
 function wiktionarySense(
@@ -116,26 +162,54 @@ function wiktionarySense(
 ): EnglishSourceSense[] {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
   const value = raw as Record<string, unknown>;
-  const definition = stringList(value.glosses)[0];
-  if (!definition || stringList(value.tags).includes("form-of")) return [];
+  const glosses = stringList(value.glosses);
+  if (glosses.length === 0 || stringList(value.tags).includes("form-of")) return [];
   const tags = unique([...stringList(value.tags), ...stringList(value.raw_tags).map((tag) => tag.toLowerCase())]);
   return [{
     evidenceId: `wiktionary:${sourceEntryId}:${index + 1}`,
     partOfSpeech,
-    definition,
+    glosses: glosses.slice(0, 1),
     registers: tags.flatMap(registerTag),
     regions: tags.flatMap(regionTag),
     domains: unique([...stringList(value.topics), ...tags.flatMap(domainTag)]),
     dated: tags.some((tag) => ["archaic", "dated", "obsolete", "historical"].includes(tag)),
     usage: tags.filter((tag) => ["transitive", "intransitive", "countable", "uncountable", "ergative"].includes(tag)),
-    examples: Array.isArray(value.examples) ? value.examples.flatMap(wiktionaryExample) : []
+    examples: Array.isArray(value.examples)
+      ? value.examples.flatMap((example, exampleIndex) =>
+          wiktionaryExample(example, sourceEntryId, index, exampleIndex))
+      : []
   }];
 }
 
-function wiktionaryExample(raw: unknown, index: number): EnglishExample[] {
+function wiktionaryExample(
+  raw: unknown,
+  sourceEntryId: string,
+  senseIndex: number,
+  index: number
+): EnglishExample[] {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
   const text = nonempty((raw as Record<string, unknown>).text);
-  return text ? [{ text, source: "sourced", sourceId: `wiktionary-example:${index + 1}`, reviewStatus: "source" }] : [];
+  return text
+    ? [{
+        text,
+        source: "sourced",
+        sourceName: "wiktionary",
+        sourceId: `${sourceEntryId}:${senseIndex + 1}:example:${index + 1}`,
+        reviewStatus: "source"
+      }]
+    : [];
+}
+
+function pronunciationList(value: unknown): Array<{ ipa: string; region?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const item = raw as Record<string, unknown>;
+    const ipa = nonempty(item.value);
+    if (!ipa) return [];
+    const region = nonempty(item.variety);
+    return [{ ipa, ...(region ? { region } : {}) }];
+  });
 }
 
 function oewnPartOfSpeech(value: unknown): string | null {
@@ -184,7 +258,7 @@ function regionFromTags(tags: string[]): string | undefined {
   return undefined;
 }
 
-function isLexicalHeadword(value: string): boolean {
+export function isLexicalHeadword(value: string): boolean {
   return Array.from(value).length <= 80
     && !/[\n\r\p{Cc}]|<[^>]+>|https?:\/\/|www\./iu.test(value)
     && /\p{Letter}/u.test(value)
@@ -205,20 +279,4 @@ function nonempty(value: unknown): string | null {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
-}
-
-function freezeSourceRecord(record: EnglishSourceRecord): EnglishSourceRecord {
-  record.pronunciations.forEach(Object.freeze);
-  record.senses.forEach((sense) => {
-    sense.examples.forEach(Object.freeze);
-    Object.freeze(sense.examples);
-    Object.freeze(sense.registers);
-    Object.freeze(sense.regions);
-    Object.freeze(sense.domains);
-    Object.freeze(sense.usage);
-    Object.freeze(sense);
-  });
-  Object.freeze(record.pronunciations);
-  Object.freeze(record.senses);
-  return Object.freeze(record);
 }
