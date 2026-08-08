@@ -135,9 +135,7 @@ export type EnrichmentRepository = {
   saveEntry(entry: PublicLookupItem, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
-  terminalOutcome(key: string): string | null;
-  saveTerminalOutcome(key: string, outcome: string): void;
-  knownLabels(): Set<string>;
+  labelVocabulary(): LabelVocabulary;
   /**
    * The canonical entry this query already resolves to in any explanation
    * language, or null. Filling a missing language group for an entry the
@@ -168,13 +166,21 @@ export type EnglishEnrichmentRepository = {
   saveEntry(entry: EnglishEntry, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: EnglishExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
-  terminalOutcome(key: string): string | null;
-  saveTerminalOutcome(key: string, outcome: string): void;
+  labelVocabulary(): EnglishLabelVocabulary;
 };
 
 export type EnglishOnDemandDictionary = DictionaryResolver<EnglishEntry>;
 
 export type ModelCallLimiter = <T>(work: () => Promise<T>) => Promise<T>;
+
+/**
+ * Model work is bounded once for both dictionaries. These were runtime
+ * variables that nothing ever set, so the deployed values were always these.
+ * Changing them is a code change, which is how the deployed value stays
+ * visible to a reader.
+ */
+export const enrichmentConcurrency = 4;
+export const modelTimeoutMs = 15_000;
 
 export type ModelRunSummary = {
   event: "model_run_summary";
@@ -190,6 +196,40 @@ export type ModelRunSummary = {
 export type EnglishModelSelection = {
   author: string;
   reviewer: string;
+};
+
+/**
+ * Why one enrichment attempt produced nothing. Nothing is persisted: the next
+ * lookup for the same word tries again. This log line is the only record, so it
+ * names the rule that refused the content and the value that broke it.
+ */
+export type EnrichmentRefusal = {
+  event: "enrichment_refused";
+  traceId: string;
+  dictionary: TargetDictionary;
+  lang: string;
+  headword: string;
+  stage: "eligibility" | "entry" | "example";
+  reason: string;
+};
+
+export type EnrichmentLogger = (event: ModelRunSummary | EnrichmentRefusal) => void;
+
+/**
+ * The label codes an authored sense may use, one set per field, each read from
+ * the codes the dictionary itself already uses. The author prompt lists exactly
+ * these codes and validation accepts exactly these codes, so the model is never
+ * asked to guess a vocabulary it has not been shown.
+ */
+export type EnglishLabelVocabulary = {
+  partOfSpeech: Set<string>;
+};
+
+export type LabelVocabulary = {
+  partOfSpeech: Set<string>;
+  misc: Set<string>;
+  field: Set<string>;
+  dialect: Set<string>;
 };
 
 type ModelRunMetrics = Omit<ModelRunSummary, "event" | "traceId" | "dictionary">;
@@ -257,14 +297,14 @@ export function createJapaneseOnDemandDictionary(options: {
   concurrency?: number;
   timeoutMs?: number;
   limiter?: ModelCallLimiter;
-  logger?: (summary: ModelRunSummary) => void;
+  logger?: EnrichmentLogger;
 }): JapaneseOnDemandDictionary {
-  const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
-  const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
+  const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
+  const timeoutMs = positiveInteger(options.timeoutMs ?? modelTimeoutMs, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const entryInFlight = new Map<string, Promise<PublicLookupItem | null>>();
-  const canonicalLocks = new Map<string, Promise<void>>();
-  const exampleLocks = new Map<string, Promise<void>>();
+  const canonicalInFlight = new Map<string, Promise<unknown>>();
+  const exampleInFlight = new Map<string, Promise<unknown>>();
   const runtime: RuntimeOptions = {
     repository: options.repository,
     modelGateway: {
@@ -272,8 +312,9 @@ export function createJapaneseOnDemandDictionary(options: {
         return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs));
       }
     },
-    canonicalLocks,
-    exampleLocks
+    canonicalInFlight,
+    exampleInFlight,
+    ...(options.logger ? { logger: options.logger } : {})
   };
 
   return {
@@ -298,7 +339,18 @@ export function createJapaneseOnDemandDictionary(options: {
 }
 
 const stringArraySchema = { type: "array", items: { type: "string" } };
-const entrySchema = {
+
+/** An array whose members must be one of the dictionary's own label codes. */
+function codeArraySchema(codes: Set<string>) {
+  return { type: "array", items: { type: "string", enum: [...codes].sort() } };
+}
+
+/**
+ * The author schema carries the label codes as enums. A label is a closed set,
+ * so the schema enforces it and the prompt does not have to describe it. This
+ * is why the entry prompt says nothing about which codes exist.
+ */
+const entrySchemaFor = (vocabulary: LabelVocabulary, hasEvidence: boolean) => ({
   name: "japanese_dictionary_entry",
   schema: {
     type: "object",
@@ -313,15 +365,17 @@ const entrySchema = {
           type: "object",
           additionalProperties: false,
           properties: {
-            partOfSpeech: stringArraySchema,
-            registers: stringArraySchema,
-            domains: stringArraySchema,
-            dialect: stringArraySchema,
+            partOfSpeech: codeArraySchema(vocabulary.partOfSpeech),
+            registers: codeArraySchema(vocabulary.misc),
+            domains: codeArraySchema(vocabulary.field),
+            dialect: codeArraySchema(vocabulary.dialect),
             pronunciations: stringArraySchema,
             pragmaticFunctions: stringArraySchema,
             glosses: stringArraySchema,
             evidenceIds: stringArraySchema,
-            provenance: { type: "string", enum: ["source", "generated"] }
+            // With no source evidence there is no id a source sense could cite,
+            // so `generated` is the only provenance that can validate.
+            provenance: { type: "string", enum: hasEvidence ? ["source", "generated"] : ["generated"] }
           },
           required: [
             "partOfSpeech", "registers", "domains", "dialect", "pronunciations",
@@ -332,7 +386,7 @@ const entrySchema = {
     },
     required: ["headword", "reading", "senses"]
   }
-};
+});
 const exampleSchema = {
   name: "dictionary_example",
   schema: {
@@ -348,7 +402,16 @@ const exampleSchema = {
 
 const lunaModel = "openai/gpt-5.6-luna";
 const geminiReviewModel = "google/gemini-3-flash-preview";
-const entryAuthorConfig = modelConfig("entry-author", lunaModel, "entry-author-v1", entrySchema);
+/**
+ * Both dictionaries author with Luna and review with Gemini. The reviewer stays
+ * a different model family from the author, which is the property ADR-0008
+ * requires. English carried these as runtime configuration while a blind
+ * comparison was outstanding; an unset variable disabled English enrichment
+ * silently, so the pair is pinned here and the comparison can repin it.
+ */
+const englishModels: EnglishModelSelection = { author: lunaModel, reviewer: geminiReviewModel };
+const entryAuthorConfigFor = (vocabulary: LabelVocabulary, hasEvidence: boolean) =>
+  modelConfig("entry-author", lunaModel, "entry-author-v2", entrySchemaFor(vocabulary, hasEvidence));
 const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v2");
 const exampleAuthorConfig = modelConfig("example-author", lunaModel, "example-author-v1", exampleSchema);
 const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v2");
@@ -377,8 +440,6 @@ async function resolveMissing(
   options: RuntimeOptions
 ): Promise<PublicLookupItem | null> {
   if (request.targetDictionary !== "ja" || invalidRequest(request)) return null;
-  const requestKey = requestOutcomeKey(request);
-  if (options.repository.terminalOutcome(requestKey)) return null;
 
   let headword = request.context?.lemma?.trim() || request.query.trim();
   if (headword !== request.query.trim()) {
@@ -398,8 +459,7 @@ async function resolveMissing(
       known.headword,
       options.repository
         .findSources(known.headword, request.targetDictionary)
-        .filter((source) => source.headword === known.headword),
-      requestKey
+        .filter((source) => source.headword === known.headword)
     );
   }
 
@@ -411,12 +471,9 @@ async function resolveMissing(
       sourceHeadword = sourceHeadwords.values().next().value as string;
     } else {
       const eligibility = await eligibilityDecision(request, options);
-      if (eligibility.kind === "terminal") {
-        options.repository.saveTerminalOutcome(requestKey, eligibility.outcome);
-        return null;
-      }
+      if (eligibility.kind === "refused") return null;
       if (!sourceHeadwords.has(eligibility.headword)) {
-        options.repository.saveTerminalOutcome(requestKey, "unrelated-headword");
+        logRefusal(options, request, "eligibility", eligibility.headword, "headword is unrelated to the sources");
         return null;
       }
       sourceHeadword = eligibility.headword;
@@ -431,12 +488,9 @@ async function resolveMissing(
   }
   if (evidence.length === 0) {
     const eligibility = await eligibilityDecision(request, options);
-    if (eligibility.kind === "terminal") {
-      options.repository.saveTerminalOutcome(requestKey, eligibility.outcome);
-      return null;
-    }
+    if (eligibility.kind === "refused") return null;
     if (!relatedHeadword(request, eligibility.headword)) {
-      options.repository.saveTerminalOutcome(requestKey, "unrelated-headword");
+      logRefusal(options, request, "eligibility", eligibility.headword, "headword is unrelated to the query");
       return null;
     }
     const canonicalHeadword = eligibility.headword;
@@ -448,7 +502,7 @@ async function resolveMissing(
     }
   }
 
-  return authorForHeadword(request, options, headword, evidence, requestKey);
+  return authorForHeadword(request, options, headword, evidence);
 }
 
 /**
@@ -459,16 +513,12 @@ function authorForHeadword(
   request: ResolveRequest,
   options: RuntimeOptions,
   headword: string,
-  evidence: SourceEvidence[],
-  requestKey: string
+  evidence: SourceEvidence[]
 ): Promise<PublicLookupItem | null> {
-  const canonicalKey = entryOutcomeKey(request, headword);
-  if (options.repository.terminalOutcome(canonicalKey)) return Promise.resolve(null);
-  return serializeByKey(options.canonicalLocks, canonicalKey, async () => {
-    if (options.repository.terminalOutcome(canonicalKey)) return null;
+  return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, headword), async () => {
     const existing = options.repository.find(headword, request.targetDictionary, request.lang);
     if (existing) return completeEntryExamples(options, existing, request);
-    return authorEntry(request, options, headword, evidence, requestKey, canonicalKey);
+    return authorEntry(request, options, headword, evidence);
   });
 }
 
@@ -476,17 +526,16 @@ async function authorEntry(
   request: ResolveRequest,
   options: RuntimeOptions,
   headword: string,
-  evidence: SourceEvidence[],
-  requestKey: string,
-  canonicalKey: string
+  evidence: SourceEvidence[]
 ): Promise<PublicLookupItem | null> {
   // An entry shares one identity across explanation languages. When the
   // dictionary already knows this headword, the authored group joins that
   // entry instead of creating a second entry the read path would never see.
   const entryId = options.repository.canonicalEntry?.(headword)?.id ?? stableId("entry", headword);
+  const vocabulary = options.repository.labelVocabulary();
   const authored = await callAndRecord(
     options,
-    entryAuthorConfig,
+    entryAuthorConfigFor(vocabulary, evidence.length > 0),
     entryAuthorPrompt(entryId, headword, request, evidence),
     request.mode,
     entryId
@@ -500,11 +549,11 @@ async function authorEntry(
       headword,
       request.lang,
       evidence,
-      options.repository.knownLabels()
+      vocabulary
     );
-  } catch {
+  } catch (error) {
     recordOutcome(options.repository, authored.attempt, "malformed");
-    saveTerminal(options.repository, [requestKey, canonicalKey], "malformed-entry");
+    logRefusal(options, request, "entry", headword, refusalReason(error));
     return null;
   }
   recordOutcome(options.repository, authored.attempt, "candidate");
@@ -519,7 +568,7 @@ async function authorEntry(
   const review = reviewOutcome(reviewed.text);
   recordOutcome(options.repository, reviewed.attempt, review);
   if (review !== "accepted") {
-    saveTerminal(options.repository, [requestKey, canonicalKey], review);
+    logRefusal(options, request, "entry", headword, `reviewer returned ${review}`);
     return null;
   }
 
@@ -539,7 +588,7 @@ async function eligibilityDecision(
   options: RuntimeOptions
 ): Promise<
   | { kind: "candidate"; headword: string }
-  | { kind: "terminal"; outcome: "skipped" | "malformed-eligibility" }
+  | { kind: "refused" }
 > {
   const config = modelConfig("eligibility", lunaModel, "eligibility-v1");
   const result = await callAndRecord(
@@ -552,11 +601,13 @@ async function eligibilityDecision(
   const line = result.text.trim();
   if (line === "SKIP") {
     recordOutcome(options.repository, result.attempt, "skipped");
-    return { kind: "terminal", outcome: "skipped" };
+    logRefusal(options, request, "eligibility", request.query, "model returned SKIP");
+    return { kind: "refused" };
   }
   if (!line || line.includes("\n") || Array.from(line).length > 80 || invalidText(line)) {
     recordOutcome(options.repository, result.attempt, "malformed");
-    return { kind: "terminal", outcome: "malformed-eligibility" };
+    logRefusal(options, request, "eligibility", request.query, `unreadable headword: ${JSON.stringify(line.slice(0, 80))}`);
+    return { kind: "refused" };
   }
   recordOutcome(options.repository, result.attempt, "candidate");
   return { kind: "candidate", headword: line };
@@ -593,15 +644,12 @@ async function completeExample(
   sense: PublicSense,
   request: ResolveRequest
 ): Promise<PublicExample | null> {
-  const terminalKey = exampleOutcomeKey(request, sense.id);
-  if (options.repository.terminalOutcome(terminalKey)) return null;
-  return serializeByKey(options.exampleLocks, terminalKey, async () => {
-    if (options.repository.terminalOutcome(terminalKey)) return null;
+  return shareByKey(options.exampleInFlight, exampleOutcomeKey(request, sense.id), async () => {
     const canonical = options.repository.find(entry.word, "ja", request.lang)
       ?.senses.find((candidate) => candidate.id === sense.id)
       ?.examples?.[0];
     if (canonical) return canonical;
-    return completeExampleWork(options, entry, sense, terminalKey, request);
+    return completeExampleWork(options, entry, sense, request);
   });
 }
 
@@ -609,7 +657,6 @@ async function completeExampleWork(
   options: RuntimeOptions,
   entry: PublicLookupItem,
   sense: PublicSense,
-  terminalKey: string,
   request: ResolveRequest
 ): Promise<PublicExample | null> {
   const mode = request.mode;
@@ -624,9 +671,9 @@ async function completeExampleWork(
   let example: PublicExample;
   try {
     example = parseExample(authored.text, entry.word, request.lang);
-  } catch {
+  } catch (error) {
     recordOutcome(options.repository, authored.attempt, "malformed");
-    options.repository.saveTerminalOutcome(terminalKey, "malformed-example");
+    logRefusal(options, request, "example", entry.word, refusalReason(error));
     return null;
   }
   recordOutcome(options.repository, authored.attempt, "candidate");
@@ -640,11 +687,10 @@ async function completeExampleWork(
   const review = reviewOutcome(reviewed.text);
   recordOutcome(options.repository, reviewed.attempt, review);
   if (review !== "accepted") {
-    // A rejected example is never saved and never removes accepted meanings.
-    // It stays missing and retryable, so a later owner-authorized lookup may
-    // try exactly one fresh candidate. A malformed response is terminal so a
-    // candidate the model cannot form does not loop.
-    if (review !== "rejected") options.repository.saveTerminalOutcome(terminalKey, review);
+    // A refused example is never saved and never removes accepted meanings. It
+    // stays missing, and a later owner-authorized lookup tries a fresh
+    // candidate.
+    logRefusal(options, request, "example", entry.word, `reviewer returned ${review}`);
     return null;
   }
   options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
@@ -736,9 +782,36 @@ type ModelCallRuntime = {
 type RuntimeOptions = {
   repository: EnrichmentRepository;
   modelGateway: ModelGateway;
-  canonicalLocks: Map<string, Promise<void>>;
-  exampleLocks: Map<string, Promise<void>>;
+  canonicalInFlight: Map<string, Promise<unknown>>;
+  exampleInFlight: Map<string, Promise<unknown>>;
+  logger?: EnrichmentLogger;
 };
+
+/**
+ * Records why an attempt produced nothing. A refusal is never persisted, so a
+ * later lookup for the same word starts fresh.
+ */
+function logRefusal(
+  options: { logger?: EnrichmentLogger },
+  request: ResolveRequest,
+  stage: EnrichmentRefusal["stage"],
+  headword: string,
+  reason: string
+): void {
+  options.logger?.({
+    event: "enrichment_refused",
+    traceId: traceContext.getStore() ?? "",
+    dictionary: request.targetDictionary,
+    lang: request.lang,
+    headword,
+    stage,
+    reason
+  });
+}
+
+function refusalReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function entryOutcomeKey(request: ResolveRequest, headword: string): string {
   return `entry:${request.targetDictionary}:${request.lang}:${headword.trim()}`;
@@ -762,10 +835,6 @@ function effectiveMode(mode: ResolveRequest["mode"]): "on-demand" | "bulk" {
   return mode === "bulk" ? "bulk" : "on-demand";
 }
 
-function saveTerminal(repository: EnrichmentRepository, keys: string[], outcome: string): void {
-  for (const key of new Set(keys)) repository.saveTerminalOutcome(key, outcome);
-}
-
 /**
  * Parses one authored entry-language group. The author writes meanings for a
  * single explanation language; nothing here derives one language from another.
@@ -776,7 +845,7 @@ function parseAuthoredEntry(
   expectedHeadword: string,
   lang: ApiLang,
   evidence: SourceEvidence[],
-  knownLabels: Set<string>
+  vocabulary: LabelVocabulary
 ): PublicLookupItem {
   const value = parseObject(text);
   assertExactKeys(value, ["headword", "reading", "senses"]);
@@ -803,7 +872,9 @@ function parseAuthoredEntry(
       "pragmaticFunctions", "glosses", "evidenceIds", "provenance"
     ]);
     const partOfSpeech = requiredStringList(sense.partOfSpeech);
-    if (partOfSpeech.length === 0 || partOfSpeech.some((label) => !knownLabels.has(label))) throw new Error("Invalid part of speech");
+    if (partOfSpeech.length === 0) throw new Error("Sense has no part of speech");
+    const unknownPos = partOfSpeech.find((label) => !vocabulary.partOfSpeech.has(label));
+    if (unknownPos) throw new Error(`Unknown part of speech: ${unknownPos}`);
     if (sense.provenance !== "source" && sense.provenance !== "generated") throw new Error("Invalid provenance");
     const evidenceIds = requiredStringList(sense.evidenceIds);
     if (sense.provenance === "source" && evidenceIds.length === 0) throw new Error("Source sense has no evidence");
@@ -816,7 +887,10 @@ function parseAuthoredEntry(
     const misc = requiredStringList(sense.registers);
     const field = requiredStringList(sense.domains);
     const dialect = requiredStringList(sense.dialect);
-    if ([...misc, ...field, ...dialect].some((label) => !knownLabels.has(label))) throw new Error("Unsupported label");
+    const unknownLabel = misc.find((label) => !vocabulary.misc.has(label))
+      ?? field.find((label) => !vocabulary.field.has(label))
+      ?? dialect.find((label) => !vocabulary.dialect.has(label));
+    if (unknownLabel) throw new Error(`Unknown label: ${unknownLabel}`);
     const pronunciations = requiredStringList(sense.pronunciations);
     if (pronunciations.some((reading) => !/^[\p{Script=Hiragana}\p{Script=Katakana}・ー]+$/u.test(reading))) {
       throw new Error("Invalid pronunciation");
@@ -1051,6 +1125,10 @@ function entryAuthorPrompt(
     "Include every schema array; use an empty array when a field does not apply.",
     "You may add an established missing sense with provenance generated and no evidence ids.",
     `Write every gloss as natural ${japaneseLanguageNames[request.lang]} dictionary wording. Divide meanings the way a ${japaneseLanguageNames[request.lang]} dictionary would; do not translate another language's wording line by line.`,
+    // The schema enumerates the label codes. This line exists only because the
+    // model's observed failure was to translate them into the explanation
+    // language; without it the codes are the one field it renders, not selects.
+    "partOfSpeech, registers, domains, and dialect are codes from the schema. Select them; never translate them.",
     `candidateId: ${candidateId}`,
     `explanation_language: ${request.lang}`,
     `headword: ${headword}`,
@@ -1099,7 +1177,7 @@ export const onDemandEvaluationContracts = {
   }
 } as const;
 
-const englishEntrySchema = {
+const englishEntrySchemaFor = (vocabulary: EnglishLabelVocabulary, languageGroup: boolean) => ({
   name: "english_dictionary_entry",
   schema: {
     type: "object",
@@ -1119,10 +1197,14 @@ const englishEntrySchema = {
         items: {
           type: "object", additionalProperties: false,
           properties: {
-            partOfSpeech: { type: "string" }, definition: { type: "string" },
+            partOfSpeech: { type: "string", enum: [...vocabulary.partOfSpeech].sort() },
+            definition: { type: "string" },
             registers: stringArraySchema, regions: stringArraySchema, domains: stringArraySchema,
             dated: { type: "boolean" }, usage: stringArraySchema,
-            evidenceIds: stringArraySchema, provenance: { type: "string", enum: ["source", "generated"] }
+            evidenceIds: stringArraySchema,
+            // A language group is written, never carried across from the English
+            // meanings, so `source` is the one value its parser always refuses.
+            provenance: { type: "string", enum: languageGroup ? ["generated"] : ["source", "generated"] }
           },
           required: [
             "partOfSpeech", "definition", "registers", "regions", "domains", "dated", "usage",
@@ -1133,7 +1215,7 @@ const englishEntrySchema = {
     },
     required: ["headword", "pronunciations", "senses"]
   }
-};
+});
 
 const englishExampleSchema = {
   name: "english_dictionary_example",
@@ -1155,8 +1237,8 @@ const englishBilingualExampleSchema = {
 
 function englishModelConfigs(selection: EnglishModelSelection) {
   return {
+    author: selection.author,
     eligibility: modelConfig("eligibility", selection.author, "english-eligibility-v1"),
-    entryAuthor: modelConfig("entry-author", selection.author, "english-entry-author-v1", englishEntrySchema),
     entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v2"),
     exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v1", englishExampleSchema),
     bilingualExampleAuthor: modelConfig(
@@ -1169,7 +1251,7 @@ function englishModelConfigs(selection: EnglishModelSelection) {
 /**
  * Explanation languages English enrichment can author. Each is one independent
  * sibling group under the same English entry: its own request, its own author
- * and reviewer, its own retries, terminal outcomes and persistence key. No
+ * and reviewer, its own retries and persistence key. No
  * group is produced by converting or translating another one.
  */
 const englishAuthoredLanguages = new Set<ApiLang>(["en", "ja", "zh-tw"]);
@@ -1183,28 +1265,26 @@ const englishExplanationLanguageNames: Partial<Record<ApiLang, string>> = {
 export function createEnglishOnDemandDictionary(options: {
   repository: EnglishEnrichmentRepository;
   modelGateway: ModelGateway;
-  models: EnglishModelSelection;
+  models?: EnglishModelSelection;
   concurrency?: number;
   timeoutMs?: number;
   limiter?: ModelCallLimiter;
-  logger?: (summary: ModelRunSummary) => void;
+  logger?: EnrichmentLogger;
 }): EnglishOnDemandDictionary {
-  if (!nonemptyString(options.models.author) || !nonemptyString(options.models.reviewer)) {
-    throw new Error("English author and reviewer models must be configured explicitly");
-  }
-  const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
-  const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
+  const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
+  const timeoutMs = positiveInteger(options.timeoutMs ?? modelTimeoutMs, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const inFlight = new Map<string, Promise<EnglishEntry | null>>();
-  const locks = new Map<string, Promise<void>>();
+  const canonicalInFlight = new Map<string, Promise<unknown>>();
   const runtime: EnglishRuntimeOptions = {
     repository: options.repository,
     modelGateway: {
       call(input) { return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs)); }
     },
-    modelConfigs: englishModelConfigs(options.models),
-    locks,
-    exampleLocks: new Map()
+    modelConfigs: englishModelConfigs(options.models ?? englishModels),
+    canonicalInFlight,
+    exampleInFlight: new Map(),
+    ...(options.logger ? { logger: options.logger } : {})
   };
   return {
     async resolve(request) {
@@ -1220,7 +1300,6 @@ export function createEnglishOnDemandDictionary(options: {
       if (existing && existing.senses.every((sense) => sense.examples.length > 0)) return existing;
       if (invalidEnglishRequest(request)) return null;
       const key = englishRequestKey(request);
-      if (options.repository.terminalOutcome(key)) return null;
       const running = inFlight.get(key);
       if (running) return running;
       const task = (existing ? completeCanonicalEnglishEntry(existing, request, runtime) : resolveMissingEnglish(request, runtime))
@@ -1269,12 +1348,10 @@ async function resolveMissingEnglish(
     sources = options.repository.findSources(headword);
   }
   const key = entryOutcomeKey(request, normalizeEnglishHeadword(headword));
-  if (options.repository.terminalOutcome(key)) return null;
-  return serializeByKey(options.locks, key, async () => {
+  return shareByKey(options.canonicalInFlight, key, async () => {
     const existing = options.repository.find(headword, request.lang);
     if (existing) return existing;
-    if (options.repository.terminalOutcome(key)) return null;
-    return authorEnglishEntry(request, headword, sources, key, options);
+    return authorEnglishEntry(request, headword, sources, options);
   });
 }
 
@@ -1289,12 +1366,12 @@ async function englishEligibility(request: ResolveRequest, options: EnglishRunti
   const headword = result.text.trim();
   if (headword === "SKIP") {
     englishRecordOutcome(options.repository, result.attempt, "skipped");
-    options.repository.saveTerminalOutcome(englishRequestKey(request), "skipped");
+    logRefusal(options, request, "eligibility", request.query, "model returned SKIP");
     return null;
   }
   if (headword.includes("\n") || !isEnglishLexicalText(headword)) {
     englishRecordOutcome(options.repository, result.attempt, "malformed");
-    options.repository.saveTerminalOutcome(englishRequestKey(request), "malformed-eligibility");
+    logRefusal(options, request, "eligibility", request.query, `unreadable headword: ${JSON.stringify(headword.slice(0, 80))}`);
     return null;
   }
   englishRecordOutcome(options.repository, result.attempt, "candidate");
@@ -1305,7 +1382,6 @@ async function authorEnglishEntry(
   request: ResolveRequest,
   headword: string,
   sources: EnglishSourceRecord[],
-  terminalKey: string,
   options: EnglishRuntimeOptions
 ): Promise<EnglishEntry | null> {
   const entryId = englishStableId("entry", headword);
@@ -1314,7 +1390,12 @@ async function authorEnglishEntry(
   const candidateId = englishCandidateId(entryId, request.lang);
   const authored = await callAndRecord(
     options,
-    options.modelConfigs.entryAuthor,
+    modelConfig(
+      "entry-author",
+      options.modelConfigs.author,
+      "english-entry-author-v2",
+      englishEntrySchemaFor(options.repository.labelVocabulary(), request.lang !== "en")
+    ),
     englishEntryAuthorPrompt(candidateId, headword, request, sources),
     request.mode,
     candidateId
@@ -1322,9 +1403,9 @@ async function authorEnglishEntry(
   let entry: EnglishEntry;
   try {
     entry = parseEnglishEntry(authored.text, entryId, headword, request.lang, sources, authored.attempt);
-  } catch {
+  } catch (error) {
     englishRecordOutcome(options.repository, authored.attempt, "malformed");
-    options.repository.saveTerminalOutcome(terminalKey, "malformed-entry");
+    logRefusal(options, request, "entry", headword, refusalReason(error));
     return null;
   }
   englishRecordOutcome(options.repository, authored.attempt, "candidate");
@@ -1344,7 +1425,7 @@ async function authorEnglishEntry(
   const outcome = reviewOutcome(reviewed.text);
   englishRecordOutcome(options.repository, reviewed.attempt, outcome);
   if (outcome !== "accepted") {
-    options.repository.saveTerminalOutcome(terminalKey, outcome);
+    logRefusal(options, request, "entry", headword, `reviewer returned ${outcome}`);
     return null;
   }
   // One author request produced one complete entry-language group and one
@@ -1366,14 +1447,11 @@ async function completeEnglishExamples(
   const completed = await Promise.all(entry.senses.map(async (sense) => {
     if (sense.examples.length > 0) return null;
     const candidateId = `${sense.id}:example`;
-    const terminalKey = exampleOutcomeKey(request, sense.id);
-    if (options.repository.terminalOutcome(terminalKey)) return null;
-    return serializeByKey(options.exampleLocks, terminalKey, async () => {
-      if (options.repository.terminalOutcome(terminalKey)) return null;
+    return shareByKey(options.exampleInFlight, exampleOutcomeKey(request, sense.id), async () => {
       const canonical = options.repository.find(entry.headword, request.lang)
         ?.senses.find((candidate) => candidate.id === sense.id)?.examples[0];
       if (canonical) return canonical;
-      return completeEnglishExample(entry, sense, candidateId, terminalKey, request, options);
+      return completeEnglishExample(entry, sense, candidateId, request, options);
     }).catch(missingExample);
   }));
   return {
@@ -1388,7 +1466,6 @@ async function completeEnglishExample(
   entry: EnglishEntry,
   sense: EnglishEntry["senses"][number],
   candidateId: string,
-  terminalKey: string,
   request: ResolveRequest,
   options: EnglishRuntimeOptions
 ): Promise<EnglishExample | null> {
@@ -1404,9 +1481,9 @@ async function completeEnglishExample(
     let example: EnglishExample;
     try {
       example = parseEnglishExample(authored.text, entry, request.lang);
-    } catch {
+    } catch (error) {
       englishRecordOutcome(options.repository, authored.attempt, "malformed");
-      options.repository.saveTerminalOutcome(terminalKey, "malformed-example");
+      logRefusal(options, request, "example", entry.headword, refusalReason(error));
       return null;
     }
     englishRecordOutcome(options.repository, authored.attempt, "candidate");
@@ -1425,11 +1502,10 @@ async function completeEnglishExample(
     const outcome = reviewOutcome(reviewed.text);
     englishRecordOutcome(options.repository, reviewed.attempt, outcome);
     if (outcome !== "accepted") {
-      // A rejected example is never saved and never removes accepted meanings.
-      // It stays missing and retryable, so a later owner-authorized lookup may
-      // try exactly one fresh candidate. A malformed response is terminal so a
-      // candidate the model cannot form does not loop.
-      if (outcome !== "rejected") options.repository.saveTerminalOutcome(terminalKey, outcome);
+      // A refused example is never saved and never removes accepted meanings.
+      // It stays missing, and a later owner-authorized lookup tries a fresh
+      // candidate.
+      logRefusal(options, request, "example", entry.headword, `reviewer returned ${outcome}`);
       return null;
     }
     options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
@@ -1701,8 +1777,9 @@ type EnglishRuntimeOptions = {
   repository: EnglishEnrichmentRepository;
   modelGateway: ModelGateway;
   modelConfigs: ReturnType<typeof englishModelConfigs>;
-  locks: Map<string, Promise<void>>;
-  exampleLocks: Map<string, Promise<void>>;
+  canonicalInFlight: Map<string, Promise<unknown>>;
+  exampleInFlight: Map<string, Promise<unknown>>;
+  logger?: EnrichmentLogger;
 };
 
 function englishRecordOutcome(repository: EnglishEnrichmentRepository, attempt: AttemptRecord, outcome: string): void {
@@ -1867,7 +1944,13 @@ function englishSourceSenseIdentity(sense: EnglishSourceRecord["senses"][number]
   ]);
 }
 
-export function createEnglishOnDemandEvaluationContracts(models: EnglishModelSelection) {
+export function createEnglishOnDemandEvaluationContracts(
+  models: EnglishModelSelection,
+  // The evaluation compares models on a fixture corpus, so it declares the
+  // narrow label set those fixtures use. Production reads its vocabulary from
+  // the dictionary instead.
+  vocabulary: EnglishLabelVocabulary = { partOfSpeech: new Set(["noun", "verb", "adjective", "adverb"]) }
+) {
   const configs = englishModelConfigs(models);
   return {
     eligibility: {
@@ -1875,7 +1958,7 @@ export function createEnglishOnDemandEvaluationContracts(models: EnglishModelSel
       prompt(candidate: string) { return englishEligibilityPrompt({ query: candidate, targetDictionary: "en", lang: "en" }); }
     },
     entryAuthor: {
-      ...configs.entryAuthor,
+      ...modelConfig("entry-author", configs.author, "english-entry-author-v2", englishEntrySchemaFor(vocabulary, false)),
       prompt(candidateId: string, headword: string, sources: EnglishSourceRecord[], sentence = "") {
         return englishEntryAuthorPrompt(candidateId, headword, {
           query: headword,
@@ -1915,19 +1998,26 @@ function boundedLog(value: string): string {
   return Array.from(value).slice(0, 8_000).join("");
 }
 
-async function serializeByKey<T>(locks: Map<string, Promise<void>>, key: string, work: () => Promise<T>): Promise<T> {
-  const previous = locks.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const tail = previous.then(() => gate);
-  locks.set(key, tail);
-  await previous;
-  try {
-    return await work();
-  } finally {
-    release();
-    if (locks.get(key) === tail) locks.delete(key);
-  }
+/**
+ * Runs one operation per key and hands its result to every caller already
+ * waiting on the same key, refusals included. Serializing instead would make
+ * each waiter repeat the author and reviewer calls, because a refusal leaves
+ * nothing behind for the next one to find. A caller that arrives after this
+ * operation settles starts a fresh attempt, which is what keeps a refusal
+ * retryable.
+ */
+function shareByKey<T>(inFlight: Map<string, Promise<unknown>>, key: string, work: () => Promise<T>): Promise<T> {
+  const running = inFlight.get(key) as Promise<T> | undefined;
+  // A completed refusal is an answer and is shared. A rejection is an
+  // operational failure: the work did not happen, so a caller waiting behind it
+  // runs its own attempt, in its own service-tier mode, rather than inheriting
+  // an error about someone else's provider call.
+  if (running) return running.then((result) => result, () => shareByKey(inFlight, key, work));
+  const task = work().finally(() => {
+    if (inFlight.get(key) === task) inFlight.delete(key);
+  });
+  inFlight.set(key, task);
+  return task;
 }
 
 export function createModelCallLimiter(concurrency: number): ModelCallLimiter {
@@ -1968,7 +2058,7 @@ function persistAttempt(
 function runWithModelSummary<T>(
   dictionary: TargetDictionary,
   traceId: string,
-  logger: ((summary: ModelRunSummary) => void) | undefined,
+  logger: EnrichmentLogger | undefined,
   work: () => Promise<T>
 ): Promise<T> {
   const metrics: ModelRunMetrics = {

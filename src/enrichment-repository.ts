@@ -6,6 +6,7 @@ import type {
   AttemptRecord,
   EnrichmentRepository,
   GenerationProvenance,
+  LabelVocabulary,
   SourceEvidence,
   TargetDictionary
 } from "./on-demand-dictionary";
@@ -23,6 +24,7 @@ export function openEnrichmentRepository(
   sourceLookup: (query: string, targetDictionary: TargetDictionary) => SourceEvidence[] = () => []
 ): PersistentEnrichmentRepository {
   const db = new Database(path);
+  let vocabulary: LabelVocabulary | undefined;
   db.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
   createJapaneseSchema(db);
 
@@ -92,13 +94,6 @@ export function openEnrichmentRepository(
   `);
   const saveAttempt = db.prepare(`
     insert into model_attempts (dictionary, attempt_json, created_at) values ('ja', ?, ?)
-  `);
-  const readTerminal = db.query<{ outcome: string }, [string]>(`
-    select outcome from terminal_outcomes where dictionary = 'ja' and outcome_key = ?
-  `);
-  const saveTerminal = db.prepare(`
-    insert into terminal_outcomes (dictionary, outcome_key, outcome) values ('ja', ?, ?)
-    on conflict(dictionary, outcome_key) do update set outcome = excluded.outcome
   `);
 
   function recordGeneration(generation: GenerationProvenance | undefined): string | null {
@@ -179,14 +174,8 @@ export function openEnrichmentRepository(
     recordAttempt(attempt) {
       saveAttempt.run(JSON.stringify(attempt), new Date().toISOString());
     },
-    terminalOutcome(key) {
-      return readTerminal.get(key)?.outcome ?? null;
-    },
-    saveTerminalOutcome(key, outcome) {
-      saveTerminal.run(key, outcome);
-    },
-    knownLabels() {
-      return new Set(Object.keys(lookupDb.meta().tags));
+    labelVocabulary() {
+      return vocabulary ??= readLabelVocabulary(db);
     },
     canonicalEntry(query) {
       for (const lang of apiLanguages) {
@@ -282,4 +271,32 @@ function generationId(generation: GenerationProvenance): string {
     generation.serviceTier ?? "unset",
     generation.createdAt
   ].join("|");
+}
+
+/**
+ * The label codes an authored sense may use, read from the codes the imported
+ * dictionary already uses. Reading them from the data rather than a hand-kept
+ * list means a code JMdict adds becomes available without a code change, and
+ * the author schema can never offer a code the dictionary does not use.
+ */
+function readLabelVocabulary(db: Database): LabelVocabulary {
+  const codes = (column: string): Set<string> => {
+    const found = new Set<string>();
+    for (const row of db.query<{ value: string }, []>(`select distinct ${column} as value from ja_senses`).all()) {
+      try {
+        for (const code of JSON.parse(row.value) as unknown[]) {
+          if (typeof code === "string" && code) found.add(code);
+        }
+      } catch {
+        // A sense that does not hold a JSON array contributes no codes.
+      }
+    }
+    return found;
+  };
+  return {
+    partOfSpeech: codes("part_of_speech"),
+    misc: codes("misc"),
+    field: codes("field"),
+    dialect: codes("dialect")
+  };
 }

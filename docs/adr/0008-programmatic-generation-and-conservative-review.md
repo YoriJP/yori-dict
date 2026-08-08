@@ -2,11 +2,17 @@
 
 Claude CLI orchestration is difficult to scale, observe, and use on demand. Yori Dict uses the official `@openrouter/sdk` behind its small `ModelGateway` port, with pinned model snapshots, reasoning effort, serving provider, and prompt version. The broader AI SDK abstraction is not used because this module needs one gateway and two fixed models, not a provider framework.
 
-Japanese enrichment uses GPT-5.6 Luna at minimal effort for eligibility and source-grounded generation, followed by Gemini 3 Flash Preview at minimal effort for review. English author and reviewer models remain explicit runtime configuration until a blind hard-English comparison selects them. In either dictionary, the reviewer is a different model family and never rewrites a candidate. Each dictionary keeps independent prompts, evidence, validation, and reviewer calibration.
+Japanese enrichment uses GPT-5.6 Luna at minimal effort for eligibility and source-grounded generation, followed by Gemini 3 Flash Preview at minimal effort for review. English authors and reviews with the same pair. It previously took the models from runtime configuration until a blind hard-English comparison selected them, but an unset variable disabled English enrichment with no error and no log, so a lookup that should have enriched returned `null` like any missing word. The pair is pinned in code for both dictionaries; the comparison repins it when it runs. Enrichment already requires the owner's bearer token, and revoking the OpenRouter key stops model work, so no separate switch is kept. In either dictionary, the reviewer is a different model family and never rewrites a candidate. Each dictionary keeps independent prompts, evidence, validation, and reviewer calibration.
 
 Review is deliberately asymmetric: a false rejection leaves a recoverable coverage gap, while a false acceptance pollutes public dictionary data. The reviewer returns exactly `ACCEPT` or `REJECT`; any other output fails closed. Prompts, candidates, raw responses, and classified outcomes remain available for private diagnosis, so production does not pay for unused explanations or issue codes.
 
-Semantic rejection, deterministic validation failure, and malformed model content are terminal for that candidate. They are not regenerated. Only transient provider, transport, timeout, rate-limit, and service-tier failures may retry.
+A refusal is never recorded. Semantic rejection, deterministic validation failure, and malformed model content all end the current attempt and produce no content, and the next lookup for that word starts over. Nothing about the refusal is stored, so there is no table, key, or cache to clear when a prompt or model changes.
+
+This replaces an earlier rule that made those three outcomes terminal for the candidate. That rule could not tell a judgment about the word apart from a defect in our own code, and it wrote both permanently: a validation rule the prompt had never stated banned the word for good, and correcting the prompt did not release it. Reviewer output also varies run to run, so a single unlucky `REJECT` removed a valid word forever. The cost the old rule avoided is repeated model calls for input that always fails; with the owner's token required for any model work, a rate limit on that token is the proportionate control.
+
+A refusal is logged as `enrichment_refused` with the stage, the headword, and the rule that refused it, including the offending value. That log line is the only record.
+
+Only transient provider, transport, timeout, rate-limit, and service-tier failures retry within a single attempt.
 
 Bulk work uses Flex for at most three total transient attempts, then records an error. On-demand work attempts Flex once and may fall back once to standard service after a transient Flex failure. Authentication, configuration, and permanent request errors never retry.
 

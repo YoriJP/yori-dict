@@ -71,7 +71,7 @@ test("returns API index links from the root route", async () => {
   expect(body.lookup).toContain("dictionary=ja");
   expect(body.docs).toBe("/doc");
   expect(body.openapi).toBe("/openapi.yaml");
-  expect(body.dataRelease).toBe("https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3");
+  expect(body.dataRelease).toBe(dataReleaseUrl);
 });
 
 test("serves Scalar API reference from the doc route", async () => {

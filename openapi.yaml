@@ -38,7 +38,7 @@ paths:
                 batchLookup: /v1/lookup/batch
                 docs: /doc
                 openapi: /openapi.yaml
-                dataRelease: https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-04.3
+                dataRelease: https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-08
   /doc:
     get:
       summary: API documentation

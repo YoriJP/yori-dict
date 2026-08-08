@@ -202,7 +202,7 @@ test("one author request and one reviewer fill a missing English group", async (
   expect(repository.acceptedEntries("en").map(({ headword }) => headword)).toEqual(["florp"]);
   expect(repository.acceptedEntries("en")[0].senses[0].generation).toMatchObject({
     model: "test/english-author",
-    promptVersion: "english-entry-author-v1",
+    promptVersion: "english-entry-author-v2",
     reviewOutcome: "accepted"
   });
   expect(repository.attemptRecords().length).toBeGreaterThan(0);

@@ -69,7 +69,7 @@ test("accepted Japanese enrichment becomes canonical production data", async () 
   reopenedLookup.close();
 });
 
-test("one language's rejection leaves another language's accepted group visible", async () => {
+test("each explanation language keeps its own accepted group", async () => {
   const path = await productionDatabase();
   const lookup = openLookupDb(path);
   const repository = openEnrichmentRepository(path, lookup);
@@ -77,8 +77,6 @@ test("one language's rejection leaves another language's accepted group visible"
 
   repository.saveEntry(englishGroup(generated), "en", generation);
   repository.saveEntry(taiwaneseGroup(generated), "zh-tw", generation);
-  // A later Taiwanese rejection is recorded against that language alone.
-  repository.saveTerminalOutcome("entry:ja:zh-tw:未知語", "rejected");
   repository.close();
 
   const reopened = openLookupDb(path);

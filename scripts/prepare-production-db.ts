@@ -11,8 +11,9 @@ import {
 } from "../src/production-database";
 
 const path = resolve(process.env.YORI_DB_PATH ?? "data/yori.sqlite");
-const englishVersion = process.env.YORI_ENGLISH_DICTIONARY_VERSION ?? "2026.08.1";
-const configuredEnglishRelease = process.env.YORI_ENGLISH_BOOTSTRAP_PATH;
+// The English source version is pinned here, the way the Japanese release is
+// pinned in data-release.json. It was a runtime variable nothing ever set.
+const englishVersion = "2026.08.1";
 const localEnglishRelease = resolve(`releases/english/yori-english-${englishVersion}.sqlite`);
 
 const installedJapanese = await ensureJapaneseProductionDatabase(path);
@@ -20,9 +21,7 @@ migrateProductionDatabase(path);
 
 let installedEnglish = false;
 if (!hasEnglishDictionary(path)) {
-  const availableRelease = configuredEnglishRelease
-    ? resolve(configuredEnglishRelease)
-    : existsSync(localEnglishRelease) ? localEnglishRelease : null;
+  const availableRelease = existsSync(localEnglishRelease) ? localEnglishRelease : null;
   if (availableRelease) {
     installedEnglish = importEnglishRelease(path, availableRelease);
   } else {
@@ -43,10 +42,13 @@ if (!hasEnglishDictionary(path)) {
   }
 }
 
+// Overlays are a one-time rescue of enrichment written before ADR-0009 merged
+// the stores. Nothing produces them now, and the import is a no-op when the
+// files are absent, so they sit at fixed names beside the database.
 const legacy = importLegacyOverlays(
   path,
-  resolve(process.env.YORI_LEGACY_JA_OVERLAY_PATH ?? join(dirname(path), "example-overlay.sqlite")),
-  resolve(process.env.YORI_LEGACY_ENGLISH_OVERLAY_PATH ?? join(dirname(path), "english-overlay.sqlite"))
+  resolve(join(dirname(path), "example-overlay.sqlite")),
+  resolve(join(dirname(path), "english-overlay.sqlite"))
 );
 
 console.log(JSON.stringify({

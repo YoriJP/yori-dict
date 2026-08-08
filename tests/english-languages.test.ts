@@ -360,6 +360,29 @@ test("a language group must be written in its own language and may not copy the 
   }
 });
 
+test("the English author schema closes the labels and the language group's provenance", async () => {
+  const { gateway, dictionary, close } = await enrichable([
+    languageGroup([{ definition: "会計の記録。", partOfSpeech: "noun" }]) as string,
+    "ACCEPT"
+  ]);
+
+  try {
+    await dictionary.resolve({ query: "ledger", targetDictionary: "en", lang: "ja" });
+    const author = gateway.calls.find((call) => call.role === "entry-author");
+    const sense = (author?.responseSchema?.schema as any).properties.senses.items.properties;
+    // A Japanese group is written in Japanese, so without a closed set the
+    // author renders the label as 名詞 and the parser refuses it — the same
+    // failure the Japanese author had.
+    expect(sense.partOfSpeech.enum).toContain("noun");
+    expect(sense.partOfSpeech.enum).not.toContain("名詞");
+    // `source` is the one value parseEnglishLanguageGroup always refuses, so
+    // the schema does not offer it.
+    expect(sense.provenance.enum).toEqual(["generated"]);
+  } finally {
+    close();
+  }
+});
+
 test("correct imported target-language content is never rewritten and only its example is filled", async () => {
   const { repository, gateway, dictionary, close } = await enrichable([
     JSON.stringify({ sentence: "The dog followed her home.", translation: "その犬は彼女について家まで来た。" }),
