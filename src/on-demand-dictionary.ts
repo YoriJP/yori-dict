@@ -342,7 +342,15 @@ const stringArraySchema = { type: "array", items: { type: "string" } };
 
 /** An array whose members must be one of the dictionary's own label codes. */
 function codeArraySchema(codes: Set<string>) {
-  return { type: "array", items: { type: "string", enum: [...codes].sort() } };
+  const listed = [...codes].sort();
+  // A category the dictionary never uses has no code to offer. `enum: []` is not
+  // a valid JSON Schema enum and the provider rejects the whole request before
+  // the model runs, and strict structured output does not accept `maxItems`
+  // either, so the constraint is left off. Validation still refuses any code the
+  // dictionary cannot describe, and that refusal is logged and retried.
+  return listed.length > 0
+    ? { type: "array", items: { type: "string", enum: listed } }
+    : stringArraySchema;
 }
 
 /**
@@ -1177,6 +1185,12 @@ export const onDemandEvaluationContracts = {
   }
 } as const;
 
+/** Same reasoning as `codeArraySchema`, for a single required label. */
+function englishPartOfSpeechSchema(vocabulary: EnglishLabelVocabulary) {
+  const listed = [...vocabulary.partOfSpeech].sort();
+  return listed.length > 0 ? { type: "string", enum: listed } : { type: "string" };
+}
+
 const englishEntrySchemaFor = (vocabulary: EnglishLabelVocabulary, languageGroup: boolean) => ({
   name: "english_dictionary_entry",
   schema: {
@@ -1197,7 +1211,7 @@ const englishEntrySchemaFor = (vocabulary: EnglishLabelVocabulary, languageGroup
         items: {
           type: "object", additionalProperties: false,
           properties: {
-            partOfSpeech: { type: "string", enum: [...vocabulary.partOfSpeech].sort() },
+            partOfSpeech: englishPartOfSpeechSchema(vocabulary),
             definition: { type: "string" },
             registers: stringArraySchema, regions: stringArraySchema, domains: stringArraySchema,
             dated: { type: "boolean" }, usage: stringArraySchema,

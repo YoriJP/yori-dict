@@ -123,7 +123,7 @@ class EvaluationRepository implements EnrichmentRepository {
       partOfSpeech: new Set(["n", "adj-na", "adj-i", "adv", "int", "v1", "v5m"]),
       misc: new Set(["col"]),
       field: new Set(["comp"]),
-      dialect: new Set<string>()
+      dialect: new Set(["ksb"])
     };
   }
 }

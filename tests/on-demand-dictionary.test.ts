@@ -3,6 +3,7 @@ import {
   createJapaneseOnDemandDictionary,
   createModelCallLimiter,
   type EnrichmentRepository,
+  type LabelVocabulary,
   type ModelGateway,
   ModelGatewayError,
   type ModelRequest,
@@ -496,6 +497,35 @@ test("concurrent lookups of one headword share a refusal instead of repeating it
   expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility", "eligibility", "entry-author", "entry-review"]);
 });
 
+test("a label category the dictionary never uses carries no enum", async () => {
+  const repository = new MemoryRepository();
+  // A dictionary with no dialect codes has none to offer. `enum: []` is not a
+  // valid JSON Schema enum and the provider rejects the request before the model
+  // runs, which would fail every enrichment rather than one label.
+  repository.vocabulary = {
+    partOfSpeech: new Set(["n"]),
+    misc: new Set<string>(),
+    field: new Set<string>(),
+    dialect: new Set<string>()
+  };
+  const gateway = new ScriptedGateway([
+    "AI",
+    authoredEntry({ headword: "AI", reading: "エーアイ", partOfSpeech: ["n"], provenance: "generated" }),
+    "ACCEPT"
+  ]);
+
+  await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolve(request("AI", { sentence: "AIを業務に活用する。" }));
+
+  const author = gateway.calls.find((call) => call.role === "entry-author");
+  const sense = (author?.responseSchema?.schema as any).properties.senses.items.properties;
+  expect(sense.partOfSpeech.items.enum).toEqual(["n"]);
+  for (const field of ["registers", "domains", "dialect"]) {
+    expect(sense[field].items.enum).toBeUndefined();
+    expect(sense[field].items.type).toBe("string");
+  }
+});
+
 test("a refusal is logged with the rule that rejected it", async () => {
   const repository = new MemoryRepository();
   const refusals: Array<Record<string, unknown>> = [];
@@ -960,12 +990,14 @@ class MemoryRepository implements EnrichmentRepository {
     this.attempts.push(attempt);
   }
 
+  vocabulary: LabelVocabulary = {
+    partOfSpeech: new Set(["n", "v5m", "v1", "adj-i", "adj-na", "adv", "int"]),
+    misc: new Set(["col", "arch"]),
+    field: new Set(["comp"]),
+    dialect: new Set(["ksb"])
+  };
+
   labelVocabulary() {
-    return {
-      partOfSpeech: new Set(["n", "v5m", "v1", "adj-i", "adj-na", "adv", "int"]),
-      misc: new Set(["col", "arch"]),
-      field: new Set(["comp"]),
-      dialect: new Set(["ksb"])
-    };
+    return this.vocabulary;
   }
 }
