@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
+import { insertRow, removeDatabaseFiles } from "./canonical-store";
 import { existsSync } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir, rename } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   createJapaneseSchema,
@@ -646,13 +646,6 @@ function restoreRetained(
   return { entries, groups, examples };
 }
 
-function insertRow(db: Database, table: string, row: Record<string, unknown>, ignore: boolean): void {
-  const columns = Object.keys(row);
-  db.prepare(
-    `insert ${ignore ? "or ignore " : ""}into ${table} (${columns.join(", ")})
-     values (${columns.map(() => "?").join(", ")})`
-  ).run(...columns.map((column) => row[column] as never));
-}
 
 function matchExampleSenses(
   word: JmdictWord,
@@ -745,6 +738,3 @@ async function readJsonl<T>(path: string): Promise<T[]> {
     .map((line) => JSON.parse(line) as T);
 }
 
-async function removeDatabaseFiles(path: string): Promise<void> {
-  await Promise.all([path, `${path}-wal`, `${path}-shm`].map((file) => rm(file, { force: true })));
-}

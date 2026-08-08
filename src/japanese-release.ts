@@ -1,10 +1,14 @@
-import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { Database } from "bun:sqlite";
+import {
+  fileSha256,
+  readCoverageFrom,
+  snapshotCanonicalDatabase
+} from "./canonical-store";
 import { visitJapaneseEntries, type JapaneseEntryGroups } from "./db";
 import {
   japaneseCanonicalTables,
@@ -57,8 +61,8 @@ export async function buildJapaneseRelease(
     artifacts.sqlite, artifacts.gzip, artifacts.checksum, artifacts.jsonl, artifacts.manifest
   ].map((path) => rm(path, { force: true })));
 
-  snapshotJapaneseDatabase(productionPath, artifacts.sqlite);
-  const coverage = readReleaseCoverage(artifacts.sqlite);
+  snapshotCanonicalDatabase(productionPath, artifacts.sqlite, japaneseCanonicalTables);
+  const coverage = readCoverageFrom(artifacts.sqlite, "ja");
   for (const lang of Object.keys(coverage)) {
     artifacts.yomitan[lang] = join(options.outputDirectory, `yori-ja-${lang}.zip`);
     await rm(artifacts.yomitan[lang], { force: true });
@@ -173,37 +177,7 @@ function releaseMeaning(sense: PublicSense, lang: ApiLang) {
   };
 }
 
-function readReleaseCoverage(path: string): Record<string, LanguageCoverage> {
-  const db = new Database(path, { readonly: true });
-  try {
-    return readCoverage(db);
-  } finally {
-    db.close();
-  }
-}
 
-function snapshotJapaneseDatabase(productionPath: string, outputPath: string): void {
-  const source = new Database(productionPath);
-  try {
-    source.exec("pragma wal_checkpoint(passive)");
-    source.prepare("vacuum into ?").run(resolve(outputPath));
-  } finally {
-    source.close();
-  }
-  const snapshot = new Database(outputPath);
-  try {
-    // A release carries the canonical Japanese tables and nothing else: no
-    // English data, no enrichment bookkeeping, and no raw source payloads.
-    const keep = new Set<string>(japaneseCanonicalTables);
-    const extra = snapshot.query<{ name: string }, []>(
-      "select name from sqlite_master where type = 'table' and name not like 'sqlite_%'"
-    ).all().filter(({ name }) => !keep.has(name));
-    for (const { name } of extra) snapshot.exec(`drop table "${name.replaceAll('"', '""')}"`);
-    snapshot.exec("pragma journal_mode = delete; vacuum");
-  } finally {
-    snapshot.close();
-  }
-}
 
 function readMetadata(path: string) {
   const db = new Database(path, { readonly: true });
@@ -220,11 +194,6 @@ function readMetadata(path: string) {
   }
 }
 
-async function fileSha256(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
-  return hash.digest("hex");
-}
 
 /**
  * Every source records the version the release was actually built from. A

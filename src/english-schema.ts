@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { readLanguageCoverage, type LanguageCoverage } from "./canonical-store";
+
+export type { LanguageCoverage };
 
 /**
  * Canonical English dictionary tables.
@@ -152,27 +155,7 @@ export function hasEnglishSchema(db: Database): boolean {
   );
 }
 
-export type EnglishLanguageCoverage = {
-  entries: number;
-  meanings: number;
-  glosses: number;
-  examples: number;
-};
-
 /** Exact entry, meaning, gloss, and example counts by explanation language. */
-export function readCoverage(db: Database): Record<string, EnglishLanguageCoverage> {
-  const rows = db.query<
-    { lang: string; entries: number; meanings: number; glosses: number; examples: number },
-    []
-  >(`
-    select sense.lang as lang,
-           count(distinct sense.entry_id) as entries,
-           count(distinct sense.id) as meanings,
-           (select count(*) from en_glosses g join en_senses s on s.id = g.sense_id where s.lang = sense.lang) as glosses,
-           (select count(*) from en_examples e join en_senses s on s.id = e.sense_id where s.lang = sense.lang) as examples
-      from en_senses sense
-     group by sense.lang
-     order by sense.lang
-  `).all();
-  return Object.fromEntries(rows.map(({ lang, ...counts }) => [lang, counts]));
+export function readCoverage(db: Database): Record<string, LanguageCoverage> {
+  return readLanguageCoverage(db, "en");
 }

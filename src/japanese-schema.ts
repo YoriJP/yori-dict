@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { readLanguageCoverage, type LanguageCoverage } from "./canonical-store";
+
+export type { LanguageCoverage };
 
 /**
  * Canonical Japanese dictionary tables.
@@ -137,27 +140,7 @@ export function hasJapaneseSchema(db: Database): boolean {
   );
 }
 
-export type LanguageCoverage = {
-  entries: number;
-  meanings: number;
-  glosses: number;
-  examples: number;
-};
-
 /** Exact entry, meaning, gloss, and example counts by explanation language. */
 export function readCoverage(db: Database): Record<string, LanguageCoverage> {
-  const rows = db.query<
-    { lang: string; entries: number; meanings: number; glosses: number; examples: number },
-    []
-  >(`
-    select sense.lang as lang,
-           count(distinct sense.entry_id) as entries,
-           count(distinct sense.id) as meanings,
-           (select count(*) from ja_glosses g join ja_senses s on s.id = g.sense_id where s.lang = sense.lang) as glosses,
-           (select count(*) from ja_examples e join ja_senses s on s.id = e.sense_id where s.lang = sense.lang) as examples
-      from ja_senses sense
-     group by sense.lang
-     order by sense.lang
-  `).all();
-  return Object.fromEntries(rows.map(({ lang, ...counts }) => [lang, counts]));
+  return readLanguageCoverage(db, "ja");
 }

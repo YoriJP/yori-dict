@@ -35,8 +35,16 @@ One written form of an entry, either kanji or kana, carrying JMdict's common fla
 _Avoid_: Form, spelling, surface
 
 **Sense**:
-One meaning of an entry, with its own part of speech and annotations.
-_Avoid_: Definition, meaning
+One meaning of an entry in one explanation language, with its own part of speech and annotations. Each explanation language owns its senses: their identifiers, order, and divisions never have to line up across languages.
+_Avoid_: Definition
+
+**Meaning**:
+What a sense is called in the public API and in writing aimed at dictionary users, where `senses` would read as jargon. The API field is `meanings`; the canonical tables are `ja_senses` and `en_senses`. They name the same thing, and no third word is used for it.
+_Avoid_: Definition, entry
+
+**Explanation Language**:
+The language a sense explains an entry in, stored on the sense rather than encoded into a table name. A lookup names one, and gets that language's own senses or nothing.
+_Avoid_: Target language, gloss language, language pair
 
 **Gloss**:
 A sense rendered into one language.

@@ -4,8 +4,13 @@ import { findPrcTerms } from "../scripts/taiwan-terminology";
 import { deinflect } from "./deinflect";
 import type { ApiLang, PublicExample, PublicLookupItem, PublicSense } from "./types";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./english-types";
+import type { LookupDictionary } from "./lookup-contract";
 
-export type TargetDictionary = "ja" | "en";
+/**
+ * Enrichment targets the same headword dictionaries lookup names, so the two
+ * always agree on what a dictionary is.
+ */
+export type TargetDictionary = LookupDictionary;
 
 const traceContext = new AsyncLocalStorage<string | undefined>();
 const modelRunContext = new AsyncLocalStorage<ModelRunMetrics>();

@@ -1,10 +1,14 @@
-import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { Database } from "bun:sqlite";
+import {
+  fileSha256,
+  readCoverageFrom,
+  snapshotCanonicalDatabase
+} from "./canonical-store";
 import {
   createEnglishDictionaryValidator,
   visitEnglishEntries,
@@ -14,7 +18,7 @@ import {
   englishCanonicalTables,
   englishSchemaVersion,
   readCoverage,
-  type EnglishLanguageCoverage
+  type LanguageCoverage
 } from "./english-schema";
 import { createStoredZip } from "./stored-zip";
 import type { EnglishSense } from "./english-types";
@@ -66,8 +70,8 @@ export async function buildEnglishRelease(
     artifacts.sqlite, artifacts.gzip, artifacts.checksum, artifacts.jsonl, artifacts.manifest
   ].map((path) => rm(path, { force: true })));
 
-  snapshotEnglishDatabase(productionPath, artifacts.sqlite);
-  const coverage = readReleaseCoverage(artifacts.sqlite);
+  snapshotCanonicalDatabase(productionPath, artifacts.sqlite, englishCanonicalTables);
+  const coverage = readCoverageFrom(artifacts.sqlite, "en");
   for (const lang of Object.keys(coverage)) {
     artifacts.yomitan[lang] = join(options.outputDirectory, `yori-en-${lang}.zip`);
     await rm(artifacts.yomitan[lang], { force: true });
@@ -193,37 +197,7 @@ function languageAttribution(sources: unknown[], lang: string): string {
   return named.length > 0 ? named.join("; ") : "Yori Dict authored and reviewed content";
 }
 
-function readReleaseCoverage(path: string): Record<string, EnglishLanguageCoverage> {
-  const db = new Database(path, { readonly: true });
-  try {
-    return readCoverage(db);
-  } finally {
-    db.close();
-  }
-}
 
-function snapshotEnglishDatabase(productionPath: string, outputPath: string): void {
-  const source = new Database(productionPath);
-  try {
-    source.exec("pragma wal_checkpoint(passive)");
-    source.prepare("vacuum into ?").run(resolve(outputPath));
-  } finally {
-    source.close();
-  }
-  const snapshot = new Database(outputPath);
-  try {
-    // A release carries the canonical English tables and nothing else: no
-    // Japanese data, no enrichment bookkeeping, and no raw source payloads.
-    const keep = new Set<string>(englishCanonicalTables);
-    const extra = snapshot.query<{ name: string }, []>(
-      "select name from sqlite_master where type = 'table' and name not like 'sqlite_%'"
-    ).all().filter(({ name }) => !keep.has(name));
-    for (const { name } of extra) snapshot.exec(`drop table "${name.replaceAll('"', '""')}"`);
-    snapshot.exec("pragma journal_mode = delete; vacuum");
-  } finally {
-    snapshot.close();
-  }
-}
 
 function readMetadata(path: string) {
   const db = new Database(path, { readonly: true });
@@ -243,8 +217,3 @@ function readMetadata(path: string) {
   }
 }
 
-async function fileSha256(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
-  return hash.digest("hex");
-}

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
+import { insertRow, removeDatabaseFiles } from "./canonical-store";
 import { existsSync } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { englishEntryId, englishSenseId, normalizeEnglishLookupTerm } from "./english-dictionary";
 import {
@@ -18,7 +19,7 @@ import {
   englishSchemaVersion,
   hasEnglishSchema,
   readCoverage,
-  type EnglishLanguageCoverage
+  type LanguageCoverage
 } from "./english-schema";
 import {
   classifySourceRecord,
@@ -143,7 +144,7 @@ export type EnglishRebuildOptions = {
 export type EnglishRebuildResult = {
   path: string;
   entries: number;
-  coverage: Record<string, EnglishLanguageCoverage>;
+  coverage: Record<string, LanguageCoverage>;
   primary: { entries: number; meanings: number };
   fallback: { entries: number; meanings: number; referenceOnly: number };
   secondary: { imported: number; droppedUnknownEvidence: number };
@@ -1015,13 +1016,6 @@ function restoreRetained(
   return { entries, groups, examples };
 }
 
-function insertRow(db: Database, table: string, row: Record<string, unknown>, ignore: boolean): void {
-  const columns = Object.keys(row);
-  db.prepare(
-    `insert ${ignore ? "or ignore " : ""}into ${table} (${columns.join(", ")})
-     values (${columns.map(() => "?").join(", ")})`
-  ).run(...columns.map((column) => row[column] as never));
-}
 
 function defaultLicense(source: string): string {
   return source === englishSourcePolicy.primary ? oewnLicense : wiktionaryLicense;
@@ -1047,6 +1041,3 @@ async function readLines(path: string): Promise<string[]> {
   return text.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
-async function removeDatabaseFiles(path: string): Promise<void> {
-  await Promise.all([path, `${path}-wal`, `${path}-shm`].map((file) => rm(file, { force: true })));
-}
