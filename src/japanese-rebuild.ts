@@ -617,8 +617,23 @@ function restoreRetained(
   let examples = 0;
   db.transaction(() => {
     for (const record of retained.entries) {
-      const existing = db.query<{ id: string }, [string]>("select id from ja_entries where id = ?").get(record.entry.id);
-      if (existing) continue;
+      // An authored Japanese entry and an imported one never share an id, so
+      // the written forms decide whether the sources now carry this word.
+      const terms = record.lookupTerms.map((term) => String(term.term));
+      const existing = db.query<{ id: string }, [string]>("select id from ja_entries where id = ?")
+        .get(record.entry.id)
+        ?? (terms.length === 0 ? null : db.query<{ id: string }, string[]>(`
+          select distinct entry_id as id from ja_lookup_terms
+           where term in (${terms.map(() => "?").join(", ")})
+        `).get(...terms));
+      if (existing) {
+        // The sources now provide this headword, so the imported entry is the
+        // canonical one. The accepted language groups the entry was enriched
+        // with move onto it rather than being restored as a second entry the
+        // same query would also match.
+        groups += reattachGroups(db, record, existing.id);
+        continue;
+      }
       db.prepare(`
         insert into ja_entries (id, source, source_id, headword_language, estimated_level)
         values (?, ?, ?, ?, ?)
@@ -669,6 +684,41 @@ function restoreRetained(
   return { entries, groups, examples };
 }
 
+
+/**
+ * Moves a retained entry's accepted language groups onto an entry the rebuilt
+ * sources now provide. A language the sources already explain is left alone:
+ * imported content wins, and a retained group never reorders it.
+ */
+function reattachGroups(db: Database, record: RetainedEntry, entryId: string): number {
+  const byLang = new Map<string, Array<Record<string, unknown>>>();
+  for (const sense of record.senses) {
+    const lang = String(sense.lang);
+    if (!byLang.has(lang)) byLang.set(lang, []);
+    byLang.get(lang)!.push(sense);
+  }
+
+  let moved = 0;
+  for (const [lang, senses] of byLang) {
+    // Only accepted enrichment travels; it is marked by its generation row.
+    if (!senses.some((sense) => sense.generation_id !== null && sense.generation_id !== undefined)) continue;
+    if (db.query<{ id: string }, [string, string]>(
+      "select id from ja_senses where entry_id = ? and lang = ? limit 1"
+    ).get(entryId, lang)) continue;
+
+    const senseIds = new Set(senses.map((sense) => String(sense.id)));
+    for (const generation of record.generations) insertRow(db, "ja_generations", generation, true);
+    for (const sense of senses) insertRow(db, "ja_senses", { ...sense, entry_id: entryId }, false);
+    for (const gloss of record.glosses) {
+      if (senseIds.has(String(gloss.sense_id))) insertRow(db, "ja_glosses", gloss, false);
+    }
+    for (const example of record.examples) {
+      if (senseIds.has(String(example.sense_id))) insertRow(db, "ja_examples", example, false);
+    }
+    moved += 1;
+  }
+  return moved;
+}
 
 function matchExampleSenses(
   word: JmdictWord,

@@ -190,6 +190,40 @@ test("rejects an archive whose compressed checksum does not match the pinned val
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("a failed run leaves the last verified evidence and manifest in place", async () => {
+  const workspace = await workspaceDirectory();
+  const archive = await gzipFixture(workspace);
+  const outDir = join(workspace, "out");
+
+  const good = await buildEnglishEvidenceArtifacts({
+    lockPath: fixtureLock, archivePath: archive, outDir,
+    maxRows: 500, maxRowsPerEntry: 24, allowDownload: false
+  });
+  const evidencePath = join(outDir, good.evidence.file);
+  const verified = await sha256(evidencePath);
+  const manifest = await Bun.file(join(outDir, "manifest.json")).text();
+
+  // The checksum is only known once the whole archive has been read, so a
+  // rejected rerun must not have replaced the artifact on its way there.
+  const lock = { ...(await Bun.file(fixtureLock).json()), sha256: "0".repeat(64) };
+  const lockPath = join(workspace, "bad-lock.json");
+  await writeFile(lockPath, JSON.stringify(lock));
+  await expect(
+    buildEnglishEvidenceArtifacts({
+      // A cap the good run did not use, so a run that wrote straight to the
+      // artifact would leave visibly different content behind.
+      lockPath, archivePath: archive, outDir,
+      maxRows: 1, maxRowsPerEntry: 24, allowDownload: false
+    })
+  ).rejects.toThrow(/checksum mismatch/i);
+
+  expect(await sha256(evidencePath)).toBe(verified);
+  expect(await Bun.file(join(outDir, "manifest.json")).text()).toBe(manifest);
+  expect(await Bun.file(`${evidencePath}.partial`).exists()).toBe(false);
+
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("emits evidence while the archive is still being read", async () => {
   const lines = (await Bun.file(fixtureArchive).text()).split("\n").filter((line) => line.trim());
   const encoder = new TextEncoder();

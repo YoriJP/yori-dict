@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { ensureCachedArchive, readCacheMetadata } from "./english-evidence-cache";
 import {
@@ -86,7 +86,12 @@ export async function buildEnglishEvidenceArtifacts(args: BuildArgs): Promise<Ev
 
   const evidenceFileName = `${lock.source}-${lock.edition}-${lock.version}-ja-zh.jsonl`;
   const evidencePath = join(outDir, evidenceFileName);
-  const sink = Bun.file(evidencePath).writer();
+  // The archive checksum is only known once the whole stream has been read, so
+  // rows are staged beside the artifact and moved into place after the manifest
+  // is complete. A failed run leaves the previously verified evidence and its
+  // manifest as they were, rather than replacing one of the pair.
+  const stagingPath = `${evidencePath}.partial`;
+  const sink = Bun.file(stagingPath).writer();
   let pending = 0;
 
   let manifest: EvidenceManifest;
@@ -111,10 +116,14 @@ export async function buildEnglishEvidenceArtifacts(args: BuildArgs): Promise<Ev
         }
       }
     );
-  } finally {
+  } catch (error) {
     await sink.end();
+    await rm(stagingPath, { force: true });
+    throw error;
   }
+  await sink.end();
 
+  await rename(stagingPath, evidencePath);
   await Bun.write(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   if (!lock.sha256) {
     console.warn(`Lock ${args.lockPath} has no pinned sha256. Record ${manifest.upstream.sha256} to pin this archive.`);
