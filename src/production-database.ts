@@ -22,9 +22,7 @@ export function migrateProductionDatabase(path: string): void {
 
 export async function ensureJapaneseProductionDatabase(path: string): Promise<boolean> {
   if (hasJapaneseDictionary(path)) return false;
-  if (existsSync(path)) {
-    throw new Error(`Production database exists without a Japanese dictionary: ${path}`);
-  }
+  if (existsSync(path)) clearReplaceableLegacyStore(path);
   await downloadPinnedDataRelease({ outPath: path });
   // A release published before the `ja_*` rebuild cannot be served. Discard it
   // and fail here rather than starting on a database no lookup can read, and
@@ -290,6 +288,46 @@ export function hasEnglishDictionary(path: string): boolean {
     ).get()?.value);
   } catch {
     return false;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Clears a volume written before the `ja_*` rebuild so this start can bootstrap
+ * from the pinned release.
+ *
+ * Its dictionary content is reproducible from the pinned sources, so the store
+ * is replaced rather than migrated — the spec keeps a migration framework out
+ * of scope. Accepted enrichment is the one thing that is not reproducible, so a
+ * store holding any is refused instead of destroyed.
+ */
+export function clearReplaceableLegacyStore(path: string): void {
+  const accepted = countLegacyGeneratedEntries(path);
+  if (accepted > 0) {
+    throw new Error(
+      `${path} predates the ja-2 canonical schema and holds ${accepted} accepted generated ` +
+        `Japanese ${accepted === 1 ? "entry" : "entries"} that a replacement would destroy. ` +
+        "Export them with bun run japanese:release from a copy of this database, then remove " +
+        "the file so this start can bootstrap from the pinned release."
+    );
+  }
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) rmSync(file, { force: true });
+}
+
+/**
+ * Accepted generated Japanese entries held by a pre-ja-2 store. They lived in
+ * `japanese_generated_records`, which the ja-2 migration drops, so they are the
+ * only content a replacement could not rebuild from the pinned sources.
+ */
+function countLegacyGeneratedEntries(path: string): number {
+  const db = new Database(path, { readonly: true });
+  try {
+    return db.query<{ count: number }, []>(
+      "select count(*) as count from japanese_generated_records"
+    ).get()?.count ?? 0;
+  } catch {
+    return 0;
   } finally {
     db.close();
   }
