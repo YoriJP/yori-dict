@@ -9,6 +9,20 @@ import type { EnglishEntry, EnglishExample } from "./english-types";
 import type { ApiLang, PublicExample, PublicLookupItem } from "./types";
 import { parseApiLang } from "./lang";
 
+/**
+ * A one-time absorption of the pre-canonical overlay databases, run once per
+ * marker and only when such a file is actually present beside the production
+ * database.
+ *
+ * The old table names appear only here, and only as things to read out of a
+ * separate legacy file. Nothing in lookup, enrichment, rebuild, or release
+ * knows them. A legacy record held every gloss language against one shared
+ * meaning list; it is split into independent language groups on the way in and
+ * keeps the provenance it was written with, including the converter that
+ * produced the legacy Simplified Chinese rows. There is no second lookup or
+ * storage implementation behind this: after absorption the rows are ordinary
+ * canonical rows.
+ */
 export function importLegacyOverlays(
   productionPath: string,
   japaneseOverlayPath: string,

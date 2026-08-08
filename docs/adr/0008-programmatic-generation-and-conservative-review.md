@@ -14,7 +14,7 @@ OpenRouter model fallback is disabled and required parameters must be supported.
 
 ## Examples
 
-If a sense lacks a sourced or accepted example, Luna produces a Japanese example with English and Taiwan-Chinese translations in one structured call. Gemini reviews the sense match, naturalness, complexity, translation agreement, Taiwan terminology, and safety. Accepted Taiwan Chinese is converted to Simplified Chinese with OpenCC. An example rejection does not affect its entry.
+If a meaning lacks a sourced or accepted example, Luna produces one example for that meaning's own explanation language in one structured call. Gemini reviews the sense match, naturalness, complexity, translation agreement, Taiwan terminology, and safety. Simplified and Taiwanese Chinese are authored separately; no accepted content is character-converted into another language. An example rejection does not affect its entry.
 
 ## Observability
 

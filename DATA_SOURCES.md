@@ -110,8 +110,9 @@ source versions, URLs, archive checksums, licenses, and attribution text are com
 `sources/english/source-lock.json`. The checksummed source archives are committed beside
 that lock so an English release never changes because an upstream URL moved.
 
-Imported records remain stored as unchanged structured JSON across the English SQLite
-`source_records` and deduplicated `source_payloads` tables.
+Canonical tables keep concise provenance — selected text, source name and version, a
+stable evidence identifier, review status, license, and attribution — and never a complete
+raw upstream record. The pinned archives themselves are the reproducible rebuild input.
 Canonical entries carry separate source evidence IDs and stable `yori:en:*` identities;
 they do not adopt either source's identity. The English SQLite, JSONL, manifest, and
 Yomitan v3 artifacts are distributed under CC BY-SA 4.0 and must retain both source
@@ -188,20 +189,23 @@ Sources:
 Release artifacts are generated under `releases/` by:
 
 ```sh
-bun run release:package
+bun run japanese:release
 ```
 
 The release SQLite database contains JMdict-derived dictionary data, Tatoeba
 examples, estimated levels, and project-reviewed AI-assisted glosses. The
-database artifact is distributed under CC BY-SA 4.0; embedded source records
-retain the attribution described above.
+database artifact is distributed under CC BY-SA 4.0. It carries concise
+provenance — source name, version, and evidence identifier — rather than
+complete raw upstream records, so the attribution above still applies.
 
-The release package includes:
+The release package includes one Yomitan pack per explanation language:
 
 ```txt
 yori-dict-<dictDate>.sqlite.gz
 yori-dict-<dictDate>.sqlite.gz.sha256
+yori-dict-<dictDate>.jsonl
 yori-dict-<dictDate>.json
+yori-ja-<lang>.zip
 ```
 
 ## Attribution

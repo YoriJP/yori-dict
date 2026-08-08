@@ -39,6 +39,6 @@ Cost is not a selection criterion at this volume: the full historical backfill c
 
 Traditional Chinese output must use Taiwanese vocabulary, not PRC vocabulary rendered in Traditional characters — 軟體 not 軟件, 資訊 not 信息. An audit of the existing 184,738 AI-assisted zh-TW glosses found 96 matches for PRC-specific terms (0.05%), of which roughly 50–70 are genuine after discounting substring false positives. That floor was produced by a non-Chinese model.
 
-The defence is deterministic, not a model: OpenCC's Taiwan phrase dictionaries — already a dependency, used in `convert-zh-cn.ts` — are a maintained mapping between PRC and Taiwanese terms, so they serve as a detector as well as a converter. Word-boundary handling is required; naive substring matching flags 聚集成群 and 假離線程式. The reviewer's rubric additionally covers framing, which a term list cannot catch.
+The defence is deterministic, not a model: OpenCC's Taiwan phrase dictionaries are a maintained mapping between PRC and Taiwanese terms, so they serve as a detector. Yori uses them only as a detector — `scripts/taiwan-terminology.ts` reads the mapping and never converts canonical content. Word-boundary handling is required; naive substring matching flags 聚集成群 and 假離線程式. The reviewer's rubric additionally covers framing, which a term list cannot catch.
 
 Japanese generation and Traditional Chinese translation are separate calls and may use separate models. A Chinese-trained model is not used on the Traditional Chinese path unless this scan shows its output is clean.
