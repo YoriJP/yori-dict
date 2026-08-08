@@ -473,6 +473,29 @@ test("the author schema enumerates the dictionary's own label codes", async () =
   expect(author?.prompt).not.toContain("adj-i =");
 });
 
+test("concurrent lookups of one headword share a refusal instead of repeating it", async () => {
+  const repository = new MemoryRepository();
+  const gateway = new ScriptedGateway([
+    "AI",
+    "AI",
+    authoredEntry({ headword: "AI", reading: "エーアイ", partOfSpeech: ["n"], provenance: "generated" }),
+    "REJECT"
+  ]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
+
+  // Different sentences, so the two never share the request key and both reach
+  // the canonical operation. A refusal persists nothing, so a waiter that only
+  // queued behind the first would repeat the whole paid run.
+  const [first, second] = await Promise.all([
+    dictionary.resolve(request("AI", { sentence: "AIを業務に活用する。" })),
+    dictionary.resolve(request("AI", { sentence: "AIの研究が進む。" }))
+  ]);
+
+  expect(first).toBeNull();
+  expect(second).toBeNull();
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility", "eligibility", "entry-author", "entry-review"]);
+});
+
 test("a refusal is logged with the rule that rejected it", async () => {
   const repository = new MemoryRepository();
   const refusals: Array<Record<string, unknown>> = [];

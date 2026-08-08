@@ -294,8 +294,8 @@ export function createJapaneseOnDemandDictionary(options: {
   const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const entryInFlight = new Map<string, Promise<PublicLookupItem | null>>();
-  const canonicalLocks = new Map<string, Promise<void>>();
-  const exampleLocks = new Map<string, Promise<void>>();
+  const canonicalInFlight = new Map<string, Promise<unknown>>();
+  const exampleInFlight = new Map<string, Promise<unknown>>();
   const runtime: RuntimeOptions = {
     repository: options.repository,
     modelGateway: {
@@ -303,8 +303,8 @@ export function createJapaneseOnDemandDictionary(options: {
         return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs));
       }
     },
-    canonicalLocks,
-    exampleLocks,
+    canonicalInFlight,
+    exampleInFlight,
     ...(options.logger ? { logger: options.logger } : {})
   };
 
@@ -506,7 +506,7 @@ function authorForHeadword(
   headword: string,
   evidence: SourceEvidence[]
 ): Promise<PublicLookupItem | null> {
-  return serializeByKey(options.canonicalLocks, entryOutcomeKey(request, headword), async () => {
+  return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, headword), async () => {
     const existing = options.repository.find(headword, request.targetDictionary, request.lang);
     if (existing) return completeEntryExamples(options, existing, request);
     return authorEntry(request, options, headword, evidence);
@@ -635,7 +635,7 @@ async function completeExample(
   sense: PublicSense,
   request: ResolveRequest
 ): Promise<PublicExample | null> {
-  return serializeByKey(options.exampleLocks, exampleOutcomeKey(request, sense.id), async () => {
+  return shareByKey(options.exampleInFlight, exampleOutcomeKey(request, sense.id), async () => {
     const canonical = options.repository.find(entry.word, "ja", request.lang)
       ?.senses.find((candidate) => candidate.id === sense.id)
       ?.examples?.[0];
@@ -773,8 +773,8 @@ type ModelCallRuntime = {
 type RuntimeOptions = {
   repository: EnrichmentRepository;
   modelGateway: ModelGateway;
-  canonicalLocks: Map<string, Promise<void>>;
-  exampleLocks: Map<string, Promise<void>>;
+  canonicalInFlight: Map<string, Promise<unknown>>;
+  exampleInFlight: Map<string, Promise<unknown>>;
   logger?: EnrichmentLogger;
 };
 
@@ -1266,15 +1266,15 @@ export function createEnglishOnDemandDictionary(options: {
   const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
   const inFlight = new Map<string, Promise<EnglishEntry | null>>();
-  const locks = new Map<string, Promise<void>>();
+  const canonicalInFlight = new Map<string, Promise<unknown>>();
   const runtime: EnglishRuntimeOptions = {
     repository: options.repository,
     modelGateway: {
       call(input) { return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs)); }
     },
     modelConfigs: englishModelConfigs(options.models ?? englishModels),
-    locks,
-    exampleLocks: new Map(),
+    canonicalInFlight,
+    exampleInFlight: new Map(),
     ...(options.logger ? { logger: options.logger } : {})
   };
   return {
@@ -1339,7 +1339,7 @@ async function resolveMissingEnglish(
     sources = options.repository.findSources(headword);
   }
   const key = entryOutcomeKey(request, normalizeEnglishHeadword(headword));
-  return serializeByKey(options.locks, key, async () => {
+  return shareByKey(options.canonicalInFlight, key, async () => {
     const existing = options.repository.find(headword, request.lang);
     if (existing) return existing;
     return authorEnglishEntry(request, headword, sources, options);
@@ -1438,7 +1438,7 @@ async function completeEnglishExamples(
   const completed = await Promise.all(entry.senses.map(async (sense) => {
     if (sense.examples.length > 0) return null;
     const candidateId = `${sense.id}:example`;
-    return serializeByKey(options.exampleLocks, exampleOutcomeKey(request, sense.id), async () => {
+    return shareByKey(options.exampleInFlight, exampleOutcomeKey(request, sense.id), async () => {
       const canonical = options.repository.find(entry.headword, request.lang)
         ?.senses.find((candidate) => candidate.id === sense.id)?.examples[0];
       if (canonical) return canonical;
@@ -1768,8 +1768,8 @@ type EnglishRuntimeOptions = {
   repository: EnglishEnrichmentRepository;
   modelGateway: ModelGateway;
   modelConfigs: ReturnType<typeof englishModelConfigs>;
-  locks: Map<string, Promise<void>>;
-  exampleLocks: Map<string, Promise<void>>;
+  canonicalInFlight: Map<string, Promise<unknown>>;
+  exampleInFlight: Map<string, Promise<unknown>>;
   logger?: EnrichmentLogger;
 };
 
@@ -1989,19 +1989,26 @@ function boundedLog(value: string): string {
   return Array.from(value).slice(0, 8_000).join("");
 }
 
-async function serializeByKey<T>(locks: Map<string, Promise<void>>, key: string, work: () => Promise<T>): Promise<T> {
-  const previous = locks.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const tail = previous.then(() => gate);
-  locks.set(key, tail);
-  await previous;
-  try {
-    return await work();
-  } finally {
-    release();
-    if (locks.get(key) === tail) locks.delete(key);
-  }
+/**
+ * Runs one operation per key and hands its result to every caller already
+ * waiting on the same key, refusals included. Serializing instead would make
+ * each waiter repeat the author and reviewer calls, because a refusal leaves
+ * nothing behind for the next one to find. A caller that arrives after this
+ * operation settles starts a fresh attempt, which is what keeps a refusal
+ * retryable.
+ */
+function shareByKey<T>(inFlight: Map<string, Promise<unknown>>, key: string, work: () => Promise<T>): Promise<T> {
+  const running = inFlight.get(key) as Promise<T> | undefined;
+  // A completed refusal is an answer and is shared. A rejection is an
+  // operational failure: the work did not happen, so a caller waiting behind it
+  // runs its own attempt, in its own service-tier mode, rather than inheriting
+  // an error about someone else's provider call.
+  if (running) return running.then((result) => result, () => shareByKey(inFlight, key, work));
+  const task = work().finally(() => {
+    if (inFlight.get(key) === task) inFlight.delete(key);
+  });
+  inFlight.set(key, task);
+  return task;
 }
 
 export function createModelCallLimiter(concurrency: number): ModelCallLimiter {
