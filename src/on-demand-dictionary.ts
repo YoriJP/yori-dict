@@ -1209,6 +1209,16 @@ export const onDemandEvaluationContracts = {
   }
 } as const;
 
+/**
+ * The deterministic check behind the author schema's part-of-speech enum. An
+ * empty vocabulary admits nothing rather than everything: a dictionary with no
+ * codes to offer has nothing to enrich, and refusing is logged and retried.
+ */
+function assertEnglishPartOfSpeech(value: string, vocabulary: EnglishLabelVocabulary): void {
+  const label = value.trim();
+  if (!vocabulary.partOfSpeech.has(label)) throw new Error(`Unknown part of speech: ${label}`);
+}
+
 /** Same reasoning as `codeArraySchema`, for a single required label. */
 function englishPartOfSpeechSchema(vocabulary: EnglishLabelVocabulary) {
   const listed = [...vocabulary.partOfSpeech].sort();
@@ -1426,13 +1436,14 @@ async function authorEnglishEntry(
   // One candidate id per entry *and* language, so two languages authored at the
   // same time never share a model request or its recorded attempt.
   const candidateId = englishCandidateId(entryId, request.lang);
+  const vocabulary = options.repository.labelVocabulary();
   const authored = await callAndRecord(
     options,
     modelConfig(
       "entry-author",
       options.modelConfigs.author,
       "english-entry-author-v2",
-      englishEntrySchemaFor(options.repository.labelVocabulary(), request.lang !== "en")
+      englishEntrySchemaFor(vocabulary, request.lang !== "en")
     ),
     englishEntryAuthorPrompt(candidateId, headword, request, sources),
     request.mode,
@@ -1440,7 +1451,7 @@ async function authorEnglishEntry(
   );
   let entry: EnglishEntry;
   try {
-    entry = parseEnglishEntry(authored.text, entryId, headword, request.lang, sources, authored.attempt);
+    entry = parseEnglishEntry(authored.text, entryId, headword, request.lang, sources, authored.attempt, vocabulary);
   } catch (error) {
     englishRecordOutcome(options.repository, authored.attempt, "malformed");
     logRefusal(options, request, "entry", headword, refusalReason(error));
@@ -1567,11 +1578,12 @@ function parseEnglishEntry(
   expectedHeadword: string,
   lang: ApiLang,
   sources: EnglishSourceRecord[],
-  authorAttempt: AttemptRecord
+  authorAttempt: AttemptRecord,
+  vocabulary: EnglishLabelVocabulary
 ): EnglishEntry {
   return lang === "en"
-    ? parseEnglishCanonicalGroup(text, entryId, expectedHeadword, lang, sources, authorAttempt)
-    : parseEnglishLanguageGroup(text, entryId, expectedHeadword, lang, sources, authorAttempt);
+    ? parseEnglishCanonicalGroup(text, entryId, expectedHeadword, lang, sources, authorAttempt, vocabulary)
+    : parseEnglishLanguageGroup(text, entryId, expectedHeadword, lang, sources, authorAttempt, vocabulary);
 }
 
 /**
@@ -1589,7 +1601,8 @@ function parseEnglishLanguageGroup(
   expectedHeadword: string,
   lang: ApiLang,
   sources: EnglishSourceRecord[],
-  authorAttempt: AttemptRecord
+  authorAttempt: AttemptRecord,
+  vocabulary: EnglishLabelVocabulary
 ): EnglishEntry {
   const value = parseObject(text);
   assertExactKeys(value, ["headword", "pronunciations", "senses"]);
@@ -1620,8 +1633,11 @@ function parseEnglishLanguageGroup(
     if (sense.provenance !== "generated") throw new Error("A language group meaning is authored, not imported");
     if (requiredStringList(sense.evidenceIds).length > 0) throw new Error("A language group meaning claims English evidence");
     // Part of speech stays in the shared English label vocabulary so packs and
-    // canonical rows read the same way across languages.
-    if (!/^[a-z][a-z ]*$/.test(sense.partOfSpeech.trim())) throw new Error("Invalid part of speech label");
+    // canonical rows read the same way across languages. The schema enumerates
+    // the codes for the model; this is the check that enforces them, so a
+    // provider that ignores the enum, or a dictionary with no codes to offer,
+    // cannot admit an invented label.
+    assertEnglishPartOfSpeech(sense.partOfSpeech, vocabulary);
     const definition = sense.definition.trim();
     if (invalidExplanationText(lang, definition)) throw new Error(`Definition is not written in ${lang}`);
     if (englishWording.has(englishTextIdentity(definition))) throw new Error("Definition repeats the English group");
@@ -1700,7 +1716,8 @@ function parseEnglishCanonicalGroup(
   expectedHeadword: string,
   lang: ApiLang,
   sources: EnglishSourceRecord[],
-  authorAttempt: AttemptRecord
+  authorAttempt: AttemptRecord,
+  vocabulary: EnglishLabelVocabulary
 ): EnglishEntry {
   const value = parseObject(text);
   assertExactKeys(value, ["headword", "pronunciations", "senses"]);
@@ -1722,6 +1739,7 @@ function parseEnglishCanonicalGroup(
     if (!nonemptyString(sense.partOfSpeech) || !nonemptyString(sense.definition) || typeof sense.dated !== "boolean") {
       throw new Error("Invalid English sense content");
     }
+    assertEnglishPartOfSpeech(sense.partOfSpeech, vocabulary);
     const evidenceIds = requiredStringList(sense.evidenceIds);
     if (sense.provenance !== "source" && sense.provenance !== "generated") throw new Error("Invalid provenance");
     if (sense.provenance === "source" && evidenceIds.length === 0) throw new Error("Missing source evidence");

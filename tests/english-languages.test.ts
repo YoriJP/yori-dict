@@ -360,6 +360,23 @@ test("a language group must be written in its own language and may not copy the 
   }
 });
 
+test("a part of speech outside the dictionary's vocabulary is refused in code", async () => {
+  const { repository, gateway, dictionary, close } = await enrichable([
+    languageGroup([{ definition: "会計の記録。", partOfSpeech: "action word" }]) as string
+  ]);
+
+  try {
+    // The author schema enumerates the codes, but the enum is an instruction to
+    // the model, not enforcement. A provider that ignores it, or a dictionary
+    // with no codes to offer, must not be able to persist an invented label.
+    expect(await dictionary.resolve({ query: "ledger", targetDictionary: "en", lang: "ja" })).toBeNull();
+    expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
+    expect(repository.find("ledger", "ja")).toBeNull();
+  } finally {
+    close();
+  }
+});
+
 test("the reviewer is told what an explanation group is before it judges one", async () => {
   const { gateway, dictionary, close } = await enrichable([
     languageGroup([{ definition: "会計の記録。", partOfSpeech: "noun" }]) as string,
