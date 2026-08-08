@@ -408,7 +408,7 @@ const generation = {
   model: "gpt-5.6-luna",
   provider: "openrouter",
   reasoningEffort: "minimal",
-  promptVersion: "english-entry-author-v1",
+  promptVersion: "english-entry-author-v2",
   serviceTier: "flex",
   reviewOutcome: "accepted",
   createdAt: "2026-08-08T00:00:00.000Z"

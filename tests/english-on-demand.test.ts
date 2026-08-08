@@ -23,12 +23,14 @@ test("English resolve returns released data without calling a model", async () =
   expect(gateway.calls).toEqual([]);
 });
 
-test("English enrichment requires an explicitly selected author and reviewer", () => {
-  expect(() => createEnglishOnDemandDictionary({
+test("English enrichment needs no configuration to run", () => {
+  // English used to disable itself when two environment variables were unset,
+  // which read from outside as "this word has no content". It is always on, and
+  // revoking the OpenRouter key is what stops model work.
+  expect(createEnglishOnDemandDictionary({
     repository: new MemoryEnglishRepository(),
-    modelGateway: new ScriptedGateway([]),
-    models: { author: "", reviewer: "" }
-  })).toThrow("must be configured explicitly");
+    modelGateway: new ScriptedGateway([])
+  })).toBeDefined();
 });
 
 test("English resolve completes missing examples on released senses", async () => {
@@ -239,7 +241,7 @@ test("English generated provenance records the successful fallback tier", async 
   expect(entry?.senses[0].generation).toMatchObject({
     model: englishModels.author,
     provider: "openrouter",
-    promptVersion: "english-entry-author-v1",
+    promptVersion: "english-entry-author-v2",
     serviceTier: "standard"
   });
 });
@@ -275,6 +277,11 @@ class ScriptedGateway implements ModelGateway {
 
 class MemoryEnglishRepository implements EnglishEnrichmentRepository {
   entry: EnglishEntry | null = null;
+
+  labelVocabulary() {
+    return { partOfSpeech: new Set(["noun", "verb", "adjective", "adverb"]) };
+  }
+
   readonly attempts: AttemptRecord[] = [];
   readonly savedLangs: ApiLang[] = [];
   readonly savedExamples: Array<[string, EnglishExample]> = [];

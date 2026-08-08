@@ -5,7 +5,12 @@ import {
   readEnglishEntry
 } from "./english-dictionary";
 import { createEnglishSchema } from "./english-schema";
-import type { AttemptRecord, EnglishEnrichmentRepository, GenerationProvenance } from "./on-demand-dictionary";
+import type {
+  AttemptRecord,
+  EnglishEnrichmentRepository,
+  EnglishLabelVocabulary,
+  GenerationProvenance
+} from "./on-demand-dictionary";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./english-types";
 import type { ApiLang } from "./types";
 
@@ -17,6 +22,7 @@ export type PersistentEnglishEnrichmentRepository = EnglishEnrichmentRepository 
 
 export function openEnglishEnrichmentRepository(path: string): PersistentEnglishEnrichmentRepository {
   const db = new Database(path);
+  let vocabulary: EnglishLabelVocabulary | undefined;
   db.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
   createEnglishSchema(db);
 
@@ -241,6 +247,14 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
           recordGeneration(generation)
         );
       })();
+    },
+    labelVocabulary() {
+      return vocabulary ??= {
+        partOfSpeech: new Set(
+          db.query<{ value: string }, []>("select distinct part_of_speech as value from en_senses")
+            .all().map((row) => row.value).filter(Boolean)
+        )
+      };
     },
     recordAttempt(attempt) {
       saveAttempt.run(JSON.stringify(attempt), new Date().toISOString());

@@ -33,19 +33,13 @@ const japaneseOnDemand = createJapaneseOnDemandDictionary({
   logger
 });
 const englishRepository = openEnglishEnrichmentRepository(dbPath);
-const englishModels = process.env.YORI_ENGLISH_AUTHOR_MODEL && process.env.YORI_ENGLISH_REVIEW_MODEL
-  ? { author: process.env.YORI_ENGLISH_AUTHOR_MODEL, reviewer: process.env.YORI_ENGLISH_REVIEW_MODEL }
-  : undefined;
-const englishOnDemand = englishModels
-  ? createEnglishOnDemandDictionary({
-      repository: englishRepository,
-      modelGateway,
-      models: englishModels,
-      limiter: modelLimiter,
-      timeoutMs: modelTimeoutMs,
-      logger
-    })
-  : undefined;
+const englishOnDemand = createEnglishOnDemandDictionary({
+  repository: englishRepository,
+  modelGateway,
+  limiter: modelLimiter,
+  timeoutMs: modelTimeoutMs,
+  logger
+});
 const onDemand = createOnDemandDictionary({ japanese: japaneseOnDemand, english: englishOnDemand });
 const app = createApp(releasedDb, {
   onDemand,

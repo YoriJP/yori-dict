@@ -148,8 +148,7 @@ stay separate even when their English sentences look alike.
 The English path rejects obvious names, wrong-script text, fragments, markup, URLs, and
 numbers before eligibility. Genuine words, compounds, phrasal verbs, idioms,
 abbreviations, and established multiword expressions stay eligible. Production author and
-reviewer models are selected explicitly with `YORI_ENGLISH_AUTHOR_MODEL` and
-`YORI_ENGLISH_REVIEW_MODEL` only after comparative evaluation. Both use OpenRouter,
+reviewer models are pinned in code, the same pair Japanese uses. Both use OpenRouter,
 minimal reasoning, and Flex first. On-demand transient failures may
 fall back to Standard once; bulk calls retry Flex at most three times. Review is fail
 closed, model concurrency is bounded globally across both dictionaries, and identical

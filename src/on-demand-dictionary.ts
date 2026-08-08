@@ -166,6 +166,7 @@ export type EnglishEnrichmentRepository = {
   saveEntry(entry: EnglishEntry, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: EnglishExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
+  labelVocabulary(): EnglishLabelVocabulary;
 };
 
 export type EnglishOnDemandDictionary = DictionaryResolver<EnglishEntry>;
@@ -211,6 +212,10 @@ export type EnrichmentLogger = (event: ModelRunSummary | EnrichmentRefusal) => v
  * these codes and validation accepts exactly these codes, so the model is never
  * asked to guess a vocabulary it has not been shown.
  */
+export type EnglishLabelVocabulary = {
+  partOfSpeech: Set<string>;
+};
+
 export type LabelVocabulary = {
   partOfSpeech: Set<string>;
   misc: Set<string>;
@@ -388,6 +393,14 @@ const exampleSchema = {
 
 const lunaModel = "openai/gpt-5.6-luna";
 const geminiReviewModel = "google/gemini-3-flash-preview";
+/**
+ * Both dictionaries author with Luna and review with Gemini. The reviewer stays
+ * a different model family from the author, which is the property ADR-0008
+ * requires. English carried these as runtime configuration while a blind
+ * comparison was outstanding; an unset variable disabled English enrichment
+ * silently, so the pair is pinned here and the comparison can repin it.
+ */
+const englishModels: EnglishModelSelection = { author: lunaModel, reviewer: geminiReviewModel };
 const entryAuthorConfigFor = (vocabulary: LabelVocabulary, hasEvidence: boolean) =>
   modelConfig("entry-author", lunaModel, "entry-author-v2", entrySchemaFor(vocabulary, hasEvidence));
 const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v2");
@@ -1155,7 +1168,7 @@ export const onDemandEvaluationContracts = {
   }
 } as const;
 
-const englishEntrySchema = {
+const englishEntrySchemaFor = (vocabulary: EnglishLabelVocabulary, languageGroup: boolean) => ({
   name: "english_dictionary_entry",
   schema: {
     type: "object",
@@ -1175,10 +1188,14 @@ const englishEntrySchema = {
         items: {
           type: "object", additionalProperties: false,
           properties: {
-            partOfSpeech: { type: "string" }, definition: { type: "string" },
+            partOfSpeech: { type: "string", enum: [...vocabulary.partOfSpeech].sort() },
+            definition: { type: "string" },
             registers: stringArraySchema, regions: stringArraySchema, domains: stringArraySchema,
             dated: { type: "boolean" }, usage: stringArraySchema,
-            evidenceIds: stringArraySchema, provenance: { type: "string", enum: ["source", "generated"] }
+            evidenceIds: stringArraySchema,
+            // A language group is written, never carried across from the English
+            // meanings, so `source` is the one value its parser always refuses.
+            provenance: { type: "string", enum: languageGroup ? ["generated"] : ["source", "generated"] }
           },
           required: [
             "partOfSpeech", "definition", "registers", "regions", "domains", "dated", "usage",
@@ -1189,7 +1206,7 @@ const englishEntrySchema = {
     },
     required: ["headword", "pronunciations", "senses"]
   }
-};
+});
 
 const englishExampleSchema = {
   name: "english_dictionary_example",
@@ -1211,8 +1228,8 @@ const englishBilingualExampleSchema = {
 
 function englishModelConfigs(selection: EnglishModelSelection) {
   return {
+    author: selection.author,
     eligibility: modelConfig("eligibility", selection.author, "english-eligibility-v1"),
-    entryAuthor: modelConfig("entry-author", selection.author, "english-entry-author-v1", englishEntrySchema),
     entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v2"),
     exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v1", englishExampleSchema),
     bilingualExampleAuthor: modelConfig(
@@ -1239,15 +1256,12 @@ const englishExplanationLanguageNames: Partial<Record<ApiLang, string>> = {
 export function createEnglishOnDemandDictionary(options: {
   repository: EnglishEnrichmentRepository;
   modelGateway: ModelGateway;
-  models: EnglishModelSelection;
+  models?: EnglishModelSelection;
   concurrency?: number;
   timeoutMs?: number;
   limiter?: ModelCallLimiter;
   logger?: EnrichmentLogger;
 }): EnglishOnDemandDictionary {
-  if (!nonemptyString(options.models.author) || !nonemptyString(options.models.reviewer)) {
-    throw new Error("English author and reviewer models must be configured explicitly");
-  }
   const concurrency = positiveInteger(options.concurrency ?? 4, "Enrichment concurrency");
   const timeoutMs = positiveInteger(options.timeoutMs ?? 15_000, "Model timeout");
   const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
@@ -1258,7 +1272,7 @@ export function createEnglishOnDemandDictionary(options: {
     modelGateway: {
       call(input) { return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs)); }
     },
-    modelConfigs: englishModelConfigs(options.models),
+    modelConfigs: englishModelConfigs(options.models ?? englishModels),
     locks,
     exampleLocks: new Map(),
     ...(options.logger ? { logger: options.logger } : {})
@@ -1367,7 +1381,12 @@ async function authorEnglishEntry(
   const candidateId = englishCandidateId(entryId, request.lang);
   const authored = await callAndRecord(
     options,
-    options.modelConfigs.entryAuthor,
+    modelConfig(
+      "entry-author",
+      options.modelConfigs.author,
+      "english-entry-author-v2",
+      englishEntrySchemaFor(options.repository.labelVocabulary(), request.lang !== "en")
+    ),
     englishEntryAuthorPrompt(candidateId, headword, request, sources),
     request.mode,
     candidateId
@@ -1916,7 +1935,13 @@ function englishSourceSenseIdentity(sense: EnglishSourceRecord["senses"][number]
   ]);
 }
 
-export function createEnglishOnDemandEvaluationContracts(models: EnglishModelSelection) {
+export function createEnglishOnDemandEvaluationContracts(
+  models: EnglishModelSelection,
+  // The evaluation compares models on a fixture corpus, so it declares the
+  // narrow label set those fixtures use. Production reads its vocabulary from
+  // the dictionary instead.
+  vocabulary: EnglishLabelVocabulary = { partOfSpeech: new Set(["noun", "verb", "adjective", "adverb"]) }
+) {
   const configs = englishModelConfigs(models);
   return {
     eligibility: {
@@ -1924,7 +1949,7 @@ export function createEnglishOnDemandEvaluationContracts(models: EnglishModelSel
       prompt(candidate: string) { return englishEligibilityPrompt({ query: candidate, targetDictionary: "en", lang: "en" }); }
     },
     entryAuthor: {
-      ...configs.entryAuthor,
+      ...modelConfig("entry-author", configs.author, "english-entry-author-v2", englishEntrySchemaFor(vocabulary, false)),
       prompt(candidateId: string, headword: string, sources: EnglishSourceRecord[], sentence = "") {
         return englishEntryAuthorPrompt(candidateId, headword, {
           query: headword,

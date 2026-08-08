@@ -73,9 +73,8 @@ The Japanese canonical store uses concise `ja_*` tables. `ja_senses` carries the
 - `YORI_ENRICHMENT_TOKEN` protects `enrich=true` lookup requests.
 - `YORI_DB_PATH` selects the canonical production SQLite database; Railway uses `/data/yori.sqlite`.
 - `YORI_ENGLISH_DICTIONARY_VERSION` selects the English source version used only when a new database is bootstrapped.
-- `YORI_ENGLISH_AUTHOR_MODEL` and `YORI_ENGLISH_REVIEW_MODEL` explicitly enable the
-  English configuration selected by the blind comparison; English enrichment remains off
-  when either is absent.
+- English enrichment is always on and needs no variable; the author and reviewer
+  models are pinned in code exactly as Japanese.
 - `YORI_JA_SOURCE_EVIDENCE_PATHS` is a comma-separated list of indexed source-evidence JSONL files.
 - `YORI_ENRICHMENT_CONCURRENCY` globally bounds combined Japanese and English model work;
   `YORI_MODEL_TIMEOUT_MS` bounds each attempt.
