@@ -120,18 +120,32 @@ test("a rebuild retains accepted generated content and does not reorder imported
       evidenceIds: []
     }]
   }, "zh-tw", generation);
+  // An authored group written from licensed evidence carries source
+  // provenance. It is still enrichment, and a rebuild must keep it.
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      id: "yori:s_sourced_school:ko:1",
+      position: 1,
+      appliesTo: { kanji: ["*"], kana: ["*"] },
+      partOfSpeech: ["n"],
+      glosses: [{ lang: "ko", text: "학교", source: "jmdict", reviewStatus: "source" }],
+      provenance: "source",
+      evidenceIds: ["jmdict:1000001"]
+    }]
+  }, "ko", generation);
   const importedSenseId = imported.senses[0].id;
   repository.saveExample(importedSenseId, {
     text: "学校へ行きます。",
     translations: [{ lang: "en", text: "I go to school." }],
     source: "generated",
     reviewStatus: "checked"
-  }, generation);
+  }, exampleGeneration);
   repository.close();
   lookup.close();
 
   const result = await rebuildJapaneseDictionary({ input: "fixtures/jmdict-sample.json", out });
-  expect(result.retained).toEqual({ entries: 1, groups: 1, examples: 1 });
+  expect(result.retained).toEqual({ entries: 1, groups: 2, examples: 1 });
 
   const reopened = openLookupDb(out);
   const generated = reopened.lookup("未知語", "en").item;
@@ -143,15 +157,25 @@ test("a rebuild retains accepted generated content and does not reorder imported
   expect(taiwanese?.id).toBe(reopened.lookup("学校", "en").item?.id);
   expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
   expect(taiwanese?.senses[0].provenance).toBe("generated");
+  // The source-provenance authored group survived too: enrichment is marked by
+  // its generation reference, not by every meaning claiming to be generated.
+  expect(reopened.lookup("学校", "ko").item?.senses[0].glosses[0].text).toBe("학교");
   expect(reopened.lookup("学校", "en").item?.senses[0].examples?.[0].text).toBe("学校へ行きます。");
   // A generated addition never renumbers imported meanings.
   expect(reopened.lookup("食べる", "en").item?.senses[0].position).toBe(1);
   reopened.close();
 
   const db = new Database(out, { readonly: true });
-  expect(db.query<{ model: string; review_outcome: string }, []>(
-    "select model, review_outcome from ja_generations"
-  ).all()).toEqual([{ model: "gpt-5.6-luna", review_outcome: "accepted" }]);
+  expect(db.query<{ prompt_version: string }, []>(
+    "select distinct prompt_version from ja_generations order by prompt_version"
+  ).all()).toEqual([{ prompt_version: "entry-author-v1" }, { prompt_version: "example-author-v1" }]);
+  // Retained content never points at a generation row the rebuild left behind.
+  for (const table of ["ja_senses", "ja_examples"]) {
+    expect(db.query<{ count: number }, []>(`
+      select count(*) as count from ${table}
+       where generation_id is not null and generation_id not in (select id from ja_generations)
+    `).get()?.count).toBe(0);
+  }
   db.close();
 });
 
@@ -169,6 +193,17 @@ test("a failed rebuild leaves the previous database usable", async () => {
   lookup.close();
   expect((await Array.fromAsync(new Bun.Glob("*.tmp").scan({ cwd: root }))).length).toBe(0);
 });
+
+/** A later run of the same model: its own row, its own creation time. */
+const exampleGeneration = {
+  model: "gpt-5.6-luna",
+  provider: "openrouter",
+  reasoningEffort: "minimal",
+  promptVersion: "example-author-v1",
+  serviceTier: "flex",
+  reviewOutcome: "accepted",
+  createdAt: "2026-08-08T01:00:00.000Z"
+};
 
 const generation = {
   model: "gpt-5.6-luna",

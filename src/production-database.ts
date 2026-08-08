@@ -75,7 +75,7 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
           create temp table retained_en_senses as
             select sense.* from en_senses sense
             join en_entries entry on entry.id = sense.entry_id
-            where sense.provenance = 'generated' and entry.source <> 'generated';
+            where sense.generation_id is not null and entry.source <> 'generated';
           create temp table retained_en_glosses as
             select gloss.* from en_glosses gloss
             where gloss.sense_id in (select id from retained_en_senses);
@@ -84,7 +84,7 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
             join en_senses sense on sense.id = example.sense_id
             join en_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated'
-              and (example.source = 'generated' or sense.provenance = 'generated');
+              and (example.source = 'generated' or sense.generation_id is not null);
           delete from en_examples where sense_id in (
             select sense.id from en_senses sense join en_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated'
@@ -174,7 +174,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           create temp table retained_ja_senses as
             select sense.* from ja_senses sense
             join ja_entries entry on entry.id = sense.entry_id
-            where sense.provenance = 'generated' and entry.source <> 'generated';
+            where sense.generation_id is not null and entry.source <> 'generated';
           create temp table retained_ja_glosses as
             select gloss.* from ja_glosses gloss
             where gloss.sense_id in (select id from retained_ja_senses);
@@ -183,7 +183,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
             join ja_senses sense on sense.id = example.sense_id
             join ja_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated'
-              and (example.source = 'generated' or sense.provenance = 'generated');
+              and (example.source = 'generated' or sense.generation_id is not null);
           delete from ja_examples where sense_id in (
             select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated'

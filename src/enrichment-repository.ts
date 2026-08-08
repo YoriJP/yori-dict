@@ -268,12 +268,18 @@ export function openEnrichmentRepository(
   }
 }
 
+/**
+ * One row per generation run. The creation time is part of the identity, so
+ * two runs of the same model and prompt keep their own timestamps instead of
+ * collapsing onto the first run's provenance.
+ */
 function generationId(generation: GenerationProvenance): string {
   return [
     generation.provider,
     generation.model,
     generation.promptVersion,
     generation.reasoningEffort,
-    generation.serviceTier ?? "unset"
+    generation.serviceTier ?? "unset",
+    generation.createdAt
   ].join("|");
 }

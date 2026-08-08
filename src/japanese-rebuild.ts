@@ -77,6 +77,8 @@ type Retained = {
   entries: RetainedEntry[];
   groups: RetainedGroup[];
   examples: Array<Record<string, unknown>>;
+  /** Generations referenced by retained examples on imported meanings. */
+  exampleGenerations: Array<Record<string, unknown>>;
 };
 
 type RetainedEntry = {
@@ -492,7 +494,7 @@ function importLegacyExamples(
 }
 
 function emptyRetained(): Retained {
-  return { entries: [], groups: [], examples: [] };
+  return { entries: [], groups: [], examples: [], exampleGenerations: [] };
 }
 
 /**
@@ -532,11 +534,15 @@ function readRetained(path: string): Retained {
         examples: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
           "select * from ja_examples where sense_id = ? order by position"
         ).all(senseId)),
-        generations: db.query<Record<string, unknown>, [string]>(`
-          select distinct generation.* from ja_generations generation
-            join ja_senses sense on sense.generation_id = generation.id
-           where sense.entry_id = ?
-        `).all(entryId)
+        generations: db.query<Record<string, unknown>, [string, string]>(`
+          select * from ja_generations where id in (
+            select generation_id from ja_senses where entry_id = ? and generation_id is not null
+            union
+            select example.generation_id from ja_examples example
+              join ja_senses sense on sense.id = example.sense_id
+             where sense.entry_id = ? and example.generation_id is not null
+          )
+        `).all(entryId, entryId)
       };
     });
 
@@ -547,7 +553,7 @@ function readRetained(path: string): Retained {
       select sense.entry_id as entry_id, sense.lang as lang
         from ja_senses sense
         join ja_entries entry on entry.id = sense.entry_id
-       where sense.provenance = 'generated' and entry.source <> 'generated'
+       where sense.generation_id is not null and entry.source <> 'generated'
        group by sense.entry_id, sense.lang
        order by sense.entry_id, sense.lang
     `).all().map<RetainedGroup>(({ entry_id: entryId, lang }) => {
@@ -565,11 +571,16 @@ function readRetained(path: string): Retained {
         examples: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
           "select * from ja_examples where sense_id = ? order by position"
         ).all(senseId)),
-        generations: db.query<Record<string, unknown>, [string, string]>(`
-          select distinct generation.* from ja_generations generation
-            join ja_senses sense on sense.generation_id = generation.id
-           where sense.entry_id = ? and sense.lang = ?
-        `).all(entryId, lang)
+        generations: db.query<Record<string, unknown>, [string, string, string, string]>(`
+          select * from ja_generations where id in (
+            select generation_id from ja_senses
+             where entry_id = ? and lang = ? and generation_id is not null
+            union
+            select example.generation_id from ja_examples example
+              join ja_senses sense on sense.id = example.sense_id
+             where sense.entry_id = ? and sense.lang = ? and example.generation_id is not null
+          )
+        `).all(entryId, lang, entryId, lang)
       };
     });
 
@@ -582,7 +593,16 @@ function readRetained(path: string): Retained {
        order by example.sense_id, example.position
     `).all().filter((example) => !retainedSenseIds.has(String(example.sense_id)));
 
-    return { entries, groups, examples };
+    // A generated example on an imported meaning carries its own generation
+    // reference, so the row it points at is retained with it.
+    const exampleGenerationIds = [...new Set(
+      examples.map((example) => example.generation_id).filter((id): id is string => typeof id === "string")
+    )];
+    const exampleGenerations = exampleGenerationIds.length === 0 ? [] : db.query<Record<string, unknown>, string[]>(
+      `select * from ja_generations where id in (${exampleGenerationIds.map(() => "?").join(", ")})`
+    ).all(...exampleGenerationIds);
+
+    return { entries, groups, examples, exampleGenerations };
   } finally {
     db.close();
   }
@@ -630,6 +650,9 @@ function restoreRetained(
       for (const gloss of group.glosses) insertRow(db, "ja_glosses", gloss, false);
       for (const example of group.examples) insertRow(db, "ja_examples", example, false);
       groups += 1;
+    }
+    for (const generation of retained.exampleGenerations) {
+      insertRow(db, "ja_generations", generation, true);
     }
     for (const example of retained.examples) {
       const senseId = String(example.sense_id);
