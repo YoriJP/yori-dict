@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { normalizeEnglishLookupTerm, openEnglishLookupDb } from "../src/english-
 import { openEnglishEnrichmentRepository } from "../src/english-enrichment-repository";
 import { rebuildEnglishDictionary, type EnglishSourceInput } from "../src/english-rebuild";
 import { migrateProductionDatabase } from "../src/production-database";
-import { createStoredZip } from "../src/stored-zip";
+import { createStoredZip, openZipArchive } from "../src/stored-zip";
 import type { EnglishEntry } from "../src/english-types";
 
 const pinnedArchive = "sources/english/raw/english-wordnet-2025-json.zip";
@@ -235,9 +235,9 @@ test("rebuilding twice from the pinned archive is byte-identical in the source's
 
 /** Reads the archive's own sense order for one entry, straight from the source. */
 function oewnSenseOrder(file: string, headword: string): string[] {
-  const document = JSON.parse(
-    Bun.spawnSync(["unzip", "-p", pinnedArchive, file]).stdout.toString()
-  ) as Record<string, Record<string, { sense?: Array<{ id: string }> }>>;
+  const archive = openZipArchive(new Uint8Array(readFileSync(pinnedArchive)));
+  const document = JSON.parse(archive.text(file)) as
+    Record<string, Record<string, { sense?: Array<{ id: string }> }>>;
   return Object.entries(document)
     .filter(([key]) => normalizeEnglishLookupTerm(key) === headword)
     .flatMap(([, entry]) => Object.values(entry).flatMap((block) =>

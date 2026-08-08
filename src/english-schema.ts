@@ -11,8 +11,13 @@ import type { Database } from "bun:sqlite";
  * languages. English explanations of English headwords are simply the group
  * whose `lang` is `en`; another explanation language is more rows, not another
  * table.
+ *
+ * `en-1` was the earlier blob shape, where one `english_entries` row held a whole
+ * entry as JSON and every meaning was English. `en-2` is this normalized shape,
+ * so a reader can tell the two artifact generations apart, exactly as `ja-2`
+ * distinguishes the Japanese rebuild from the tables it replaced.
  */
-export const englishSchemaVersion = "en-1";
+export const englishSchemaVersion = "en-2";
 
 export const englishCanonicalTables = [
   "en_metadata",

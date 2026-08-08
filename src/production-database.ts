@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
@@ -26,12 +26,15 @@ export async function ensureJapaneseProductionDatabase(path: string): Promise<bo
     throw new Error(`Production database exists without a Japanese dictionary: ${path}`);
   }
   await downloadPinnedDataRelease({ outPath: path });
-  // A release published before the `ja_*` rebuild cannot be served. Fail here
-  // rather than starting on a database no lookup can read.
+  // A release published before the `ja_*` rebuild cannot be served. Discard it
+  // and fail here rather than starting on a database no lookup can read, and
+  // rather than leaving an unusable file that confuses the next start.
   if (!hasJapaneseDictionary(path)) {
+    rmSync(path, { force: true });
     throw new Error(
-      `Pinned data release does not use the ja_* canonical schema: ${path}. ` +
-        "Publish a rebuilt release, or build locally with bun run build:db."
+      `The release pinned in data-release.json predates the ja-2 canonical schema, ` +
+        `so it has no ja_* tables to serve: ${path}. Publish a Japanese release built ` +
+        "by bun run japanese:release and re-pin it, or build locally with bun run build:db."
     );
   }
   return true;

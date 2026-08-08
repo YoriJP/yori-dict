@@ -8,6 +8,7 @@ import { openEnrichmentRepository } from "../src/enrichment-repository";
 import { buildJapaneseRelease, type JapaneseReleaseArtifacts } from "../src/japanese-release";
 import { migrateProductionDatabase } from "../src/production-database";
 import type { ApiLang, PublicLookupItem } from "../src/types";
+import { openZipFile } from "../src/stored-zip";
 
 const kana = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const han = /\p{Script=Han}/u;
@@ -119,9 +120,9 @@ test("no release artifact mixes explanation languages", async () => {
   // packs of two languages never share a term list.
   const packs = new Map<string, string[]>();
   for (const [lang, path] of Object.entries(artifacts.yomitan)) {
-    const index = JSON.parse(await Bun.$`unzip -p ${path} index.json`.text());
+    const index = JSON.parse(await packEntry(path, "index.json"));
     expect(index.description).toContain(lang);
-    const terms = JSON.parse(await Bun.$`unzip -p ${path} term_bank_1.json`.text()) as unknown[][];
+    const terms = JSON.parse(await packEntry(path, "term_bank_1.json")) as unknown[][];
     const definitions = terms.flatMap((term) => term[5] as string[]);
     expect(definitions.filter((text) => foreignToLanguage(lang, text))).toEqual([]);
     packs.set(lang, definitions);
@@ -134,24 +135,20 @@ test("imported gloss language survives release into its own pack", async () => {
   const { artifacts } = await release();
   // 学校 is a fixture entry with both English and German imported glosses on
   // the same JMdict meaning.
-  const germanTerms = JSON.parse(
-    await Bun.$`unzip -p ${artifacts.yomitan.de} term_bank_1.json`.text()
-  ) as unknown[][];
+  const germanTerms = JSON.parse(await packEntry(artifacts.yomitan.de, "term_bank_1.json")) as unknown[][];
   expect(germanTerms.map((term) => [term[0], term[5]])).toEqual([
     ["学校", ["Schule"]],
     ["食べる", ["essen"]]
   ]);
 
-  const englishTerms = JSON.parse(
-    await Bun.$`unzip -p ${artifacts.yomitan.en} term_bank_1.json`.text()
-  ) as unknown[][];
+  const englishTerms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
   const english = englishTerms.find((term) => term[0] === "学校");
   expect(english?.[5]).toEqual(["school"]);
 });
 
 test("a Yomitan pack keeps its language's meaning order and coexists with the others", async () => {
   const { artifacts } = await release();
-  const terms = JSON.parse(await Bun.$`unzip -p ${artifacts.yomitan.en} term_bank_1.json`.text()) as unknown[][];
+  const terms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
   const generated = terms.find((term) => term[0] === "未知語");
   expect(generated?.[5]).toEqual(["unknown term", "unlisted word"]);
 
@@ -250,4 +247,9 @@ function addLegacyTaiwaneseMeaning(path: string, baseSenseId: string, gloss: str
     "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, ?, 'generated', 'checked')"
   ).run(`${baseSenseId}:zh-tw`, gloss);
   db.close();
+}
+
+/** Reads one file out of a produced Yomitan pack. */
+async function packEntry(path: string, name: string): Promise<string> {
+  return (await openZipFile(path)).text(name);
 }

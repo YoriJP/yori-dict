@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { englishEntryId, englishSenseId, normalizeEnglishLookupTerm } from "./english-dictionary";
 import {
   importOpenEnglishWordNetEntry,
@@ -28,6 +28,7 @@ import {
   type JapaneseWordNetRecord,
   type TaiwanTerminologyRecord
 } from "../scripts/english-evidence-sources";
+import { openZipFile, type ZipArchive } from "./stored-zip";
 import type { EnglishSourceRecord } from "./english-types";
 
 /**
@@ -496,7 +497,9 @@ function writeMetadata(
       version: source.version,
       license: source.license ?? defaultLicense(source.source),
       attribution: source.attribution ?? defaultAttribution(source.source),
-      file: source.file,
+      // The archive's own name, never the builder's path: a manifest describes
+      // the pinned artifact, and must read the same on any machine.
+      file: basename(source.file),
       ...(source.sha256 ? { sha256: source.sha256 } : {}),
       ...(source.url ? { url: source.url } : {}),
       role: source.source === englishSourcePolicy.primary ? "primary" : "fallback"
@@ -507,12 +510,16 @@ function writeMetadata(
       version: source.version,
       license: source.license,
       attribution: source.attribution,
-      file: source.file,
+      file: basename(source.file),
       ...(source.sha256 ? { sha256: source.sha256 } : {}),
       ...(source.url ? { url: source.url } : {}),
       role: "language-direct-import",
       ...(source.source === "japanese-wordnet"
-        ? { mappingSource: source.mappingSource, mappingVersion: source.mappingVersion, mappings: source.mappings }
+        ? {
+            mappingSource: source.mappingSource,
+            mappingVersion: source.mappingVersion,
+            mappings: basename(source.mappings)
+          }
         : {})
     }))
   ]));
@@ -529,11 +536,11 @@ async function importPrimary(
   entryFiles: string[] | null,
   entries: Map<string, PendingEntry>
 ): Promise<{ entries: number; meanings: number }> {
-  const archive = resolve(source.file);
-  const names = await listArchive(archive);
+  const archive = await openArchive(resolve(source.file));
+  const names = archive.names;
   const synsets = new Map<string, OewnSynset>();
   for (const name of names.filter((name) => /^(noun|verb|adj|adv)\..+\.json$/.test(name)).sort()) {
-    for (const [id, synset] of Object.entries(await readArchiveJson(archive, name))) {
+    for (const [id, synset] of Object.entries(readArchiveJson(archive, name))) {
       if (synset && typeof synset === "object" && !Array.isArray(synset)) synsets.set(id, synset as OewnSynset);
     }
   }
@@ -542,7 +549,7 @@ async function importPrimary(
   const counts = { entries: 0, meanings: 0 };
   for (const name of names.filter((name) => /^entries-.+\.json$/.test(name)).sort()) {
     if (wanted && !wanted.has(name)) continue;
-    const document = await readArchiveJson(archive, name);
+    const document = readArchiveJson(archive, name);
     for (const [headword, raw] of Object.entries(document)) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
       const records = importOpenEnglishWordNetEntry(
@@ -953,14 +960,13 @@ function defaultAttribution(source: string): string {
   return source === englishSourcePolicy.primary ? oewnAttribution : wiktionaryAttribution;
 }
 
-async function listArchive(path: string): Promise<string[]> {
+async function openArchive(path: string): Promise<ZipArchive> {
   if (!path.endsWith(".zip")) throw new Error(`Expected a zipped Open English WordNet archive: ${path}`);
-  const listing = await Bun.$`unzip -Z1 ${path}`.text();
-  return listing.split("\n").map((name) => name.trim()).filter(Boolean);
+  return openZipFile(path);
 }
 
-async function readArchiveJson(path: string, name: string): Promise<Record<string, unknown>> {
-  return JSON.parse(await Bun.$`unzip -p ${path} ${name}`.text()) as Record<string, unknown>;
+function readArchiveJson(archive: ZipArchive, name: string): Record<string, unknown> {
+  return JSON.parse(archive.text(name)) as Record<string, unknown>;
 }
 
 async function readLines(path: string): Promise<string[]> {

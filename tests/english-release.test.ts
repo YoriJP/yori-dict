@@ -3,10 +3,10 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { buildEnglishRelease } from "../src/english-release";
 import { rebuildEnglishDictionary, type EnglishSourceInput } from "../src/english-rebuild";
-import { createStoredZip } from "../src/stored-zip";
+import { createStoredZip, openZipFile } from "../src/stored-zip";
 
 test("the English release is deterministic and keeps the source's meaning order end to end", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-release-"));
@@ -28,7 +28,7 @@ test("the English release is deterministic and keeps the source's meaning order 
   expect(manifest).toMatchObject({
     dictionary: "en",
     artifactVersion: "2026.08.1",
-    schemaVersion: "en-1",
+    schemaVersion: "en-2",
     dictionaryVersion: "2026.08.1",
     entries: 3,
     sourcePolicy: {
@@ -47,7 +47,7 @@ test("the English release is deterministic and keeps the source's meaning order 
       version: "2025-fixture",
       license: "CC-BY-4.0",
       attribution: "Open English WordNet contributors",
-      file: sources[0].file,
+      file: basename(sources[0].file),
       sha256: "oewn-fixture-checksum",
       role: "primary"
     },
@@ -57,7 +57,7 @@ test("the English release is deterministic and keeps the source's meaning order 
       version: "2026-07-06-fixture",
       license: "CC-BY-SA-4.0 AND GFDL-1.1-or-later",
       attribution: "Simple English Wiktionary contributors; extracted with Wiktextract",
-      file: sources[1].file,
+      file: basename(sources[1].file),
       sha256: "simple-fixture-checksum",
       role: "fallback"
     }
@@ -90,8 +90,8 @@ test("the English release is deterministic and keeps the source's meaning order 
   });
   expect(JSON.stringify(bank)).not.toContain("rawRecord");
 
-  const index = JSON.parse(await Bun.$`unzip -p ${firstRelease.yomitan.en} index.json`.text());
-  const terms = JSON.parse(await Bun.$`unzip -p ${firstRelease.yomitan.en} term_bank_1.json`.text());
+  const index = JSON.parse(await packEntry(firstRelease.yomitan.en, "index.json"));
+  const terms = JSON.parse(await packEntry(firstRelease.yomitan.en, "term_bank_1.json"));
   expect(index).toMatchObject({ title: "Yori English–English", format: 3, revision: "2026.08.1" });
   const bankTerm = terms.find((term: unknown[]) => term[0] === "bank")!;
   expect(bankTerm.slice(0, 5)).toEqual(["bank", "", "noun", "", 0]);
@@ -164,4 +164,9 @@ async function fixtureWiktionary(root: string): Promise<EnglishSourceInput> {
     file,
     sha256: "simple-fixture-checksum"
   };
+}
+
+/** Reads one file out of a produced Yomitan pack. */
+async function packEntry(path: string, name: string): Promise<string> {
+  return (await openZipFile(path)).text(name);
 }

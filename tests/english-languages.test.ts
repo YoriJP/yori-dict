@@ -14,7 +14,7 @@ import {
 } from "../src/english-rebuild";
 import { buildEnglishRelease, type EnglishReleaseArtifacts } from "../src/english-release";
 import { migrateProductionDatabase } from "../src/production-database";
-import { createStoredZip } from "../src/stored-zip";
+import { createStoredZip, openZipFile } from "../src/stored-zip";
 import {
   createEnglishOnDemandDictionary,
   type ModelGateway,
@@ -183,9 +183,9 @@ test("no English release artifact leaks one explanation language into another", 
   // for only the headwords that language explains, in that language's order.
   const definitions = new Map<string, string[]>();
   for (const [lang, path] of Object.entries(artifacts.yomitan)) {
-    const index = JSON.parse(await Bun.$`unzip -p ${path} index.json`.text());
+    const index = JSON.parse(await packEntry(path, "index.json"));
     expect(index.description).toContain(lang);
-    const terms = JSON.parse(await Bun.$`unzip -p ${path} term_bank_1.json`.text()) as unknown[][];
+    const terms = JSON.parse(await packEntry(path, "term_bank_1.json")) as unknown[][];
     const texts = terms.flatMap((term) => term[5] as string[]);
     expect(texts.filter((text) => foreignToLanguage(lang, text))).toEqual([]);
     definitions.set(lang, texts);
@@ -619,4 +619,9 @@ class ScriptedGateway implements ModelGateway {
       outputTokens: 10
     };
   }
+}
+
+/** Reads one file out of a produced Yomitan pack. */
+async function packEntry(path: string, name: string): Promise<string> {
+  return (await openZipFile(path)).text(name);
 }
