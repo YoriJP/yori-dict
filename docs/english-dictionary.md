@@ -40,6 +40,30 @@ The policy is explicit and deterministic, and no model takes part in it.
 Imported examples are kept where a source maps them exactly to a meaning; accepted generated
 examples are appended after them and keep their own provenance.
 
+### Japanese and Taiwanese Chinese meanings
+
+Each explanation language has its own direct-import source, configured under
+`languageSources` in the lock. Both go through `classifySourceRecord`, the one gate the
+evidence pipeline also uses, so a record becomes a canonical `ja` or `zh-tw` meaning only
+when it carries its own target-language meaning text, reaches the English entry through an
+exact source identifier or a validated mapping, and records license, attribution and
+version.
+
+- **Japanese WordNet** enters through a validated Princeton WordNet/ILI mapping, matched to
+  the Open English WordNet concept the English meaning already names. The published meaning
+  keeps the mapping source and version in its attribution. A record with no Japanese
+  definition is supporting evidence and publishes nothing.
+- **Taiwan government terminology** enters only through its own English/Chinese term pair,
+  for a headword the English inventory already carries, and keeps its agency, dataset,
+  domain and version. It never creates an English headword, and it is authoritative only
+  inside its stated domain, so the domain travels with the meaning. A bare term pair is
+  evidence, not content.
+
+Neither file is committed; both point at operator-supplied downloads, so a build without
+them simply produces no imported meanings in that language. Everything else in `ja` and
+`zh-tw` is independently authored and reviewed. Traditional characters and character
+conversion never make content Taiwanese; there is no conversion path in the code.
+
 ## Build and publish
 
 The pinned source archives are committed under `sources/english/raw/`. Rebuild the whole
@@ -71,9 +95,10 @@ filtered source evidence produced separately by `bun run english:evidence`. See
 import artifact and never a release table.
 
 English lookup uses the same v1 contract as Japanese: `dictionary=en` with an explicit
-`lang`. English content is currently authored in English only, so `lang=en` is the one
-supported pair; another language is a request error rather than an English answer in
-disguise. The response uses the shared base entry shape — id, dictionary, lang, headword,
+`lang`. English headwords are explained in `en`, `ja` and `zh-tw`. A lookup returns that
+one language's complete ordered group or `null`; it never falls back to another language,
+and an unsupported pair is a request error rather than an answer in disguise. The response
+uses the shared base entry shape — id, dictionary, lang, headword,
 headwords, meanings, sources — and English keeps its pronunciations. Public lookup reads the
 canonical tables and makes zero model calls; it returns `null` only for absent or rejected
 content.
@@ -93,11 +118,32 @@ English artifacts remain independently versioned.
 Enrichment is language scoped, like Japanese: `saveEntry(entry, lang, generation)` writes
 exactly one entry-language group atomically. Owner-authorized lookup fills only a missing
 entry, a missing explanation-language group, or a missing generated example — correct
-imported meanings are never rewritten. One author request writes the complete missing group
-and one separate reviewer accepts or rejects it; examples are authored and reviewed
-independently, one meaning at a time, and one useful learner example per meaning is enough.
-A rejected example is not saved and stays retryable on a later owner lookup; a malformed
-model response is terminal so a candidate the model cannot form does not loop.
+imported meanings are never rewritten, and short imported content is not treated as
+missing. One author request writes the complete missing group and one separate reviewer
+accepts or rejects it; examples are authored and reviewed independently, one meaning at a
+time, and one useful learner example per meaning is enough. A rejected example is not saved
+and stays retryable on a later owner lookup; a malformed model response is terminal so a
+candidate the model cannot form does not loop.
+
+`ja` and `zh-tw` groups are siblings of the English group, not translations of it. Each has
+its own author request, reviewer, retries, terminal outcome and persistence key, keyed by
+entry *and* language, so the two may run concurrently and one rejection publishes nothing
+and leaves the other untouched. The author reads the English facts as reference but writes
+the group itself, and may divide meanings differently from English.
+
+Three deterministic checks run before the reviewer sees a candidate. A meaning must be
+authored — it may not claim an English evidence identifier, which is the shape a
+meaning-by-meaning translation would take. Every definition must be written in the target
+language's script, and a `zh-tw` definition containing reviewed Mainland terminology is
+rejected. No definition may repeat the English group's wording. What they cannot detect is
+fluent, correctly divided target-language wording that was nevertheless arrived at by
+translating the English meanings; the prompt states that rule and the separate reviewer
+judges it.
+
+A generated example for a non-English group is one bilingual pair: the English sentence
+must contain the headword, and its paired sentence must be written in that group's
+language. The pair is stored on the meaning that owns it, so Japanese and Chinese examples
+stay separate even when their English sentences look alike.
 
 The English path rejects obvious names, wrong-script text, fragments, markup, URLs, and
 numbers before eligibility. Genuine words, compounds, phrasal verbs, idioms,

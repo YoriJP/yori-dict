@@ -58,6 +58,9 @@ test("Open English WordNet import keeps the lexical entry's own sense order and 
   ]);
   expect(records[0].senses[0]).toEqual({
     evidenceId: "open-english-wordnet:bank%1:14:00::",
+    // The source's own concept identifier, which another source's validated
+    // concept mapping can name.
+    synset: "08420278-n",
     partOfSpeech: "noun",
     glosses: ["a financial institution that accepts deposits"],
     registers: [],

@@ -86,6 +86,10 @@ wording but is not a direct-import candidate, because it carries no Taiwanese me
 Both mapped sources are configured in the lock and point at operator-supplied downloads.
 A configured but absent file is skipped with a warning so the Wiktionary filter still runs.
 
+The English rebuild reads the same two mapped sources through the same gate when
+`languageSources` is configured, so what may become a canonical `ja` or `zh-tw` meaning is
+decided in one place. See [Independent English dictionary](english-dictionary.md).
+
 ## Taiwanese labelling
 
 `zh-tw` is assigned only when Taiwan government terminology corroborates the exact term.

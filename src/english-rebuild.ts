@@ -20,6 +20,14 @@ import {
   readCoverage,
   type EnglishLanguageCoverage
 } from "./english-schema";
+import {
+  classifySourceRecord,
+  importJapaneseWordNetEvidence,
+  importTaiwanTerminology,
+  type IliMapping,
+  type JapaneseWordNetRecord,
+  type TaiwanTerminologyRecord
+} from "../scripts/english-evidence-sources";
 import type { EnglishSourceRecord } from "./english-types";
 
 /**
@@ -36,8 +44,63 @@ import type { EnglishSourceRecord } from "./english-types";
  */
 export const englishSourcePolicy = {
   primary: "open-english-wordnet",
-  fallback: "wiktionary"
+  fallback: "wiktionary",
+  ja: "japanese-wordnet through a validated Princeton WordNet/ILI mapping",
+  "zh-tw": "Taiwan government terminology inside its stated domain"
 } as const;
+
+/**
+ * A pinned source that may publish canonical meanings in an explanation
+ * language other than English.
+ *
+ * Both are read through the same gate the evidence pipeline uses
+ * (`classifySourceRecord`): a record becomes canonical only when it carries its
+ * own target-language meaning text, reaches the English entry through an exact
+ * source identifier or a validated mapping, and records license, attribution
+ * and version. A bare term pair or an unmapped record stays evidence and
+ * publishes nothing.
+ */
+export type EnglishLanguageSourceInput =
+  | {
+      lang: "ja";
+      source: "japanese-wordnet";
+      version: string;
+      /** JSONL of `{synset, lemma, lang, definition}` records. */
+      file: string;
+      /** JSONL of `{synset, ili, pwnSynset, validated}` mapping rows. */
+      mappings: string;
+      mappingSource: string;
+      mappingVersion: string;
+      license: string;
+      attribution: string;
+      sha256?: string;
+      url?: string;
+    }
+  | {
+      lang: "zh-tw";
+      source: "taiwan-terminology";
+      /** Pinned dataset version; each row also keeps the version it declares. */
+      version: string;
+      /** JSONL of Taiwan government terminology records with their own provenance. */
+      file: string;
+      license: string;
+      attribution: string;
+      sha256?: string;
+      url?: string;
+    };
+
+export type EnglishLanguageImportResult = {
+  /** Records the gate accepted for direct import. */
+  eligible: number;
+  /** Meanings actually published, after resolving the English entry. */
+  imported: number;
+  /** Records that stay evidence because the direct-import contract is unmet. */
+  evidenceOnly: number;
+  /** Eligible records whose English entry this rebuild does not carry. */
+  unmatched: number;
+  /** Records the mapped-source importer rejected outright. */
+  rejected: number;
+};
 
 export type EnglishSourceInput = {
   source: "open-english-wordnet" | "wiktionary";
@@ -60,6 +123,12 @@ export type EnglishRebuildOptions = {
    * as one extra canonical meaning: `{"evidenceId": "wiktionary:..."}`.
    */
   secondaryMappings?: string[];
+  /**
+   * Pinned sources for explanation languages other than English. They add
+   * sibling meaning groups to entries the English inventory already carries;
+   * they never create, reorder or rewrite the English group.
+   */
+  languageSources?: EnglishLanguageSourceInput[];
   /** Limits which lexical-entry files of the archive are read. Tests rebuild a slice. */
   wordnetEntryFiles?: string[] | null;
   /**
@@ -79,6 +148,8 @@ export type EnglishRebuildResult = {
   secondary: { imported: number; droppedUnknownEvidence: number };
   pronunciations: { primary: number; fallback: number };
   retained: { entries: number; examples: number };
+  /** Direct-import outcome per explanation language other than English. */
+  languages: Record<string, EnglishLanguageImportResult>;
 };
 
 type PendingEntry = {
@@ -158,6 +229,7 @@ async function buildInto(
 
   writeMetadata(db, options, primarySource, fallbackSource);
   const pronunciations = writeEntries(db, entries, reference.byTerm);
+  const languages = await importLanguageGroups(db, options.languageSources ?? [], entries);
   const retainedResult = restoreRetained(db, retained);
 
   return {
@@ -167,8 +239,231 @@ async function buildInto(
     fallback: { entries: reference.entries, meanings: reference.meanings, referenceOnly: reference.referenceOnly },
     secondary,
     pronunciations,
-    retained: retainedResult
+    retained: retainedResult,
+    languages
   };
+}
+
+/** One canonical meaning to publish in an explanation language other than English. */
+type LanguageMeaning = {
+  lookupTerm: string;
+  evidenceId: string;
+  definition: string;
+  partOfSpeech: string;
+  domains: string[];
+  sourceName: string;
+  sourceVersion: string;
+  sourceEntryId: string;
+  license: string;
+  attribution: string;
+};
+
+/**
+ * Publishes sibling explanation-language groups from pinned mapped sources.
+ *
+ * Each language group gets its own meaning identifiers and its own positions
+ * starting at 1. The English group is read only, for the concept mapping and
+ * the part-of-speech label; nothing here touches an English row.
+ */
+async function importLanguageGroups(
+  db: Database,
+  inputs: EnglishLanguageSourceInput[],
+  entries: Map<string, PendingEntry>
+): Promise<Record<string, EnglishLanguageImportResult>> {
+  const results: Record<string, EnglishLanguageImportResult> = {};
+  if (inputs.length === 0) return results;
+
+  const bySynset = new Map<string, Array<{ lookupTerm: string; partOfSpeech: string }>>();
+  for (const pending of entries.values()) {
+    for (const record of pending.records) {
+      for (const sense of record.senses) {
+        if (!sense.synset) continue;
+        const key = conceptKey(sense.synset);
+        const holders = bySynset.get(key) ?? [];
+        if (!holders.some((holder) => holder.lookupTerm === pending.lookupTerm)) {
+          holders.push({ lookupTerm: pending.lookupTerm, partOfSpeech: sense.partOfSpeech });
+        }
+        bySynset.set(key, holders);
+      }
+    }
+  }
+
+  const meanings: LanguageMeaning[] = [];
+  for (const input of inputs) {
+    const result = results[input.lang] ??= { eligible: 0, imported: 0, evidenceOnly: 0, unmatched: 0, rejected: 0 };
+    const produced = input.source === "japanese-wordnet"
+      ? await readJapaneseWordNetMeanings(input, bySynset, result)
+      : await readTaiwanTerminologyMeanings(input, entries, result);
+    meanings.push(...produced);
+  }
+
+  writeLanguageMeanings(db, meanings, results);
+  return results;
+}
+
+/** Japanese WordNet and Open English WordNet both key concepts on the PWN identifier. */
+function conceptKey(synset: string): string {
+  return synset.replace(/^[a-z]+-/, "");
+}
+
+async function readJapaneseWordNetMeanings(
+  input: Extract<EnglishLanguageSourceInput, { source: "japanese-wordnet" }>,
+  bySynset: Map<string, Array<{ lookupTerm: string; partOfSpeech: string }>>,
+  result: EnglishLanguageImportResult
+): Promise<LanguageMeaning[]> {
+  const records = (await readLines(resolve(input.file))).map((line) => JSON.parse(line) as JapaneseWordNetRecord);
+  const mappings = (await readLines(resolve(input.mappings))).map((line) => JSON.parse(line) as IliMapping);
+  const imported = importJapaneseWordNetEvidence(records, mappings, {
+    version: input.version,
+    license: input.license,
+    attribution: input.attribution,
+    mappingSource: input.mappingSource,
+    mappingVersion: input.mappingVersion
+  });
+  result.rejected += imported.rejected.length;
+
+  const meanings: LanguageMeaning[] = [];
+  for (const row of imported.accepted) {
+    if (row.role !== "direct-import-candidate" || !row.definition) {
+      result.evidenceOnly += 1;
+      continue;
+    }
+    result.eligible += 1;
+    const holders = bySynset.get(conceptKey(row.mapping.pwnSynset)) ?? [];
+    if (holders.length === 0) {
+      result.unmatched += 1;
+      continue;
+    }
+    for (const holder of holders) {
+      meanings.push({
+        lookupTerm: holder.lookupTerm,
+        evidenceId: row.evidenceId,
+        definition: row.definition,
+        partOfSpeech: holder.partOfSpeech,
+        domains: [],
+        sourceName: "japanese-wordnet",
+        sourceVersion: row.sourceVersion,
+        sourceEntryId: `${row.synset}:${row.lemma}`,
+        license: input.license,
+        attribution: `${input.attribution}; mapped through ${row.mapping.mappingSource} ${row.mapping.mappingVersion}`
+      });
+    }
+  }
+  return meanings;
+}
+
+async function readTaiwanTerminologyMeanings(
+  input: Extract<EnglishLanguageSourceInput, { source: "taiwan-terminology" }>,
+  entries: Map<string, PendingEntry>,
+  result: EnglishLanguageImportResult
+): Promise<LanguageMeaning[]> {
+  const records = (await readLines(resolve(input.file))).map((line) => JSON.parse(line) as TaiwanTerminologyRecord);
+  const imported = importTaiwanTerminology(records, { license: input.license });
+  result.rejected += imported.rejected.length;
+
+  const meanings: LanguageMeaning[] = [];
+  for (const row of imported.accepted) {
+    // Re-run the gate here rather than trusting the role written into the file.
+    const classification = classifySourceRecord({
+      sourceId: "taiwan-terminology",
+      sourceVersion: row.version,
+      recordId: row.evidenceId,
+      targetLocale: "zh-tw",
+      recordLocale: "zh-tw",
+      hasTargetLanguageMeaningStructure: row.definition !== null,
+      matchedBy: "source-identifier",
+      license: input.license,
+      attribution: row.attribution
+    });
+    if (!classification.eligible || !row.definition) {
+      result.evidenceOnly += 1;
+      continue;
+    }
+    result.eligible += 1;
+    const lookupTerm = normalizeEnglishLookupTerm(row.termPair.english);
+    const pending = entries.get(lookupTerm);
+    // Terminology never creates an English headword; it explains one that the
+    // English inventory already carries.
+    if (!pending || pending.records.length === 0) {
+      result.unmatched += 1;
+      continue;
+    }
+    meanings.push({
+      lookupTerm,
+      evidenceId: row.evidenceId,
+      definition: row.definition,
+      partOfSpeech: pending.records[0].senses[0]?.partOfSpeech ?? "noun",
+      // The row is authoritative only inside its stated domain, so the domain
+      // travels with the published meaning.
+      domains: [row.domain],
+      sourceName: "taiwan-terminology",
+      sourceVersion: row.version,
+      sourceEntryId: `${row.agency}:${row.dataset}:${row.evidenceId}`,
+      license: input.license,
+      attribution: `${row.attribution} (${row.agency}, ${row.dataset} ${row.version})`
+    });
+  }
+  return meanings;
+}
+
+function writeLanguageMeanings(
+  db: Database,
+  meanings: LanguageMeaning[],
+  results: Record<string, EnglishLanguageImportResult>
+): void {
+  const langOf = (meaning: LanguageMeaning) => meaning.sourceName === "japanese-wordnet" ? "ja" : "zh-tw";
+  const insertSense = db.prepare(`
+    insert or ignore into en_senses (
+      id, entry_id, lang, position, part_of_speech, registers, regions, domains, dated, usage,
+      provenance, source_name, source_version, source_ref, generation_id
+    ) values (?, ?, ?, ?, ?, '[]', '[]', ?, 0, '[]', 'source', ?, ?, ?, null)
+  `);
+  const insertGloss = db.prepare(`
+    insert or ignore into en_glosses (sense_id, position, text, source, review_status, type)
+    values (?, 1, ?, ?, 'source', null)
+  `);
+  const insertEntrySource = db.prepare(`
+    insert or ignore into en_entry_sources
+      (entry_id, source, source_version, source_entry_id, license, attribution)
+    values (?, ?, ?, ?, ?, ?)
+  `);
+  const positions = new Map<string, number>();
+
+  db.transaction(() => {
+    for (const meaning of meanings) {
+      const lang = langOf(meaning);
+      const entryId = englishEntryId(meaning.lookupTerm);
+      if (!db.query<{ id: string }, [string]>("select id from en_entries where id = ?").get(entryId)) {
+        results[lang].unmatched += 1;
+        continue;
+      }
+      const key = `${entryId}:${lang}`;
+      const position = (positions.get(key) ?? 0) + 1;
+      positions.set(key, position);
+      const senseId = englishSenseId(`${lang}:${meaning.evidenceId}:${meaning.lookupTerm}`);
+      insertSense.run(
+        senseId,
+        entryId,
+        lang,
+        position,
+        meaning.partOfSpeech,
+        JSON.stringify(meaning.domains),
+        meaning.sourceName,
+        meaning.sourceVersion,
+        meaning.evidenceId
+      );
+      insertGloss.run(senseId, meaning.definition, meaning.sourceName);
+      insertEntrySource.run(
+        entryId,
+        meaning.sourceName,
+        meaning.sourceVersion,
+        meaning.sourceEntryId,
+        meaning.license,
+        meaning.attribution
+      );
+      results[lang].imported += 1;
+    }
+  })();
 }
 
 function writeMetadata(
@@ -185,18 +480,42 @@ function writeMetadata(
   insert.run("sourcePolicy", JSON.stringify({
     primary: englishSourcePolicy.primary,
     fallback: englishSourcePolicy.fallback,
-    secondary: "exact evidence identifier mappings only"
+    secondary: "exact evidence identifier mappings only",
+    // Every explanation language names its own direct-import source. Anything
+    // else about that language is authored and reviewed, never converted.
+    languages: {
+      en: `${englishSourcePolicy.primary} then ${englishSourcePolicy.fallback}`,
+      ja: englishSourcePolicy.ja,
+      "zh-tw": englishSourcePolicy["zh-tw"]
+    }
   }));
-  insert.run("sources", JSON.stringify(options.sources.map((source) => ({
-    source: source.source,
-    version: source.version,
-    license: source.license ?? defaultLicense(source.source),
-    attribution: source.attribution ?? defaultAttribution(source.source),
-    file: source.file,
-    ...(source.sha256 ? { sha256: source.sha256 } : {}),
-    ...(source.url ? { url: source.url } : {}),
-    role: source.source === englishSourcePolicy.primary ? "primary" : "fallback"
-  }))));
+  insert.run("sources", JSON.stringify([
+    ...options.sources.map((source) => ({
+      source: source.source,
+      lang: "en",
+      version: source.version,
+      license: source.license ?? defaultLicense(source.source),
+      attribution: source.attribution ?? defaultAttribution(source.source),
+      file: source.file,
+      ...(source.sha256 ? { sha256: source.sha256 } : {}),
+      ...(source.url ? { url: source.url } : {}),
+      role: source.source === englishSourcePolicy.primary ? "primary" : "fallback"
+    })),
+    ...(options.languageSources ?? []).map((source) => ({
+      source: source.source,
+      lang: source.lang,
+      version: source.version,
+      license: source.license,
+      attribution: source.attribution,
+      file: source.file,
+      ...(source.sha256 ? { sha256: source.sha256 } : {}),
+      ...(source.url ? { url: source.url } : {}),
+      role: "language-direct-import",
+      ...(source.source === "japanese-wordnet"
+        ? { mappingSource: source.mappingSource, mappingVersion: source.mappingVersion, mappings: source.mappings }
+        : {})
+    }))
+  ]));
 }
 
 /**

@@ -213,7 +213,8 @@ const japaneseLanguageNames: Record<ApiLang, string> = {
   de: "German",
   "zh-tw": "Taiwan Mandarin Chinese written in traditional characters",
   "zh-cn": "Mainland Simplified Chinese",
-  ko: "Korean"
+  ko: "Korean",
+  ja: "Japanese"
 };
 
 const kanaPattern = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
@@ -238,6 +239,8 @@ function invalidExplanationText(lang: ApiLang, text: string): boolean {
       return kanaPattern.test(value) || hangulPattern.test(value) || !hanPattern.test(value);
     case "ko":
       return kanaPattern.test(value) || !hangulPattern.test(value);
+    case "ja":
+      return hangulPattern.test(value) || !(kanaPattern.test(value) || hanPattern.test(value));
   }
 }
 
@@ -1124,18 +1127,42 @@ const englishExampleSchema = {
   }
 };
 
+/** A bilingual example keeps the English sentence and its target-language pair together. */
+const englishBilingualExampleSchema = {
+  name: "english_dictionary_bilingual_example",
+  schema: {
+    type: "object", additionalProperties: false,
+    properties: { sentence: { type: "string" }, translation: { type: "string" } },
+    required: ["sentence", "translation"]
+  }
+};
+
 function englishModelConfigs(selection: EnglishModelSelection) {
   return {
     eligibility: modelConfig("eligibility", selection.author, "english-eligibility-v1"),
     entryAuthor: modelConfig("entry-author", selection.author, "english-entry-author-v1", englishEntrySchema),
     entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v2"),
     exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v1", englishExampleSchema),
+    bilingualExampleAuthor: modelConfig(
+      "example-author", selection.author, "english-bilingual-example-author-v1", englishBilingualExampleSchema
+    ),
     exampleReview: modelConfig("example-review", selection.reviewer, "english-example-review-v2")
   };
 }
 
-/** English content is authored in English only until a later language slice adds more. */
-const englishAuthoredLanguages = new Set<ApiLang>(["en"]);
+/**
+ * Explanation languages English enrichment can author. Each is one independent
+ * sibling group under the same English entry: its own request, its own author
+ * and reviewer, its own retries, terminal outcomes and persistence key. No
+ * group is produced by converting or translating another one.
+ */
+const englishAuthoredLanguages = new Set<ApiLang>(["en", "ja", "zh-tw"]);
+
+const englishExplanationLanguageNames: Partial<Record<ApiLang, string>> = {
+  en: "English",
+  ja: "Japanese",
+  "zh-tw": "Taiwan Mandarin Chinese written in traditional characters"
+};
 
 export function createEnglishOnDemandDictionary(options: {
   repository: EnglishEnrichmentRepository;
@@ -1266,8 +1293,15 @@ async function authorEnglishEntry(
   options: EnglishRuntimeOptions
 ): Promise<EnglishEntry | null> {
   const entryId = englishStableId("entry", headword);
+  // One candidate id per entry *and* language, so two languages authored at the
+  // same time never share a model request or its recorded attempt.
+  const candidateId = englishCandidateId(entryId, request.lang);
   const authored = await callAndRecord(
-    options, options.modelConfigs.entryAuthor, englishEntryAuthorPrompt(entryId, headword, request, sources), request.mode, entryId
+    options,
+    options.modelConfigs.entryAuthor,
+    englishEntryAuthorPrompt(candidateId, headword, request, sources),
+    request.mode,
+    candidateId
   );
   let entry: EnglishEntry;
   try {
@@ -1281,9 +1315,15 @@ async function authorEnglishEntry(
   const reviewed = await callAndRecord(
     options,
     options.modelConfigs.entryReview,
-    reviewPrompt(entryId, { entry, sourceEvidence: sources }),
+    reviewPrompt(candidateId, {
+      explanationLanguage: request.lang,
+      entry,
+      // English source facts are reference for another language, never the
+      // meaning list the group had to mirror.
+      [request.lang === "en" ? "sourceEvidence" : "englishReferenceFacts"]: sources
+    }),
     request.mode,
-    entryId
+    candidateId
   );
   const outcome = reviewOutcome(reviewed.text);
   englishRecordOutcome(options.repository, reviewed.attempt, outcome);
@@ -1313,7 +1353,7 @@ async function completeEnglishExamples(
       const canonical = options.repository.find(entry.headword, request.lang)
         ?.senses.find((candidate) => candidate.id === sense.id)?.examples[0];
       if (canonical) return canonical;
-      return completeEnglishExample(entry, sense, candidateId, terminalKey, request.mode, options);
+      return completeEnglishExample(entry, sense, candidateId, terminalKey, request, options);
     }).catch(missingExample);
   }));
   return {
@@ -1329,18 +1369,21 @@ async function completeEnglishExample(
   sense: EnglishEntry["senses"][number],
   candidateId: string,
   terminalKey: string,
-  mode: ResolveRequest["mode"],
+  request: ResolveRequest,
   options: EnglishRuntimeOptions
 ): Promise<EnglishExample | null> {
+    const mode = request.mode;
+    const bilingual = request.lang !== "en";
     const authored = await callAndRecord(
-      options, options.modelConfigs.exampleAuthor, englishExamplePrompt(candidateId, entry, sense), mode, candidateId
+      options,
+      bilingual ? options.modelConfigs.bilingualExampleAuthor : options.modelConfigs.exampleAuthor,
+      englishExamplePrompt(candidateId, entry, sense, request.lang),
+      mode,
+      candidateId
     );
     let example: EnglishExample;
     try {
-      const value = parseObject(authored.text);
-      assertExactKeys(value, ["sentence"]);
-      if (!nonemptyString(value.sentence) || !englishSentenceContains(value.sentence, entry.headword)) throw new Error("Invalid example");
-      example = { text: value.sentence.trim(), source: "generated", reviewStatus: "checked" };
+      example = parseEnglishExample(authored.text, entry, request.lang);
     } catch {
       englishRecordOutcome(options.repository, authored.attempt, "malformed");
       options.repository.saveTerminalOutcome(terminalKey, "malformed-example");
@@ -1350,7 +1393,12 @@ async function completeEnglishExample(
     const reviewed = await callAndRecord(
       options,
       options.modelConfigs.exampleReview,
-      reviewPrompt(candidateId, { entry: { headword: entry.headword }, sense, example }),
+      reviewPrompt(candidateId, {
+        explanationLanguage: request.lang,
+        entry: { headword: entry.headword },
+        sense,
+        example
+      }),
       mode,
       candidateId
     );
@@ -1372,8 +1420,147 @@ async function completeEnglishExample(
  * Parses one authored entry-language group for an English headword. The author
  * writes meanings for a single explanation language; nothing here derives one
  * language from another, and nothing rewrites an imported meaning.
+ *
+ * The English group is grounded in English source evidence. Every other
+ * explanation language is an independent sibling group: it may read the English
+ * facts but may not claim their evidence identifiers, is not required to
+ * produce one meaning per English meaning, and is checked against the
+ * target-language deterministic rules below.
  */
 function parseEnglishEntry(
+  text: string,
+  entryId: string,
+  expectedHeadword: string,
+  lang: ApiLang,
+  sources: EnglishSourceRecord[],
+  authorAttempt: AttemptRecord
+): EnglishEntry {
+  return lang === "en"
+    ? parseEnglishCanonicalGroup(text, entryId, expectedHeadword, lang, sources, authorAttempt)
+    : parseEnglishLanguageGroup(text, entryId, expectedHeadword, lang, sources, authorAttempt);
+}
+
+/**
+ * Deterministic rules for an authored English→other-language group.
+ *
+ * They catch the failure modes a machine can see: text written in the wrong
+ * language, Mainland terminology published as Taiwanese, and wording carried
+ * across from the English group. They cannot tell fluent, independently divided
+ * target-language wording from a fluent meaning-by-meaning translation; the
+ * prompt and the separate reviewer carry that judgement.
+ */
+function parseEnglishLanguageGroup(
+  text: string,
+  entryId: string,
+  expectedHeadword: string,
+  lang: ApiLang,
+  sources: EnglishSourceRecord[],
+  authorAttempt: AttemptRecord
+): EnglishEntry {
+  const value = parseObject(text);
+  assertExactKeys(value, ["headword", "pronunciations", "senses"]);
+  if (normalizeEnglishHeadword(value.headword) !== expectedHeadword || !Array.isArray(value.senses) || value.senses.length === 0) {
+    throw new Error("Invalid English headword");
+  }
+  // Pronunciations describe the entry, not one explanation language, so a
+  // language group neither restates nor may change them.
+  if (!Array.isArray(value.pronunciations) || value.pronunciations.length > 0) {
+    throw new Error("A language group must not restate entry pronunciations");
+  }
+  const englishWording = new Set(sources.flatMap((source) =>
+    source.senses.flatMap((sense) => sense.glosses.map(englishTextIdentity))
+  ));
+  const generation = acceptedGeneration(authorAttempt);
+
+  const senses = value.senses.map((raw: unknown, index: number): EnglishEntry["senses"][number] => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid English sense");
+    const sense = raw as Record<string, unknown>;
+    assertExactKeys(sense, [
+      "partOfSpeech", "definition", "registers", "regions", "domains", "dated", "usage", "evidenceIds", "provenance"
+    ]);
+    if (!nonemptyString(sense.partOfSpeech) || !nonemptyString(sense.definition) || typeof sense.dated !== "boolean") {
+      throw new Error("Invalid English sense content");
+    }
+    // The group is written, not derived: it may not attach itself to an English
+    // source meaning, which is what a line-by-line translation would do.
+    if (sense.provenance !== "generated") throw new Error("A language group meaning is authored, not imported");
+    if (requiredStringList(sense.evidenceIds).length > 0) throw new Error("A language group meaning claims English evidence");
+    // Part of speech stays in the shared English label vocabulary so packs and
+    // canonical rows read the same way across languages.
+    if (!/^[a-z][a-z ]*$/.test(sense.partOfSpeech.trim())) throw new Error("Invalid part of speech label");
+    const definition = sense.definition.trim();
+    if (invalidExplanationText(lang, definition)) throw new Error(`Definition is not written in ${lang}`);
+    if (englishWording.has(englishTextIdentity(definition))) throw new Error("Definition repeats the English group");
+
+    const registers = requiredStringList(sense.registers);
+    const regions = requiredStringList(sense.regions);
+    const domains = requiredStringList(sense.domains);
+    const usage = requiredStringList(sense.usage);
+    return {
+      id: englishStableId("sense", JSON.stringify([entryId, lang, index + 1, englishTextIdentity(definition)])),
+      lang,
+      position: index + 1,
+      partOfSpeech: sense.partOfSpeech.trim(),
+      glosses: [{ text: definition, source: "generated", reviewStatus: "checked" }],
+      registers,
+      regions,
+      domains,
+      dated: sense.dated,
+      usage,
+      examples: [],
+      evidenceIds: [],
+      provenance: "generated",
+      generation
+    };
+  });
+  if (new Set(senses.map((sense) => sense.id)).size !== senses.length) throw new Error("Duplicate language group meaning");
+
+  return {
+    id: entryId,
+    dictionary: "en",
+    headword: expectedHeadword,
+    // The entry keeps its own pronunciations; a language group never writes them.
+    pronunciations: [],
+    senses,
+    sources: []
+  };
+}
+
+/**
+ * One generated example for one target-language meaning. For English it is a
+ * single sentence; for another explanation language it is a true bilingual
+ * pair, the English sentence kept together with its target-language sentence.
+ */
+function parseEnglishExample(text: string, entry: EnglishEntry, lang: ApiLang): EnglishExample {
+  const value = parseObject(text);
+  assertExactKeys(value, lang === "en" ? ["sentence"] : ["sentence", "translation"]);
+  if (!nonemptyString(value.sentence) || !englishSentenceContains(value.sentence, entry.headword)) {
+    throw new Error("Invalid example");
+  }
+  const sentence = value.sentence.trim();
+  if (invalidExplanationText("en", sentence)) throw new Error("The example sentence is not English");
+  if (lang === "en") return { text: sentence, source: "generated", reviewStatus: "checked" };
+
+  if (!nonemptyString(value.translation)) throw new Error("Invalid example translation");
+  const translation = value.translation.trim();
+  if (invalidExplanationText(lang, translation)) throw new Error(`The paired sentence is not written in ${lang}`);
+  return {
+    text: sentence,
+    translations: [{ lang, text: translation }],
+    source: "generated",
+    reviewStatus: "checked"
+  };
+}
+
+function englishTextIdentity(text: string): string {
+  return text.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ");
+}
+
+function englishCandidateId(entryId: string, lang: ApiLang): string {
+  return `${entryId}:${lang}`;
+}
+
+function parseEnglishCanonicalGroup(
   text: string,
   entryId: string,
   expectedHeadword: string,
@@ -1519,6 +1706,21 @@ function englishEntryAuthorPrompt(
   request: ResolveRequest,
   sources: EnglishSourceRecord[]
 ): string {
+  const language = englishExplanationLanguageNames[request.lang] ?? request.lang;
+  if (request.lang !== "en") {
+    return [
+      `Author the ${language} explanation group for one English headword, as JSON.`,
+      `Write every definition as natural ${language} dictionary wording that a ${language} learner's dictionary would print.`,
+      "Divide the meanings the way a dictionary in that language would. Do not translate the English definitions line by line, and do not produce one meaning per English meaning unless that division is genuinely right.",
+      "Every meaning has provenance generated and an empty evidenceIds array. Return an empty pronunciations array.",
+      `candidateId: ${candidateId}`,
+      `explanation_language: ${request.lang}`,
+      `headword: ${headword}`,
+      `context: ${request.context?.sentence ?? ""}`,
+      // English facts inform the author; they are not the meaning list to copy.
+      `english_reference_facts: ${JSON.stringify(sources)}`
+    ].join("\n");
+  }
   return [
     "Author one canonical English dictionary entry as JSON.",
     "Preserve every source meaning and evidence id. Keep parts of speech, pronunciations, registers, regions, domains, dated status, and usage distinct.",
@@ -1532,7 +1734,23 @@ function englishEntryAuthorPrompt(
   ].join("\n");
 }
 
-function englishExamplePrompt(candidateId: string, entry: EnglishEntry, sense: EnglishEntry["senses"][number]): string {
+function englishExamplePrompt(
+  candidateId: string,
+  entry: EnglishEntry,
+  sense: EnglishEntry["senses"][number],
+  lang: ApiLang
+): string {
+  if (lang !== "en") {
+    const language = englishExplanationLanguageNames[lang] ?? lang;
+    return [
+      "Write one natural, safe English learner sentence that demonstrates exactly this meaning.",
+      `Return JSON with that English sentence and its ${language} translation as a matching pair.`,
+      `candidateId: ${candidateId}`,
+      `explanation_language: ${lang}`,
+      `headword: ${entry.headword}`,
+      `sense: ${JSON.stringify(sense)}`
+    ].join("\n");
+  }
   return [
     "Write one natural English sentence that demonstrates exactly this sense. Return JSON with sentence only.",
     `candidateId: ${candidateId}`,

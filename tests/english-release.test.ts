@@ -43,6 +43,7 @@ test("the English release is deterministic and keeps the source's meaning order 
   expect(manifest.sources).toEqual([
     {
       source: "open-english-wordnet",
+      lang: "en",
       version: "2025-fixture",
       license: "CC-BY-4.0",
       attribution: "Open English WordNet contributors",
@@ -52,6 +53,7 @@ test("the English release is deterministic and keeps the source's meaning order 
     },
     {
       source: "wiktionary",
+      lang: "en",
       version: "2026-07-06-fixture",
       license: "CC-BY-SA-4.0 AND GFDL-1.1-or-later",
       attribution: "Simple English Wiktionary contributors; extracted with Wiktextract",

@@ -63,6 +63,7 @@ export function importOpenEnglishWordNetEntry(
       if (glosses.length === 0) return [];
       return [{
         evidenceId: `open-english-wordnet:${senseId}`,
+        synset: synsetId,
         partOfSpeech,
         glosses,
         registers: [],

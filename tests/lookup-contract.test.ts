@@ -131,7 +131,7 @@ test("every lookup requires a supported dictionary and explanation language", as
     "/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja",
     "/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=fr&lang=en",
     "/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=fr",
-    "/v1/lookup?q=bank&dictionary=en&lang=zh-tw",
+    "/v1/lookup?q=bank&dictionary=en&lang=de",
     "/v1/lookup?dictionary=ja&lang=en"
   ];
   for (const path of cases) {
@@ -192,6 +192,15 @@ test("lookup returns only the requested language and never falls back", async ()
   const korean = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=ko");
   expect(korean.status).toBe(200);
   expect(await korean.json()).toBeNull();
+
+  // English accepts Japanese and Taiwanese Chinese as explanation languages.
+  // A headword with no group in one of them is a miss for that language, never
+  // the English group under another language's name.
+  for (const lang of ["ja", "zh-tw"]) {
+    const response = await app.request(`/v1/lookup?q=bank&dictionary=en&lang=${lang}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toBeNull();
+  }
   expect(gateway.calls).toEqual([]);
 });
 

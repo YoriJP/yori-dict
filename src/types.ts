@@ -1,6 +1,12 @@
 export type SourceLang = "eng" | "ger" | string;
 
-export type ApiLang = "en" | "de" | "zh-tw" | "zh-cn" | "ko";
+/**
+ * Explanation languages the product knows about. Which of them a dictionary
+ * actually offers is decided per dictionary by the lookup contract, not here:
+ * `ja` is an explanation language for English headwords, and the Japanese
+ * dictionary does not offer it.
+ */
+export type ApiLang = "en" | "de" | "zh-tw" | "zh-cn" | "ko" | "ja";
 
 /**
  * Cross-reference to another entry. JMdict-simplified emits one of:

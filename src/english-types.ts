@@ -9,6 +9,12 @@ export type EnglishSourceName = "open-english-wordnet" | "wiktionary";
  */
 export type EnglishSourceSense = {
   evidenceId: string;
+  /**
+   * Concept identifier the source itself gives this meaning, when it has one.
+   * It is what another source's validated concept mapping can name; it is never
+   * used to order meanings.
+   */
+  synset?: string;
   partOfSpeech: string;
   glosses: string[];
   registers: string[];

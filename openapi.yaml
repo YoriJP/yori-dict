@@ -142,8 +142,8 @@ paths:
           required: true
           description: >-
             Explanation language of the returned meanings. There is no default and no
-            fallback. `ja` supports en, de, zh-tw, zh-cn, and ko; `en` currently
-            supports en. Any other combination is a request error.
+            fallback. `ja` supports en, de, zh-tw, zh-cn, and ko; `en` supports en,
+            ja, and zh-tw. Any other combination is a request error.
           schema:
             $ref: "#/components/schemas/ApiLang"
           example: zh-tw
@@ -287,7 +287,7 @@ components:
           format: uri
     ApiLang:
       type: string
-      enum: [en, de, zh-tw, zh-cn, ko]
+      enum: [en, de, zh-tw, zh-cn, ko, ja]
     MetaResponse:
       type: object
       required: [apiVersion, dictionaryVersion, languages, tags, sources]

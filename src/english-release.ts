@@ -29,8 +29,11 @@ export type EnglishReleaseArtifacts = {
   yomitan: Record<string, string>;
 };
 
+/** Short pack names, one per language pair, so installed packs stay distinguishable. */
 const yomitanTitles: Record<string, string> = {
-  en: "Yori English–English"
+  en: "Yori English–English",
+  ja: "Yori English–Japanese",
+  "zh-tw": "Yori English–Chinese (Taiwan)"
 };
 
 /**
@@ -120,7 +123,7 @@ export async function buildEnglishRelease(
           sequenced: true,
           author: "YoriJP",
           url: "https://github.com/YoriJP/yori-dict",
-          attribution: "Open English WordNet and Simple English Wiktionary contributors; see the release manifest.",
+          attribution: `${languageAttribution(metadata.sources, lang)}; see the release manifest.`,
           // Named explanation language of this pack; it contains no other.
           description: `English headwords explained in ${lang}.`
         })
@@ -174,6 +177,19 @@ function canonicalRecord(record: EnglishEntryGroups) {
 function releaseMeaning(sense: EnglishSense) {
   const { evidenceIds, examples, ...rest } = sense;
   return { ...rest, sources: evidenceIds, examples };
+}
+
+/**
+ * Attribution for one pack: the sources that may publish content in that
+ * explanation language, and no others. Generated groups have no source, so a
+ * language with none says so rather than borrowing English's attribution.
+ */
+function languageAttribution(sources: unknown[], lang: string): string {
+  const named = sources.flatMap((source) => {
+    const record = source as { lang?: unknown; attribution?: unknown };
+    return record.lang === lang && typeof record.attribution === "string" ? [record.attribution] : [];
+  });
+  return named.length > 0 ? named.join("; ") : "Yori Dict authored and reviewed content";
 }
 
 function readReleaseCoverage(path: string): Record<string, EnglishLanguageCoverage> {

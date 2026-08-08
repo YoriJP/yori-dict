@@ -17,7 +17,7 @@ export type LookupDictionary = "ja" | "en";
  */
 const lookupLanguages: Record<LookupDictionary, ApiLang[]> = {
   ja: ["en", "de", "zh-tw", "zh-cn", "ko"],
-  en: ["en"]
+  en: ["en", "ja", "zh-tw"]
 };
 
 export function parseLookupDictionary(value: unknown): LookupDictionary | null {
