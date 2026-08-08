@@ -108,7 +108,22 @@ test("a Japanese source refresh preserves accepted generated content", async () 
     reviewStatus: "checked"
   };
   repository.saveEntry(englishGroup(generatedEntry()), "en", generation);
-  repository.saveExample(repository.find("学校", "ja", "en")!.senses[0].id, example, generation);
+  // The usual shape of accepted enrichment: a whole language group authored
+  // for an entry the pinned source provides.
+  const imported = repository.find("学校", "ja", "en")!;
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      id: "yori:s_generated_school:zh-tw:1",
+      position: 1,
+      appliesTo: { kanji: ["*"], kana: ["*"] },
+      partOfSpeech: ["n"],
+      glosses: [{ lang: "zh-tw", text: "學校", source: "generated", reviewStatus: "checked" }],
+      provenance: "generated",
+      evidenceIds: []
+    }]
+  }, "zh-tw", generation);
+  repository.saveExample(imported.senses[0].id, example, generation);
   repository.close();
   lookup.close();
 
@@ -122,7 +137,70 @@ test("a Japanese source refresh preserves accepted generated content", async () 
   const refreshedLookup = openLookupDb(path);
   expect(refreshedLookup.lookup("未知語", "en").item?.word).toBe("未知語");
   expect(refreshedLookup.lookup("学校", "en").item?.senses[0].examples).toEqual([example]);
+  // The accepted language group on an imported entry survived the refresh with
+  // its own provenance, under that entry's own identity.
+  const taiwanese = refreshedLookup.lookup("学校", "zh-tw").item;
+  expect(taiwanese?.id).toBe(refreshedLookup.lookup("学校", "en").item?.id);
+  expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
+  expect(taiwanese?.senses[0].provenance).toBe("generated");
   refreshedLookup.close();
+});
+
+test("a generated example is appended after the imported examples of its meaning", async () => {
+  const path = await productionDatabase({ examples: true });
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const imported = lookup.lookup("食べる", "en").item!.senses[0];
+  expect(imported.examples?.[0]?.source).toBe("sourced");
+
+  const generated: PublicExample = {
+    text: "毎日果物を食べる。",
+    translations: [{ lang: "en", text: "I eat fruit every day." }],
+    source: "generated",
+    reviewStatus: "checked"
+  };
+  repository.saveExample(imported.id, generated, generation);
+  repository.close();
+
+  const reopened = openLookupDb(path);
+  // The imported example keeps its source position; the generated one follows.
+  expect(reopened.lookup("食べる", "en").item?.senses[0].examples)
+    .toEqual([...imported.examples!, generated]);
+  reopened.close();
+  lookup.close();
+});
+
+test("an absorbed legacy language group joins the entry it explains", async () => {
+  const path = await productionDatabase();
+  const legacyPath = join(mkdtempSync(join(tmpdir(), "yori-legacy-group-")), "entry-overlay.sqlite");
+  const legacy = new Database(legacyPath);
+  legacy.exec("create table on_demand_entries (entry_id text primary key, entry_json text not null)");
+  const schoolEntry: PublicLookupItem = {
+    ...generatedEntry(),
+    id: "yori:e_generated_legacy_school",
+    word: "学校",
+    reading: "がっこう",
+    sourceId: "yori:e_generated_legacy_school",
+    headwords: [{ text: "学校", reading: "がっこう", kind: "kanji", common: false, tags: [] }],
+    senses: [{
+      ...generatedEntry().senses[0],
+      id: "yori:s_generated_legacy_school",
+      glosses: [{ lang: "zh-tw", text: "學校", source: "generated", reviewStatus: "checked" }]
+    }]
+  };
+  legacy.prepare("insert into on_demand_entries values (?, ?)").run(schoolEntry.id, JSON.stringify(schoolEntry));
+  legacy.close();
+
+  expect(importLegacyOverlays(path, legacyPath, join(dirname(legacyPath), "missing.sqlite")).japanese).toBe(true);
+  const reopened = openLookupDb(path);
+  const english = reopened.lookup("学校", "en").item!;
+  const taiwanese = reopened.lookup("学校", "zh-tw").item!;
+  // One entry with two sibling language groups, not two entries sharing a term.
+  expect(taiwanese.id).toBe(english.id);
+  expect(taiwanese.senses[0].glosses[0].text).toBe("學校");
+  // The imported English group was not replaced by the absorbed record.
+  expect(english.senses[0].glosses[0].text).toBe("school");
+  reopened.close();
 });
 
 test("legacy overlays are absorbed once into canonical production data", async () => {
@@ -153,9 +231,10 @@ test("legacy overlays are absorbed once into canonical production data", async (
   reopened.close();
 });
 
-async function productionDatabase(): Promise<string> {
+async function productionDatabase(options: { examples?: boolean } = {}): Promise<string> {
   const path = join(mkdtempSync(join(tmpdir(), "yori-production-")), "yori.sqlite");
-  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  const examples = options.examples ? ["--examples", "fixtures/jmdict-examples-sample.json"] : [];
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json ${{ raw: examples.join(" ") }} --out ${path}`.quiet();
   migrateProductionDatabase(path);
   return path;
 }

@@ -212,6 +212,45 @@ test("enrichment never rewrites correct imported content", async () => {
   expect(enriched.meanings[0].examples[0].text).toBe("学校へ行きます。");
 });
 
+test("a language group authored for an imported entry joins that entry", async () => {
+  gateway.reset();
+  const english = await read("学校", "en");
+  expect(await read("学校", "zh-tw")).toBeNull();
+
+  gateway.script("entry-author", JSON.stringify({
+    headword: "学校",
+    reading: "がっこう",
+    senses: [{
+      partOfSpeech: ["n"],
+      registers: [],
+      domains: [],
+      dialect: [],
+      pronunciations: [],
+      pragmaticFunctions: [],
+      glosses: ["學校"],
+      evidenceIds: [],
+      provenance: "generated"
+    }]
+  }));
+  gateway.script("entry-review", "ACCEPT");
+  gateway.script("example-author", JSON.stringify({ sentence: "学校へ行きます。", translation: "我去學校。" }));
+  gateway.script("example-review", "ACCEPT");
+  const taiwanese = await enrich("学校", "zh-tw");
+
+  // One entry, one identity: the authored group did not mint a second entry,
+  // and the entry keeps the imported source facts it was published with.
+  expect(taiwanese.id).toBe(english.id);
+  expect(taiwanese.sources).toEqual(english.sources);
+  expect(taiwanese.reading).toBe(english.reading);
+
+  // Both groups are readable afterwards, each in its own language.
+  const stored = await read("学校", "zh-tw");
+  expect(stored.id).toBe(english.id);
+  expect(stored.meanings.map((meaning: { glosses: Array<{ text: string }> }) => meaning.glosses[0].text))
+    .toEqual(["學校"]);
+  expect((await read("学校", "en")).meanings).toEqual(english.meanings);
+});
+
 test("public lookup makes zero model calls even when a language is missing", async () => {
   gateway.reset();
   expect(await read("学校", "ko")).toBeNull();

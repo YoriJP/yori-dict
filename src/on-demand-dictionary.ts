@@ -134,11 +134,13 @@ export type EnrichmentRepository = {
   saveTerminalOutcome(key: string, outcome: string): void;
   knownLabels(): Set<string>;
   /**
-   * The canonical headword this query already resolves to in any explanation
+   * The canonical entry this query already resolves to in any explanation
    * language, or null. Filling a missing language group for an entry the
-   * dictionary already knows needs no eligibility decision.
+   * dictionary already knows needs no eligibility decision, and the authored
+   * group must attach to that entry's own identity rather than minting a
+   * second entry for the same headword.
    */
-  canonicalHeadword?(query: string): string | null;
+  canonicalEntry?(query: string): { id: string; headword: string } | null;
 };
 
 export type DictionaryResolver<TEntry> = {
@@ -381,15 +383,17 @@ async function resolveMissing(
 
   // The entry may already exist with only other languages' meanings. That is a
   // missing language group, not an unknown word, so it is authored directly.
-  const known = options.repository.canonicalHeadword?.(request.query.trim())
-    ?? (headword === request.query.trim() ? null : options.repository.canonicalHeadword?.(headword))
+  const known = options.repository.canonicalEntry?.(request.query.trim())
+    ?? (headword === request.query.trim() ? null : options.repository.canonicalEntry?.(headword))
     ?? null;
   if (known) {
     return authorForHeadword(
       request,
       options,
-      known,
-      options.repository.findSources(known, request.targetDictionary).filter((source) => source.headword === known),
+      known.headword,
+      options.repository
+        .findSources(known.headword, request.targetDictionary)
+        .filter((source) => source.headword === known.headword),
       requestKey
     );
   }
@@ -471,7 +475,10 @@ async function authorEntry(
   requestKey: string,
   canonicalKey: string
 ): Promise<PublicLookupItem | null> {
-  const entryId = stableId("entry", headword);
+  // An entry shares one identity across explanation languages. When the
+  // dictionary already knows this headword, the authored group joins that
+  // entry instead of creating a second entry the read path would never see.
+  const entryId = options.repository.canonicalEntry?.(headword)?.id ?? stableId("entry", headword);
   const authored = await callAndRecord(
     options,
     entryAuthorConfig,
@@ -515,7 +522,11 @@ async function authorEntry(
   // reviewer accepted it, so the group is persisted atomically for this
   // language alone.
   options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
-  return completeEntryExamples(options, entry, request);
+  // Read the group back so an authored language group on an existing entry
+  // answers with that entry's own identity, written forms, and source facts
+  // rather than the candidate's placeholder ones.
+  const stored = options.repository.find(headword, request.targetDictionary, request.lang) ?? entry;
+  return completeEntryExamples(options, stored, request);
 }
 
 async function eligibilityDecision(

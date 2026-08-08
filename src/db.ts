@@ -264,15 +264,19 @@ function readBestItem(
   candidates: LookupCandidate[],
   lang: ApiLang
 ): PublicLookupItem | null {
-  const best = candidates.sort((a, b) => a.rank - b.rank)[0];
-  if (!best) return null;
-
-  const entry = readEntry(db, best.entryIds[0], lang);
-  // An entry with no meaning in the requested language is a miss for that
-  // language, not an entry to answer with another language's meanings.
-  if (!entry || entry.senses.length === 0) return null;
-
-  return toLookupItem(entry, best.inflectionPath);
+  // Several entries can share one written form. The requested language decides
+  // which of them can answer: the first candidate entry, in match order, that
+  // owns meanings in that language. An entry with no meaning in the requested
+  // language is a miss for that language, never an entry to answer with
+  // another language's meanings, and never a reason to hide a sibling entry
+  // that does explain the word in the requested language.
+  for (const candidate of [...candidates].sort((a, b) => a.rank - b.rank)) {
+    for (const entryId of candidate.entryIds) {
+      const entry = readEntry(db, entryId, lang);
+      if (entry && entry.senses.length > 0) return toLookupItem(entry, candidate.inflectionPath);
+    }
+  }
+  return null;
 }
 
 function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): PublicLookupItem {

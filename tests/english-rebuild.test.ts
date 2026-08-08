@@ -167,7 +167,25 @@ test("a rebuild retains accepted generated content and does not reorder imported
 
   const repository = openEnglishEnrichmentRepository(out);
   repository.saveEntry(generatedEntry(), "en", generation);
-  const importedSenseId = repository.find("bank", "en")!.senses[0].id;
+  const imported = repository.find("bank", "en")!;
+  // The usual shape of accepted enrichment: a whole language group authored
+  // for an entry the pinned source provides.
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      id: "yori:en:s_generated_bank_ja:1",
+      lang: "ja",
+      position: 1,
+      partOfSpeech: "noun",
+      glosses: [{ text: "川岸", source: "generated", reviewStatus: "checked" }],
+      registers: [], regions: [], domains: [], dated: false, usage: [],
+      examples: [],
+      evidenceIds: [],
+      provenance: "generated",
+      generation
+    }]
+  }, "ja", generation);
+  const importedSenseId = imported.senses[0].id;
   repository.saveExample(importedSenseId, {
     text: "The river bank was steep.",
     source: "generated",
@@ -176,7 +194,7 @@ test("a rebuild retains accepted generated content and does not reorder imported
   repository.close();
 
   const result = await rebuildEnglishDictionary({ sources, out, version: "test" });
-  expect(result.retained).toEqual({ entries: 1, examples: 1 });
+  expect(result.retained).toEqual({ entries: 1, groups: 1, examples: 1 });
 
   const lookup = openEnglishLookupDb(out);
   const generated = lookup.lookup("florp", "en")!;
@@ -187,6 +205,12 @@ test("a rebuild retains accepted generated content and does not reorder imported
   expect(bank.senses[0].position).toBe(1);
   expect(bank.senses[0].provenance).toBe("source");
   expect(bank.senses[0].examples.map(({ source }) => source)).toEqual(["sourced", "generated"]);
+  // The accepted language group on an imported entry survived the rebuild with
+  // its own provenance, under that entry's own identity.
+  const japanese = lookup.lookup("bank", "ja")!;
+  expect(japanese.id).toBe(bank.id);
+  expect(japanese.senses.map((sense) => sense.glosses[0].text)).toEqual(["川岸"]);
+  expect(japanese.senses[0].provenance).toBe("generated");
   lookup.close();
 });
 

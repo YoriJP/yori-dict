@@ -148,7 +148,7 @@ export type EnglishRebuildResult = {
   fallback: { entries: number; meanings: number; referenceOnly: number };
   secondary: { imported: number; droppedUnknownEvidence: number };
   pronunciations: { primary: number; fallback: number };
-  retained: { entries: number; examples: number };
+  retained: { entries: number; groups: number; examples: number };
   /** Direct-import outcome per explanation language other than English. */
   languages: Record<string, EnglishLanguageImportResult>;
 };
@@ -171,7 +171,25 @@ type RetainedEntry = {
   generations: Array<Record<string, unknown>>;
 };
 
-type Retained = { entries: RetainedEntry[]; examples: Array<Record<string, unknown>> };
+/**
+ * One accepted authored language group on an entry the sources still provide.
+ * The entry itself is imported, so only this language's own meanings, glosses,
+ * examples, and generation provenance are carried across a rebuild.
+ */
+type RetainedGroup = {
+  entryId: string;
+  lang: string;
+  senses: Array<Record<string, unknown>>;
+  glosses: Array<Record<string, unknown>>;
+  examples: Array<Record<string, unknown>>;
+  generations: Array<Record<string, unknown>>;
+};
+
+type Retained = {
+  entries: RetainedEntry[];
+  groups: RetainedGroup[];
+  examples: Array<Record<string, unknown>>;
+};
 
 /**
  * Rebuilds the whole English dictionary from pinned inputs into a fresh file
@@ -848,13 +866,14 @@ function writeEntries(
 }
 
 function emptyRetained(): Retained {
-  return { entries: [], examples: [] };
+  return { entries: [], groups: [], examples: [] };
 }
 
 /**
  * Accepted enrichment survives a rebuild with its own provenance: generated
- * entries are carried whole, and generated examples on imported meanings are
- * re-attached by their meaning identifier.
+ * entries are carried whole, accepted language groups authored for an imported
+ * entry are carried per language, and generated examples on imported meanings
+ * are re-attached by their meaning identifier.
  */
 function readRetained(path: string): Retained {
   const db = new Database(path, { readonly: true });
@@ -895,22 +914,60 @@ function readRetained(path: string): Retained {
       };
     });
 
+    // What enrichment usually produces is a language group under an imported
+    // entry. It is retained per entry and language, because the entry itself
+    // comes back from the sources.
+    const groups = db.query<{ entry_id: string; lang: string }, []>(`
+      select sense.entry_id as entry_id, sense.lang as lang
+        from en_senses sense
+        join en_entries entry on entry.id = sense.entry_id
+       where sense.provenance = 'generated' and entry.source <> 'generated'
+       group by sense.entry_id, sense.lang
+       order by sense.entry_id, sense.lang
+    `).all().map<RetainedGroup>(({ entry_id: entryId, lang }) => {
+      const senses = db.query<Record<string, unknown>, [string, string]>(
+        "select * from en_senses where entry_id = ? and lang = ? order by position"
+      ).all(entryId, lang);
+      const senseIds = senses.map((sense) => String(sense.id));
+      return {
+        entryId,
+        lang,
+        senses,
+        glosses: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
+          "select * from en_glosses where sense_id = ? order by position"
+        ).all(senseId)),
+        examples: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
+          "select * from en_examples where sense_id = ? order by position"
+        ).all(senseId)),
+        generations: db.query<Record<string, unknown>, [string, string]>(`
+          select distinct generation.* from en_generations generation
+            join en_senses sense on sense.generation_id = generation.id
+           where sense.entry_id = ? and sense.lang = ?
+        `).all(entryId, lang)
+      };
+    });
+
+    const retainedSenseIds = new Set(groups.flatMap((group) => group.senses.map((sense) => String(sense.id))));
     const examples = db.query<Record<string, unknown>, []>(`
       select example.* from en_examples example
         join en_senses sense on sense.id = example.sense_id
         join en_entries entry on entry.id = sense.entry_id
        where example.source = 'generated' and entry.source <> 'generated'
        order by example.sense_id, example.position
-    `).all();
+    `).all().filter((example) => !retainedSenseIds.has(String(example.sense_id)));
 
-    return { entries, examples };
+    return { entries, groups, examples };
   } finally {
     db.close();
   }
 }
 
-function restoreRetained(db: Database, retained: Retained): { entries: number; examples: number } {
+function restoreRetained(
+  db: Database,
+  retained: Retained
+): { entries: number; groups: number; examples: number } {
   let entries = 0;
+  let groups = 0;
   let examples = 0;
   db.transaction(() => {
     for (const record of retained.entries) {
@@ -929,6 +986,20 @@ function restoreRetained(db: Database, retained: Retained): { entries: number; e
       for (const example of record.examples) insertRow(db, "en_examples", example, false);
       entries += 1;
     }
+    for (const group of retained.groups) {
+      // The entry must still exist in the rebuilt sources, and the rebuild must
+      // not already explain it in this language: imported content wins, and a
+      // retained group never reorders it.
+      if (!db.query<{ id: string }, [string]>("select id from en_entries where id = ?").get(group.entryId)) continue;
+      if (db.query<{ id: string }, [string, string]>(
+        "select id from en_senses where entry_id = ? and lang = ? limit 1"
+      ).get(group.entryId, group.lang)) continue;
+      for (const generation of group.generations) insertRow(db, "en_generations", generation, true);
+      for (const sense of group.senses) insertRow(db, "en_senses", sense, false);
+      for (const gloss of group.glosses) insertRow(db, "en_glosses", gloss, false);
+      for (const example of group.examples) insertRow(db, "en_examples", example, false);
+      groups += 1;
+    }
     for (const example of retained.examples) {
       const senseId = String(example.sense_id);
       if (!db.query<{ id: string }, [string]>("select id from en_senses where id = ?").get(senseId)) continue;
@@ -941,7 +1012,7 @@ function restoreRetained(db: Database, retained: Retained): { entries: number; e
       examples += 1;
     }
   })();
-  return { entries, examples };
+  return { entries, groups, examples };
 }
 
 function insertRow(db: Database, table: string, row: Record<string, unknown>, ignore: boolean): void {

@@ -105,7 +105,22 @@ test("a rebuild retains accepted generated content and does not reorder imported
   const lookup = openLookupDb(out);
   const repository = openEnrichmentRepository(out, lookup);
   repository.saveEntry(generatedEntry(), "en", generation);
-  const importedSenseId = repository.find("学校", "ja", "en")!.senses[0].id;
+  // The usual shape of accepted enrichment: a whole language group authored
+  // for an entry the pinned source provides.
+  const imported = repository.find("学校", "ja", "en")!;
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      id: "yori:s_generated_school:zh-tw:1",
+      position: 1,
+      appliesTo: { kanji: ["*"], kana: ["*"] },
+      partOfSpeech: ["n"],
+      glosses: [{ lang: "zh-tw", text: "學校", source: "generated", reviewStatus: "checked" }],
+      provenance: "generated",
+      evidenceIds: []
+    }]
+  }, "zh-tw", generation);
+  const importedSenseId = imported.senses[0].id;
   repository.saveExample(importedSenseId, {
     text: "学校へ行きます。",
     translations: [{ lang: "en", text: "I go to school." }],
@@ -116,12 +131,18 @@ test("a rebuild retains accepted generated content and does not reorder imported
   lookup.close();
 
   const result = await rebuildJapaneseDictionary({ input: "fixtures/jmdict-sample.json", out });
-  expect(result.retained).toEqual({ entries: 1, examples: 1 });
+  expect(result.retained).toEqual({ entries: 1, groups: 1, examples: 1 });
 
   const reopened = openLookupDb(out);
   const generated = reopened.lookup("未知語", "en").item;
   expect(generated?.source).toBe("generated");
   expect(generated?.senses[0].glosses[0].text).toBe("unknown term");
+  // The accepted language group on an imported entry survived the rebuild with
+  // its own provenance, and the imported English group came back from source.
+  const taiwanese = reopened.lookup("学校", "zh-tw").item;
+  expect(taiwanese?.id).toBe(reopened.lookup("学校", "en").item?.id);
+  expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
+  expect(taiwanese?.senses[0].provenance).toBe("generated");
   expect(reopened.lookup("学校", "en").item?.senses[0].examples?.[0].text).toBe("学校へ行きます。");
   // A generated addition never renumbers imported meanings.
   expect(reopened.lookup("食べる", "en").item?.senses[0].position).toBe(1);

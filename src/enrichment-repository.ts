@@ -26,6 +26,8 @@ export function openEnrichmentRepository(
   db.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
   createJapaneseSchema(db);
 
+  // An authored language group never rewrites an imported entry's identity:
+  // the update only applies to an entry this dictionary itself generated.
   const saveEntryRow = db.prepare(`
     insert into ja_entries (id, source, source_id, headword_language, estimated_level)
     values (?, ?, ?, 'ja', ?)
@@ -33,6 +35,7 @@ export function openEnrichmentRepository(
       source = excluded.source,
       source_id = excluded.source_id,
       estimated_level = excluded.estimated_level
+    where ja_entries.source = 'generated'
   `);
   const saveForm = db.prepare(`
     insert or replace into ja_forms (entry_id, text, reading, kind, common, tags) values (?, ?, ?, ?, ?, ?)
@@ -51,17 +54,36 @@ export function openEnrichmentRepository(
     insert into ja_glosses (sense_id, position, text, source, review_status, type)
     values (?, ?, ?, ?, ?, ?)
   `);
-  const saveExampleRow = db.prepare(`
+  const clearGeneratedExamples = db.prepare(
+    "delete from ja_examples where sense_id = ? and source = 'generated'"
+  );
+  // A generated example is appended after the meaning's imported examples, so
+  // accepting or retrying one never overwrites sourced content.
+  const insertGeneratedExample = db.prepare(`
     insert into ja_examples (
       sense_id, position, text, translations, source, source_name, source_id, review_status, generation_id
-    ) values (?, 1, ?, ?, 'generated', null, null, 'checked', ?)
-    on conflict(sense_id, position) do update set
-      text = excluded.text,
-      translations = excluded.translations,
-      source = excluded.source,
-      review_status = excluded.review_status,
-      generation_id = excluded.generation_id
+    ) values (
+      ?,
+      (select coalesce(max(position), 0) + 1 from ja_examples where sense_id = ?),
+      ?, ?, 'generated', null, null, 'checked', ?
+    )
   `);
+  const appendExample = (
+    senseId: string,
+    text: string,
+    translations: string,
+    generationRef: string | null
+  ) => insertGeneratedExample.run(senseId, senseId, text, translations, generationRef);
+  /** One accepted generated example per meaning: a retry replaces the previous one. */
+  const saveExampleRow = (
+    senseId: string,
+    text: string,
+    translations: string,
+    generationRef: string | null
+  ) => {
+    clearGeneratedExamples.run(senseId);
+    appendExample(senseId, text, translations, generationRef);
+  };
   const saveGeneration = db.prepare(`
     insert into ja_generations
       (id, model, provider, reasoning_effort, prompt_version, service_tier, review_outcome, created_at)
@@ -119,8 +141,13 @@ export function openEnrichmentRepository(
         }
         db.prepare("delete from ja_senses where entry_id = ? and lang = ?").run(entry.id, lang);
 
+        const imported = db.query<{ source: string }, [string]>(
+          "select source from ja_entries where id = ?"
+        ).get(entry.id)?.source === "jmdict";
         saveEntryRow.run(entry.id, entry.source, entry.sourceId, entry.estimatedLevel ?? null);
-        for (const headword of entry.headwords) {
+        // Written forms belong to the entry, not to one explanation language.
+        // An imported entry keeps the ones its source wrote.
+        for (const headword of imported ? [] : entry.headwords) {
           saveForm.run(
             entry.id,
             headword.text,
@@ -141,7 +168,7 @@ export function openEnrichmentRepository(
     },
     saveExample(senseId, example, generation) {
       db.transaction(() => {
-        saveExampleRow.run(
+        saveExampleRow(
           senseId,
           example.text,
           JSON.stringify(example.translations),
@@ -161,10 +188,10 @@ export function openEnrichmentRepository(
     knownLabels() {
       return new Set(Object.keys(lookupDb.meta().tags));
     },
-    canonicalHeadword(query) {
+    canonicalEntry(query) {
       for (const lang of apiLanguages) {
         const item = lookupDb.lookup(query, lang).item;
-        if (item) return item.word;
+        if (item) return { id: item.id, headword: item.word };
       }
       return null;
     },
@@ -233,8 +260,10 @@ export function openEnrichmentRepository(
         gloss.type ?? null
       );
     });
+    // The meaning was just rewritten, so its examples are appended in the order
+    // they arrived rather than competing for one fixed position.
     (sense.examples ?? []).forEach((example) => {
-      saveExampleRow.run(sense.id, example.text, JSON.stringify(example.translations), generationRef);
+      appendExample(sense.id, example.text, JSON.stringify(example.translations), generationRef);
     });
   }
 }

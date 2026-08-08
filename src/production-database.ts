@@ -42,8 +42,9 @@ export async function ensureJapaneseProductionDatabase(path: string): Promise<bo
 
 /**
  * Grafts a rebuilt English release onto the production database. Imported
- * content is replaced wholesale while accepted generated entries and accepted
- * generated examples on imported meanings are retained with their provenance.
+ * content is replaced wholesale while accepted generated entries, accepted
+ * language groups authored for imported entries, and accepted generated
+ * examples on imported meanings are retained with their provenance.
  */
 export function importEnglishRelease(path: string, releasePath: string): boolean {
   const production = new Database(path);
@@ -68,11 +69,22 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
     try {
       production.transaction(() => {
         production.exec(`
+          -- An accepted language group authored for an imported entry is the
+          -- usual shape of enrichment. It is carried across the graft whole,
+          -- with its glosses, examples, and generation provenance.
+          create temp table retained_en_senses as
+            select sense.* from en_senses sense
+            join en_entries entry on entry.id = sense.entry_id
+            where sense.provenance = 'generated' and entry.source <> 'generated';
+          create temp table retained_en_glosses as
+            select gloss.* from en_glosses gloss
+            where gloss.sense_id in (select id from retained_en_senses);
           create temp table retained_en_examples as
             select example.* from en_examples example
             join en_senses sense on sense.id = example.sense_id
             join en_entries entry on entry.id = sense.entry_id
-            where example.source = 'generated' and entry.source <> 'generated';
+            where entry.source <> 'generated'
+              and (example.source = 'generated' or sense.provenance = 'generated');
           delete from en_examples where sense_id in (
             select sense.id from en_senses sense join en_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated'
@@ -97,9 +109,24 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
           insert or ignore into en_senses select * from english_release.en_senses;
           insert or ignore into en_glosses select * from english_release.en_glosses;
           insert or ignore into en_examples select * from english_release.en_examples;
+          -- A retained group only returns to an entry the release still
+          -- provides, and never displaces content the release itself explains
+          -- in that language.
+          insert or ignore into en_senses
+            select retained.* from retained_en_senses retained
+            join en_entries entry on entry.id = retained.entry_id
+            where not exists (
+              select 1 from en_senses existing
+               where existing.entry_id = retained.entry_id and existing.lang = retained.lang
+            );
+          insert or ignore into en_glosses
+            select retained.* from retained_en_glosses retained
+            join en_senses sense on sense.id = retained.sense_id;
           insert or ignore into en_examples
             select retained.* from retained_en_examples retained
             join en_senses sense on sense.id = retained.sense_id;
+          drop table retained_en_senses;
+          drop table retained_en_glosses;
           drop table retained_en_examples;
         `);
       })();
@@ -114,8 +141,9 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
 
 /**
  * Grafts a rebuilt Japanese release onto the production database. Imported
- * content is replaced wholesale while accepted generated entries and accepted
- * generated examples on imported meanings are retained with their provenance.
+ * content is replaced wholesale while accepted generated entries, accepted
+ * language groups authored for imported entries, and accepted generated
+ * examples on imported meanings are retained with their provenance.
  */
 export function importJapaneseRelease(path: string, releasePath: string): boolean {
   const production = new Database(path);
@@ -140,11 +168,22 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
     try {
       production.transaction(() => {
         production.exec(`
+          -- An accepted language group authored for an imported entry is the
+          -- usual shape of enrichment. It is carried across the graft whole,
+          -- with its glosses, examples, and generation provenance.
+          create temp table retained_ja_senses as
+            select sense.* from ja_senses sense
+            join ja_entries entry on entry.id = sense.entry_id
+            where sense.provenance = 'generated' and entry.source <> 'generated';
+          create temp table retained_ja_glosses as
+            select gloss.* from ja_glosses gloss
+            where gloss.sense_id in (select id from retained_ja_senses);
           create temp table retained_ja_examples as
             select example.* from ja_examples example
             join ja_senses sense on sense.id = example.sense_id
             join ja_entries entry on entry.id = sense.entry_id
-            where example.source = 'generated' and entry.source <> 'generated';
+            where entry.source <> 'generated'
+              and (example.source = 'generated' or sense.provenance = 'generated');
           delete from ja_examples where sense_id in (
             select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated'
@@ -167,9 +206,24 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           insert or ignore into ja_senses select * from japanese_release.ja_senses;
           insert or ignore into ja_glosses select * from japanese_release.ja_glosses;
           insert or ignore into ja_examples select * from japanese_release.ja_examples;
+          -- A retained group only returns to an entry the release still
+          -- provides, and never displaces content the release itself explains
+          -- in that language.
+          insert or ignore into ja_senses
+            select retained.* from retained_ja_senses retained
+            join ja_entries entry on entry.id = retained.entry_id
+            where not exists (
+              select 1 from ja_senses existing
+               where existing.entry_id = retained.entry_id and existing.lang = retained.lang
+            );
+          insert or ignore into ja_glosses
+            select retained.* from retained_ja_glosses retained
+            join ja_senses sense on sense.id = retained.sense_id;
           insert or ignore into ja_examples
             select retained.* from retained_ja_examples retained
             join ja_senses sense on sense.id = retained.sense_id;
+          drop table retained_ja_senses;
+          drop table retained_ja_glosses;
           drop table retained_ja_examples;
         `);
       })();

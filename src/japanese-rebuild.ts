@@ -37,7 +37,7 @@ export type JapaneseRebuildResult = {
   sourcedExamples: { imported: number; unmatched: number; ambiguous: number; invalid: number };
   legacyGlosses: { imported: number; droppedUnknownSense: number };
   legacyExamples: { imported: number; droppedUnknownSense: number };
-  retained: { entries: number; examples: number };
+  retained: { entries: number; groups: number; examples: number };
 };
 
 type LegacyGlossRow = {
@@ -57,6 +57,26 @@ type LegacyExampleRow = {
     reviewStatus: "checked";
   };
   attempts: unknown[];
+};
+
+/**
+ * One accepted authored language group on an entry the sources still provide.
+ * The entry itself is imported, so only this language's own meanings, glosses,
+ * examples, and generation provenance are carried across a rebuild.
+ */
+type RetainedGroup = {
+  entryId: string;
+  lang: string;
+  senses: Array<Record<string, unknown>>;
+  glosses: Array<Record<string, unknown>>;
+  examples: Array<Record<string, unknown>>;
+  generations: Array<Record<string, unknown>>;
+};
+
+type Retained = {
+  entries: RetainedEntry[];
+  groups: RetainedGroup[];
+  examples: Array<Record<string, unknown>>;
 };
 
 type RetainedEntry = {
@@ -112,7 +132,7 @@ export async function rebuildJapaneseDictionary(
 async function buildInto(
   db: Database,
   options: JapaneseRebuildOptions,
-  retained: { entries: RetainedEntry[]; examples: Array<Record<string, unknown>> }
+  retained: Retained
 ): Promise<Omit<JapaneseRebuildResult, "path">> {
   db.exec("pragma journal_mode = OFF; pragma synchronous = OFF;");
   createJapaneseSchema(db);
@@ -471,16 +491,17 @@ function importLegacyExamples(
   return stats;
 }
 
-function emptyRetained(): { entries: RetainedEntry[]; examples: Array<Record<string, unknown>> } {
-  return { entries: [], examples: [] };
+function emptyRetained(): Retained {
+  return { entries: [], groups: [], examples: [] };
 }
 
 /**
  * Accepted enrichment survives a rebuild with its own provenance: generated
- * entries are carried whole, and generated examples on imported meanings are
- * re-attached by their language-scoped meaning identifier.
+ * entries are carried whole, accepted language groups authored for an imported
+ * entry are carried per language, and generated examples on imported meanings
+ * are re-attached by their language-scoped meaning identifier.
  */
-function readRetained(path: string): { entries: RetainedEntry[]; examples: Array<Record<string, unknown>> } {
+function readRetained(path: string): Retained {
   const db = new Database(path, { readonly: true });
   try {
     if (!hasJapaneseSchema(db)) return emptyRetained();
@@ -519,15 +540,49 @@ function readRetained(path: string): { entries: RetainedEntry[]; examples: Array
       };
     });
 
+    // What enrichment usually produces is a language group under an imported
+    // entry. It is retained per entry and language, because the entry itself
+    // comes back from the sources.
+    const groups = db.query<{ entry_id: string; lang: string }, []>(`
+      select sense.entry_id as entry_id, sense.lang as lang
+        from ja_senses sense
+        join ja_entries entry on entry.id = sense.entry_id
+       where sense.provenance = 'generated' and entry.source <> 'generated'
+       group by sense.entry_id, sense.lang
+       order by sense.entry_id, sense.lang
+    `).all().map<RetainedGroup>(({ entry_id: entryId, lang }) => {
+      const senses = db.query<Record<string, unknown>, [string, string]>(
+        "select * from ja_senses where entry_id = ? and lang = ? order by position"
+      ).all(entryId, lang);
+      const senseIds = senses.map((sense) => String(sense.id));
+      return {
+        entryId,
+        lang,
+        senses,
+        glosses: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
+          "select * from ja_glosses where sense_id = ? order by position"
+        ).all(senseId)),
+        examples: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
+          "select * from ja_examples where sense_id = ? order by position"
+        ).all(senseId)),
+        generations: db.query<Record<string, unknown>, [string, string]>(`
+          select distinct generation.* from ja_generations generation
+            join ja_senses sense on sense.generation_id = generation.id
+           where sense.entry_id = ? and sense.lang = ?
+        `).all(entryId, lang)
+      };
+    });
+
+    const retainedSenseIds = new Set(groups.flatMap((group) => group.senses.map((sense) => String(sense.id))));
     const examples = db.query<Record<string, unknown>, []>(`
       select example.* from ja_examples example
         join ja_senses sense on sense.id = example.sense_id
         join ja_entries entry on entry.id = sense.entry_id
        where example.source = 'generated' and entry.source <> 'generated'
        order by example.sense_id, example.position
-    `).all();
+    `).all().filter((example) => !retainedSenseIds.has(String(example.sense_id)));
 
-    return { entries, examples };
+    return { entries, groups, examples };
   } finally {
     db.close();
   }
@@ -535,9 +590,10 @@ function readRetained(path: string): { entries: RetainedEntry[]; examples: Array
 
 function restoreRetained(
   db: Database,
-  retained: { entries: RetainedEntry[]; examples: Array<Record<string, unknown>> }
-): { entries: number; examples: number } {
+  retained: Retained
+): { entries: number; groups: number; examples: number } {
   let entries = 0;
+  let groups = 0;
   let examples = 0;
   db.transaction(() => {
     for (const record of retained.entries) {
@@ -561,14 +617,33 @@ function restoreRetained(
       for (const example of record.examples) insertRow(db, "ja_examples", example, false);
       entries += 1;
     }
+    for (const group of retained.groups) {
+      // The entry must still exist in the rebuilt sources, and the rebuild must
+      // not already explain it in this language: imported content wins, and a
+      // retained group never reorders it.
+      if (!db.query<{ id: string }, [string]>("select id from ja_entries where id = ?").get(group.entryId)) continue;
+      if (db.query<{ id: string }, [string, string]>(
+        "select id from ja_senses where entry_id = ? and lang = ? limit 1"
+      ).get(group.entryId, group.lang)) continue;
+      for (const generation of group.generations) insertRow(db, "ja_generations", generation, true);
+      for (const sense of group.senses) insertRow(db, "ja_senses", sense, false);
+      for (const gloss of group.glosses) insertRow(db, "ja_glosses", gloss, false);
+      for (const example of group.examples) insertRow(db, "ja_examples", example, false);
+      groups += 1;
+    }
     for (const example of retained.examples) {
       const senseId = String(example.sense_id);
       if (!db.query<{ id: string }, [string]>("select id from ja_senses where id = ?").get(senseId)) continue;
-      insertRow(db, "ja_examples", example, true);
+      // The rebuilt meaning may have gained or lost imported examples, so the
+      // retained one is appended rather than dropped onto a taken position.
+      const next = db.query<{ position: number }, [string]>(
+        "select coalesce(max(position), 0) + 1 as position from ja_examples where sense_id = ?"
+      ).get(senseId)!.position;
+      insertRow(db, "ja_examples", { ...example, position: next }, true);
       examples += 1;
     }
   })();
-  return { entries, examples };
+  return { entries, groups, examples };
 }
 
 function insertRow(db: Database, table: string, row: Record<string, unknown>, ignore: boolean): void {

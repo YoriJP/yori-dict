@@ -46,7 +46,14 @@ function importJapaneseOverlay(productionPath: string, overlayPath: string): boo
         // It is split back into one independent group per language, keeping
         // each language's own meanings, ids, and order.
         for (const [lang, entry] of splitLegacyEntry(JSON.parse(row.entry_json) as PublicLookupItem)) {
-          repository.saveEntry(entry, lang);
+          // A legacy group for a headword the dictionary already carries joins
+          // that entry's identity. Minting a second entry for the same written
+          // form would leave the absorbed group unreadable.
+          const canonical = repository.canonicalEntry?.(entry.word);
+          // Content the dictionary already carries in this language is correct
+          // and stays untouched; only a missing language group is absorbed.
+          if (repository.find(entry.word, "ja", lang)) continue;
+          repository.saveEntry(canonical ? { ...entry, id: canonical.id } : entry, lang);
         }
       }
     }
