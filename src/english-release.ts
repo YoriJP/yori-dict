@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { Database } from "bun:sqlite";
+import { createLanguageBanks, writeYomitanPacks } from "./yomitan-pack";
 import {
   fileSha256,
   readCoverageFrom,
@@ -20,7 +21,6 @@ import {
   readCoverage,
   type LanguageCoverage
 } from "./english-schema";
-import { createStoredZip } from "./stored-zip";
 import type { EnglishSense } from "./english-types";
 
 export type EnglishReleaseArtifacts = {
@@ -77,11 +77,7 @@ export async function buildEnglishRelease(
     await rm(artifacts.yomitan[lang], { force: true });
   }
 
-  // Each pack accumulates only the terms of its own explanation language, so
-  // one pass over the canonical data can never place a gloss in another
-  // language's pack.
-  const banks = new Map<string, unknown[][][]>(Object.keys(coverage).map((lang) => [lang, [[]]]));
-  const sequence = new Map<string, number>(Object.keys(coverage).map((lang) => [lang, 0]));
+  const banks = createLanguageBanks(Object.keys(coverage));
   const writer = Bun.file(artifacts.jsonl).writer();
   const problems: string[] = [];
   const validator = createEnglishDictionaryValidator();
@@ -92,16 +88,7 @@ export async function buildEnglishRelease(
     writer.write(`${JSON.stringify(canonicalRecord(record))}\n`);
     entries += 1;
     for (const group of record.groups) {
-      const langBanks = banks.get(group.lang);
-      if (!langBanks) continue;
-      let bank = langBanks.at(-1)!;
-      if (bank.length === 10_000) {
-        bank = [];
-        langBanks.push(bank);
-      }
-      const next = (sequence.get(group.lang) ?? 0) + 1;
-      sequence.set(group.lang, next);
-      bank.push([
+      banks.add(group.lang, (sequence) => [
         record.entry.headword,
         "",
         [...new Set(group.senses.map(({ partOfSpeech }) => partOfSpeech))].join(" "),
@@ -109,7 +96,7 @@ export async function buildEnglishRelease(
         0,
         // Meanings keep this language's own stored order.
         group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text)),
-        next,
+        sequence,
         ""
       ]);
     }
@@ -117,25 +104,16 @@ export async function buildEnglishRelease(
   await writer.end();
   if (problems.length > 0) throw new Error(`Invalid English dictionary:\n${problems.slice(0, 20).join("\n")}`);
 
-  for (const [lang, langBanks] of banks) {
-    await Bun.write(artifacts.yomitan[lang], createStoredZip([
-      {
-        name: "index.json",
-        content: JSON.stringify({
-          title: yomitanTitles[lang] ?? `Yori English (${lang})`,
-          revision: version,
-          format: 3,
-          sequenced: true,
-          author: "YoriJP",
-          url: "https://github.com/YoriJP/yori-dict",
-          attribution: `${languageAttribution(metadata.sources, lang)}; see the release manifest.`,
-          // Named explanation language of this pack; it contains no other.
-          description: `English headwords explained in ${lang}.`
-        })
-      },
-      ...langBanks.map((bank, index) => ({ name: `term_bank_${index + 1}.json`, content: JSON.stringify(bank) }))
-    ]));
-  }
+  await writeYomitanPacks(banks, {
+    revision: version,
+    path: (lang) => artifacts.yomitan[lang]!,
+    index: (lang) => ({
+      title: yomitanTitles[lang] ?? `Yori English (${lang})`,
+      attribution: `${languageAttribution(metadata.sources, lang)}; see the release manifest.`,
+      // Named explanation language of this pack; it contains no other.
+      description: `English headwords explained in ${lang}.`
+    })
+  });
 
   await pipeline(createReadStream(artifacts.sqlite), createGzip({ level: 9 }), createWriteStream(artifacts.gzip));
   const sha256 = await fileSha256(artifacts.gzip);
