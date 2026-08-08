@@ -1161,10 +1161,34 @@ function exampleAuthorPrompt(
   ].join("\n");
 }
 
-function reviewPrompt(candidateId: string, candidate: unknown): string {
+/**
+ * What a reviewer checks when the candidate is a whole entry with its own
+ * pronunciations and source evidence.
+ */
+const entryReviewCriteria =
+  "Check coverage, sense structure, pronunciation, labels, source provenance, Taiwan terminology, factual accuracy, and safety.";
+
+/**
+ * An explanation group is a different shape, and the criteria above reject every
+ * well-formed one: the group is authored rather than imported, so it carries no
+ * evidence ids, and pronunciations describe the entry rather than one language,
+ * so it carries none. Asked to check provenance and pronunciation, a reviewer
+ * finds both missing and refuses content that is exactly as specified.
+ */
+const languageGroupReviewCriteria = [
+  "The candidate is one explanation group written in explanationLanguage for a headword.",
+  "The group is authored, not imported: every meaning is provenance generated with no evidence ids,",
+  "and the group carries no pronunciations. Neither is a defect.",
+  "Reference facts describe coverage to match, never wording to copy.",
+  "Check that each definition is natural dictionary wording in explanationLanguage, that the meaning",
+  "division suits that language rather than mirroring the reference, that labels are right, that a",
+  "zh-tw group uses Taiwan terminology, and that the content is accurate and safe."
+].join(" ");
+
+function reviewPrompt(candidateId: string, candidate: unknown, criteria: string = entryReviewCriteria): string {
   return [
     "Reject only. Return exactly ACCEPT or REJECT and nothing else. Never rewrite or explain.",
-    "Check coverage, sense structure, pronunciation, labels, source provenance, Taiwan terminology, factual accuracy, and safety.",
+    criteria,
     `candidateId: ${candidateId}`,
     `candidate: ${JSON.stringify(candidate)}`
   ].join("\n");
@@ -1253,7 +1277,7 @@ function englishModelConfigs(selection: EnglishModelSelection) {
   return {
     author: selection.author,
     eligibility: modelConfig("eligibility", selection.author, "english-eligibility-v1"),
-    entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v2"),
+    entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v3"),
     exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v1", englishExampleSchema),
     bilingualExampleAuthor: modelConfig(
       "example-author", selection.author, "english-bilingual-example-author-v1", englishBilingualExampleSchema
@@ -1432,7 +1456,7 @@ async function authorEnglishEntry(
       // English source facts are reference for another language, never the
       // meaning list the group had to mirror.
       [request.lang === "en" ? "sourceEvidence" : "englishReferenceFacts"]: sources
-    }),
+    }, request.lang === "en" ? entryReviewCriteria : languageGroupReviewCriteria),
     request.mode,
     candidateId
   );
