@@ -2,7 +2,9 @@ import { Database } from "bun:sqlite";
 import {
   lookupEnglishEntry,
   normalizeEnglishLookupTerm,
-  readEnglishEntry
+  readEnglishEntry,
+  readEnglishLanguages,
+  readEnglishSourceCredits
 } from "./english-dictionary";
 import { createEnglishSchema } from "./english-schema";
 import type {
@@ -12,11 +14,13 @@ import type {
   GenerationProvenance
 } from "./on-demand-dictionary";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./english-types";
-import type { ApiLang } from "./types";
+import type { ApiLang, DictionaryMeta } from "./types";
 
 export type PersistentEnglishEnrichmentRepository = EnglishEnrichmentRepository & {
   acceptedEntries(lang: ApiLang): EnglishEntry[];
   attemptRecords(): AttemptRecord[];
+  /** What the English dictionary can truthfully say about itself, read from its rows. */
+  meta(): DictionaryMeta;
   close(): void;
 };
 
@@ -54,7 +58,7 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
   const clearGeneratedExamples = db.prepare(
     "delete from en_examples where sense_id = ? and source = 'generated'"
   );
-  // A generated example is appended after the meaning's imported examples, so
+  // A generated example is appended after the sense's imported examples, so
   // accepting or retrying one never overwrites sourced content.
   const insertGeneratedExample = db.prepare(`
     insert into en_examples
@@ -161,9 +165,9 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
       });
     },
     /**
-     * Writes one entry-language group atomically. Only meanings in `lang` are
+     * Writes one entry-language group atomically. Only senses in `lang` are
      * replaced, so authoring or rejecting one language never disturbs another
-     * language's accepted content for the same entry, and imported meanings in
+     * language's accepted content for the same entry, and imported senses in
      * another language are never rewritten.
      */
     saveEntry(entry, lang, generation) {
@@ -238,7 +242,7 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
     saveExample(senseId, example, generation) {
       db.transaction(() => {
         if (!db.query<{ id: string }, [string]>("select id from en_senses where id = ?").get(senseId)) {
-          throw new Error(`Cannot save an English example before its meaning: ${senseId}`);
+          throw new Error(`Cannot save an English example before its sense: ${senseId}`);
         }
         saveExampleRow(
           senseId,
@@ -274,6 +278,9 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
       return db.query<{ attempt_json: string }, []>(
         "select attempt_json from model_attempts where dictionary = 'en' order by id"
       ).all().map((row) => JSON.parse(row.attempt_json) as AttemptRecord);
+    },
+    meta() {
+      return { languages: readEnglishLanguages(db), sources: readEnglishSourceCredits(db) };
     },
     close() {
       db.close();

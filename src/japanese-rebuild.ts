@@ -61,7 +61,7 @@ type LegacyExampleRow = {
 
 /**
  * One accepted authored language group on an entry the sources still provide.
- * The entry itself is imported, so only this language's own meanings, glosses,
+ * The entry itself is imported, so only this language's own senses, glosses,
  * examples, and generation provenance are carried across a rebuild.
  */
 type RetainedGroup = {
@@ -77,7 +77,7 @@ type Retained = {
   entries: RetainedEntry[];
   groups: RetainedGroup[];
   examples: Array<Record<string, unknown>>;
-  /** Generations referenced by retained examples on imported meanings. */
+  /** Generations referenced by retained examples on imported senses. */
   exampleGenerations: Array<Record<string, unknown>>;
 };
 
@@ -183,7 +183,7 @@ type ImportedSense = {
   entryId: string;
   jmdictSense: JmdictWord["sense"][number];
   position: number;
-  /** Language-scoped canonical sense ids created for this source meaning. */
+  /** Language-scoped canonical sense ids created for this source sense. */
   byLang: Map<ApiLang, string>;
 };
 
@@ -238,7 +238,7 @@ function importWords(
 
       const examplesBySensePosition = matchExampleSenses(word, examplesBySourceId.get(word.id), exampleStats);
       // Positions restart at 1 inside each explanation language while keeping
-      // JMdict's editorial order, so one entry can have different meaning
+      // JMdict's editorial order, so one entry can have different sense
       // counts and order per language.
       const nextPosition = new Map<ApiLang, number>();
 
@@ -287,7 +287,7 @@ function importWords(
 
         importedSenses.set(baseSenseId, { entryId, jmdictSense: sense, position: index + 1, byLang });
 
-        // A sourced example is a bilingual pair. It stays with the meaning of
+        // A sourced example is a bilingual pair. It stays with the sense of
         // the language it is paired with and is never copied into a language
         // whose sentence it does not carry.
         const positionsByLang = new Map<ApiLang, number>();
@@ -337,8 +337,8 @@ function insertSenseStatement(db: Database) {
 /**
  * Legacy accepted gloss records name an exact imported sense identifier, which
  * is the only route by which secondary content becomes canonical. Each record
- * creates a meaning inside its own explanation language rather than adding a
- * gloss to another language's meaning.
+ * creates a sense inside its own explanation language rather than adding a
+ * gloss to another language's sense.
  */
 function importLegacyGlosses(
   db: Database,
@@ -373,7 +373,7 @@ function importLegacyGlosses(
       seen.add(key);
 
       const imported = importedSenses.get(row.senseId);
-      // The pinned source version may no longer contain the mapped meaning.
+      // The pinned source version may no longer contain the mapped sense.
       // A deliberate rebuild drops it rather than failing the whole import.
       if (!imported) {
         stats.droppedUnknownSense += 1;
@@ -435,9 +435,9 @@ function countSenses(db: Database, entryId: string, lang: string): number {
 }
 
 /**
- * Accepted generated examples are attached only to the meaning of the language
+ * Accepted generated examples are attached only to the sense of the language
  * whose sentence they carry, so a paired sentence never appears under another
- * language's meaning.
+ * language's sense.
  */
 function importLegacyExamples(
   db: Database,
@@ -500,8 +500,8 @@ function emptyRetained(): Retained {
 /**
  * Accepted enrichment survives a rebuild with its own provenance: generated
  * entries are carried whole, accepted language groups authored for an imported
- * entry are carried per language, and generated examples on imported meanings
- * are re-attached by their language-scoped meaning identifier.
+ * entry are carried per language, and generated examples on imported senses
+ * are re-attached by their language-scoped sense identifier.
  */
 function readRetained(path: string): Retained {
   const db = new Database(path, { readonly: true });
@@ -593,7 +593,7 @@ function readRetained(path: string): Retained {
        order by example.sense_id, example.position
     `).all().filter((example) => !retainedSenseIds.has(String(example.sense_id)));
 
-    // A generated example on an imported meaning carries its own generation
+    // A generated example on an imported sense carries its own generation
     // reference, so the row it points at is retained with it.
     const exampleGenerationIds = [...new Set(
       examples.map((example) => example.generation_id).filter((id): id is string => typeof id === "string")
@@ -672,7 +672,7 @@ function restoreRetained(
     for (const example of retained.examples) {
       const senseId = String(example.sense_id);
       if (!db.query<{ id: string }, [string]>("select id from ja_senses where id = ?").get(senseId)) continue;
-      // The rebuilt meaning may have gained or lost imported examples, so the
+      // The rebuilt sense may have gained or lost imported examples, so the
       // retained one is appended rather than dropped onto a taken position.
       const next = db.query<{ position: number }, [string]>(
         "select coalesce(max(position), 0) + 1 as position from ja_examples where sense_id = ?"

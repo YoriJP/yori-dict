@@ -7,16 +7,16 @@ export type { LanguageCoverage };
  * Canonical English dictionary tables.
  *
  * One entry owns identity, written form, and pronunciations. Everything that
- * explains the entry — meanings, glosses, examples, provenance — hangs off
+ * explains the entry — senses, glosses, examples, provenance — hangs off
  * `en_senses`, which carries the explanation language as data. A gloss or
  * example can therefore only ever belong to the one language its owning
- * meaning declares, which is what keeps releases and Yomitan packs from mixing
+ * sense declares, which is what keeps releases and Yomitan packs from mixing
  * languages. English explanations of English headwords are simply the group
  * whose `lang` is `en`; another explanation language is more rows, not another
  * table.
  *
  * `en-1` was the earlier blob shape, where one `english_entries` row held a whole
- * entry as JSON and every meaning was English. `en-2` is this normalized shape,
+ * entry as JSON and every sense was English. `en-2` is this normalized shape,
  * so a reader can tell the two artifact generations apart, exactly as `ja-2`
  * distinguishes the Japanese rebuild from the tables it replaced.
  */
@@ -155,7 +155,7 @@ export function hasEnglishSchema(db: Database): boolean {
   );
 }
 
-/** Exact entry, meaning, gloss, and example counts by explanation language. */
+/** Exact entry, sense, gloss, and example counts by explanation language. */
 export function readCoverage(db: Database): Record<string, LanguageCoverage> {
   return readLanguageCoverage(db, "en");
 }

@@ -5,7 +5,7 @@ import { createStoredZip } from "./stored-zip";
  *
  * A pack holds exactly one explanation language. That is enforced here by
  * construction rather than by each release remembering to filter: terms are
- * accumulated into the bank named by the language of the meaning they came
+ * accumulated into the bank named by the language of the sense they came
  * from, and a pack is written from one language's banks alone.
  */
 

@@ -66,7 +66,7 @@ test("a Japanese WordNet record without its own definition stays supporting evid
 
   expect(imported.accepted[0]).toMatchObject({
     role: "supporting-evidence",
-    reasons: ["source-has-no-target-language-meaning-structure"]
+    reasons: ["source-has-no-target-language-sense-structure"]
   });
 });
 
@@ -108,7 +108,7 @@ test("Taiwan terminology keeps agency, dataset, domain, version, attribution, an
 test("reverse and Simplified Chinese sources remain supporting evidence", () => {
   for (const sourceId of ["jmdict-reverse", "cc-cedict", "chinese-wordnet-simplified", "wiktionary-en-translations"]) {
     const classification = classifySourceRecord(
-      candidate({ sourceId, matchedBy: "source-identifier", hasTargetLanguageMeaningStructure: true })
+      candidate({ sourceId, matchedBy: "source-identifier", hasTargetLanguageSenseStructure: true })
     );
     expect(classification.role).toBe("supporting-evidence");
     expect(classification.eligible).toBe(false);
@@ -144,8 +144,8 @@ test("NTU Chinese Wordnet needs a documented permission grant before any import"
 test("direct import requires meaning structure, locale, license, attribution, and provenance", () => {
   expect(classifySourceRecord(candidate({}))).toEqual({ role: "direct-import-candidate", eligible: true, reasons: [] });
 
-  expect(classifySourceRecord(candidate({ hasTargetLanguageMeaningStructure: false })).reasons).toContain(
-    "source-has-no-target-language-meaning-structure"
+  expect(classifySourceRecord(candidate({ hasTargetLanguageSenseStructure: false })).reasons).toContain(
+    "source-has-no-target-language-sense-structure"
   );
   expect(classifySourceRecord(candidate({ recordLocale: "zh-hant", targetLocale: "zh-tw" })).reasons).toContain(
     "record-locale-does-not-match-the-target-locale"
@@ -162,7 +162,7 @@ function candidate(overrides: Partial<DirectImportCandidate>): DirectImportCandi
     recordId: "02084071-n:犬",
     targetLocale: "ja",
     recordLocale: "ja",
-    hasTargetLanguageMeaningStructure: true,
+    hasTargetLanguageSenseStructure: true,
     matchedBy: "explicit-mapping",
     license: wordNetMeta.license,
     attribution: wordNetMeta.attribution,

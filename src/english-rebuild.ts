@@ -7,6 +7,7 @@ import { englishEntryId, englishSenseId, normalizeEnglishLookupTerm } from "./en
 import {
   importOpenEnglishWordNetEntry,
   importWiktionaryEntry,
+  englishSourceCredits,
   oewnAttribution,
   oewnLicense,
   wiktionaryAttribution,
@@ -35,11 +36,11 @@ import type { EnglishSourceRecord } from "./english-types";
 /**
  * The explicit English source policy.
  *
- * Open English WordNet is the primary meaning inventory because it has the
+ * Open English WordNet is the primary sense inventory because it has the
  * broader coverage, and its lexical-entry editorial order is what canonical
  * storage keeps. Simple English Wiktionary is fallback and reference: it
  * supplies the whole entry for a headword Open English WordNet does not carry,
- * and otherwise only fills a pronunciation gap or is admitted one meaning at a
+ * and otherwise only fills a pronunciation gap or is admitted one sense at a
  * time through an explicit mapping that names an exact evidence identifier.
  * Nothing here compares two differently worded trusted definitions, and no
  * model is involved.
@@ -52,12 +53,12 @@ export const englishSourcePolicy = {
 } as const;
 
 /**
- * A pinned source that may publish canonical meanings in an explanation
+ * A pinned source that may publish canonical senses in an explanation
  * language other than English.
  *
  * Both are read through the same gate the evidence pipeline uses
  * (`classifySourceRecord`): a record becomes canonical only when it carries its
- * own target-language meaning text, reaches the English entry through an exact
+ * own target-language sense text, reaches the English entry through an exact
  * source identifier or a validated mapping, and records license, attribution
  * and version. A bare term pair or an unmapped record stays evidence and
  * publishes nothing.
@@ -94,7 +95,7 @@ export type EnglishLanguageSourceInput =
 export type EnglishLanguageImportResult = {
   /** Records the gate accepted for direct import. */
   eligible: number;
-  /** Meanings actually published, after resolving the English entry. */
+  /** Senses actually published, after resolving the English entry. */
   imported: number;
   /** Records that stay evidence because the direct-import contract is unmet. */
   evidenceOnly: number;
@@ -122,12 +123,12 @@ export type EnglishRebuildOptions = {
   version?: string;
   /**
    * JSONL files whose rows name an exact fallback evidence identifier to admit
-   * as one extra canonical meaning: `{"evidenceId": "wiktionary:..."}`.
+   * as one extra canonical sense: `{"evidenceId": "wiktionary:..."}`.
    */
   secondaryMappings?: string[];
   /**
    * Pinned sources for explanation languages other than English. They add
-   * sibling meaning groups to entries the English inventory already carries;
+   * sibling sense groups to entries the English inventory already carries;
    * they never create, reorder or rewrite the English group.
    */
   languageSources?: EnglishLanguageSourceInput[];
@@ -145,8 +146,8 @@ export type EnglishRebuildResult = {
   path: string;
   entries: number;
   coverage: Record<string, LanguageCoverage>;
-  primary: { entries: number; meanings: number };
-  fallback: { entries: number; meanings: number; referenceOnly: number };
+  primary: { entries: number; senses: number };
+  fallback: { entries: number; senses: number; referenceOnly: number };
   secondary: { imported: number; droppedUnknownEvidence: number };
   pronunciations: { primary: number; fallback: number };
   retained: { entries: number; groups: number; examples: number };
@@ -174,7 +175,7 @@ type RetainedEntry = {
 
 /**
  * One accepted authored language group on an entry the sources still provide.
- * The entry itself is imported, so only this language's own meanings, glosses,
+ * The entry itself is imported, so only this language's own senses, glosses,
  * examples, and generation provenance are carried across a rebuild.
  */
 type RetainedGroup = {
@@ -190,7 +191,7 @@ type Retained = {
   entries: RetainedEntry[];
   groups: RetainedGroup[];
   examples: Array<Record<string, unknown>>;
-  /** Generations referenced by retained examples on imported meanings. */
+  /** Generations referenced by retained examples on imported senses. */
   exampleGenerations: Array<Record<string, unknown>>;
 };
 
@@ -245,7 +246,7 @@ async function buildInto(
 
   const reference = fallbackSource
     ? await importFallback(fallbackSource, entries)
-    : { entries: 0, meanings: 0, referenceOnly: 0, byEvidenceId: new Map<string, ReferenceSense>(), byTerm: new Map<string, EnglishSourceRecord[]>() };
+    : { entries: 0, senses: 0, referenceOnly: 0, byEvidenceId: new Map<string, ReferenceSense>(), byTerm: new Map<string, EnglishSourceRecord[]>() };
 
   const secondary = await admitSecondary(options.secondaryMappings ?? [], reference.byEvidenceId, entries);
 
@@ -258,7 +259,7 @@ async function buildInto(
     entries: db.query<{ count: number }, []>("select count(*) as count from en_entries").get()?.count ?? 0,
     coverage: readCoverage(db),
     primary: primaryCounts,
-    fallback: { entries: reference.entries, meanings: reference.meanings, referenceOnly: reference.referenceOnly },
+    fallback: { entries: reference.entries, senses: reference.senses, referenceOnly: reference.referenceOnly },
     secondary,
     pronunciations,
     retained: retainedResult,
@@ -266,8 +267,8 @@ async function buildInto(
   };
 }
 
-/** One canonical meaning to publish in an explanation language other than English. */
-type LanguageMeaning = {
+/** One canonical sense to publish in an explanation language other than English. */
+type LanguageSense = {
   lookupTerm: string;
   evidenceId: string;
   definition: string;
@@ -283,7 +284,7 @@ type LanguageMeaning = {
 /**
  * Publishes sibling explanation-language groups from pinned mapped sources.
  *
- * Each language group gets its own meaning identifiers and its own positions
+ * Each language group gets its own sense identifiers and its own positions
  * starting at 1. The English group is read only, for the concept mapping and
  * the part-of-speech label; nothing here touches an English row.
  */
@@ -310,16 +311,16 @@ async function importLanguageGroups(
     }
   }
 
-  const meanings: LanguageMeaning[] = [];
+  const senses: LanguageSense[] = [];
   for (const input of inputs) {
     const result = results[input.lang] ??= { eligible: 0, imported: 0, evidenceOnly: 0, unmatched: 0, rejected: 0 };
     const produced = input.source === "japanese-wordnet"
       ? await readJapaneseWordNetMeanings(input, bySynset, result)
       : await readTaiwanTerminologyMeanings(input, entries, result);
-    meanings.push(...produced);
+    senses.push(...produced);
   }
 
-  writeLanguageMeanings(db, meanings, results);
+  writeLanguageSenses(db, senses, results);
   return results;
 }
 
@@ -332,7 +333,7 @@ async function readJapaneseWordNetMeanings(
   input: Extract<EnglishLanguageSourceInput, { source: "japanese-wordnet" }>,
   bySynset: Map<string, Array<{ lookupTerm: string; partOfSpeech: string }>>,
   result: EnglishLanguageImportResult
-): Promise<LanguageMeaning[]> {
+): Promise<LanguageSense[]> {
   const records = (await readLines(resolve(input.file))).map((line) => JSON.parse(line) as JapaneseWordNetRecord);
   const mappings = (await readLines(resolve(input.mappings))).map((line) => JSON.parse(line) as IliMapping);
   const imported = importJapaneseWordNetEvidence(records, mappings, {
@@ -344,7 +345,7 @@ async function readJapaneseWordNetMeanings(
   });
   result.rejected += imported.rejected.length;
 
-  const meanings: LanguageMeaning[] = [];
+  const senses: LanguageSense[] = [];
   for (const row of imported.accepted) {
     if (row.role !== "direct-import-candidate" || !row.definition) {
       result.evidenceOnly += 1;
@@ -357,7 +358,7 @@ async function readJapaneseWordNetMeanings(
       continue;
     }
     for (const holder of holders) {
-      meanings.push({
+      senses.push({
         lookupTerm: holder.lookupTerm,
         evidenceId: row.evidenceId,
         definition: row.definition,
@@ -371,19 +372,19 @@ async function readJapaneseWordNetMeanings(
       });
     }
   }
-  return meanings;
+  return senses;
 }
 
 async function readTaiwanTerminologyMeanings(
   input: Extract<EnglishLanguageSourceInput, { source: "taiwan-terminology" }>,
   entries: Map<string, PendingEntry>,
   result: EnglishLanguageImportResult
-): Promise<LanguageMeaning[]> {
+): Promise<LanguageSense[]> {
   const records = (await readLines(resolve(input.file))).map((line) => JSON.parse(line) as TaiwanTerminologyRecord);
   const imported = importTaiwanTerminology(records, { license: input.license });
   result.rejected += imported.rejected.length;
 
-  const meanings: LanguageMeaning[] = [];
+  const senses: LanguageSense[] = [];
   for (const row of imported.accepted) {
     // Re-run the gate here rather than trusting the role written into the file.
     const classification = classifySourceRecord({
@@ -392,7 +393,7 @@ async function readTaiwanTerminologyMeanings(
       recordId: row.evidenceId,
       targetLocale: "zh-tw",
       recordLocale: "zh-tw",
-      hasTargetLanguageMeaningStructure: row.definition !== null,
+      hasTargetLanguageSenseStructure: row.definition !== null,
       matchedBy: "source-identifier",
       license: input.license,
       attribution: row.attribution
@@ -410,13 +411,13 @@ async function readTaiwanTerminologyMeanings(
       result.unmatched += 1;
       continue;
     }
-    meanings.push({
+    senses.push({
       lookupTerm,
       evidenceId: row.evidenceId,
       definition: row.definition,
       partOfSpeech: pending.records[0].senses[0]?.partOfSpeech ?? "noun",
       // The row is authoritative only inside its stated domain, so the domain
-      // travels with the published meaning.
+      // travels with the published sense.
       domains: [row.domain],
       sourceName: "taiwan-terminology",
       sourceVersion: row.version,
@@ -425,15 +426,15 @@ async function readTaiwanTerminologyMeanings(
       attribution: `${row.attribution} (${row.agency}, ${row.dataset} ${row.version})`
     });
   }
-  return meanings;
+  return senses;
 }
 
-function writeLanguageMeanings(
+function writeLanguageSenses(
   db: Database,
-  meanings: LanguageMeaning[],
+  senses: LanguageSense[],
   results: Record<string, EnglishLanguageImportResult>
 ): void {
-  const langOf = (meaning: LanguageMeaning) => meaning.sourceName === "japanese-wordnet" ? "ja" : "zh-tw";
+  const langOf = (sense: LanguageSense) => sense.sourceName === "japanese-wordnet" ? "ja" : "zh-tw";
   const insertSense = db.prepare(`
     insert or ignore into en_senses (
       id, entry_id, lang, position, part_of_speech, registers, regions, domains, dated, usage,
@@ -452,9 +453,9 @@ function writeLanguageMeanings(
   const positions = new Map<string, number>();
 
   db.transaction(() => {
-    for (const meaning of meanings) {
-      const lang = langOf(meaning);
-      const entryId = englishEntryId(meaning.lookupTerm);
+    for (const sense of senses) {
+      const lang = langOf(sense);
+      const entryId = englishEntryId(sense.lookupTerm);
       if (!db.query<{ id: string }, [string]>("select id from en_entries where id = ?").get(entryId)) {
         results[lang].unmatched += 1;
         continue;
@@ -462,26 +463,26 @@ function writeLanguageMeanings(
       const key = `${entryId}:${lang}`;
       const position = (positions.get(key) ?? 0) + 1;
       positions.set(key, position);
-      const senseId = englishSenseId(`${lang}:${meaning.evidenceId}:${meaning.lookupTerm}`);
+      const senseId = englishSenseId(`${lang}:${sense.evidenceId}:${sense.lookupTerm}`);
       insertSense.run(
         senseId,
         entryId,
         lang,
         position,
-        meaning.partOfSpeech,
-        JSON.stringify(meaning.domains),
-        meaning.sourceName,
-        meaning.sourceVersion,
-        meaning.evidenceId
+        sense.partOfSpeech,
+        JSON.stringify(sense.domains),
+        sense.sourceName,
+        sense.sourceVersion,
+        sense.evidenceId
       );
-      insertGloss.run(senseId, meaning.definition, meaning.sourceName);
+      insertGloss.run(senseId, sense.definition, sense.sourceName);
       insertEntrySource.run(
         entryId,
-        meaning.sourceName,
-        meaning.sourceVersion,
-        meaning.sourceEntryId,
-        meaning.license,
-        meaning.attribution
+        sense.sourceName,
+        sense.sourceVersion,
+        sense.sourceEntryId,
+        sense.license,
+        sense.attribution
       );
       results[lang].imported += 1;
     }
@@ -514,6 +515,7 @@ function writeMetadata(
   insert.run("sources", JSON.stringify([
     ...options.sources.map((source) => ({
       source: source.source,
+      ...sourceCredit(source.source),
       lang: "en",
       version: source.version,
       license: source.license ?? defaultLicense(source.source),
@@ -527,6 +529,7 @@ function writeMetadata(
     })),
     ...(options.languageSources ?? []).map((source) => ({
       source: source.source,
+      ...sourceCredit(source.source),
       lang: source.lang,
       version: source.version,
       license: source.license,
@@ -556,7 +559,7 @@ async function importPrimary(
   source: EnglishSourceInput,
   entryFiles: string[] | null,
   entries: Map<string, PendingEntry>
-): Promise<{ entries: number; meanings: number }> {
+): Promise<{ entries: number; senses: number }> {
   const archive = await openArchive(resolve(source.file));
   const names = archive.names;
   const synsets = new Map<string, OewnSynset>();
@@ -567,7 +570,7 @@ async function importPrimary(
   }
 
   const wanted = entryFiles ? new Set(entryFiles) : null;
-  const counts = { entries: 0, meanings: 0 };
+  const counts = { entries: 0, senses: 0 };
   for (const name of names.filter((name) => /^entries-.+\.json$/.test(name)).sort()) {
     if (wanted && !wanted.has(name)) continue;
     const document = readArchiveJson(archive, name);
@@ -581,7 +584,7 @@ async function importPrimary(
       );
       if (records.length === 0) continue;
       counts.entries += 1;
-      counts.meanings += records.reduce((total, record) => total + record.senses.length, 0);
+      counts.senses += records.reduce((total, record) => total + record.senses.length, 0);
       for (const record of records) {
         const pending = pendingEntry(entries, record.headword);
         pending.records.push(record);
@@ -605,7 +608,7 @@ async function importFallback(
   entries: Map<string, PendingEntry>
 ): Promise<{
   entries: number;
-  meanings: number;
+  senses: number;
   referenceOnly: number;
   byEvidenceId: Map<string, ReferenceSense>;
   byTerm: Map<string, EnglishSourceRecord[]>;
@@ -615,7 +618,7 @@ async function importFallback(
   const seenRecordIds = new Map<string, number>();
   const covered = new Set(entries.keys());
   let admitted = 0;
-  let meanings = 0;
+  let senses = 0;
   let referenceOnly = 0;
 
   for (const line of await readLines(resolve(source.file))) {
@@ -635,14 +638,14 @@ async function importFallback(
       const pending = pendingEntry(entries, unique.headword);
       if (pending.records.length === 0) admitted += 1;
       pending.records.push(unique);
-      meanings += unique.senses.length;
+      senses += unique.senses.length;
     }
   }
-  return { entries: admitted, meanings, referenceOnly, byEvidenceId, byTerm };
+  return { entries: admitted, senses, referenceOnly, byEvidenceId, byTerm };
 }
 
 /**
- * Admits secondary canonical meanings. A row must name an exact evidence
+ * Admits secondary canonical senses. A row must name an exact evidence
  * identifier that the fallback source really produced; there is no matching by
  * wording and no model comparison.
  */
@@ -662,7 +665,7 @@ async function admitSecondary(
       if (admitted.has(row.evidenceId)) throw new Error(`Duplicate English secondary mapping: ${row.evidenceId}`);
       admitted.add(row.evidenceId);
       const reference = byEvidenceId.get(row.evidenceId);
-      // The pinned source may no longer carry the mapped meaning. A deliberate
+      // The pinned source may no longer carry the mapped sense. A deliberate
       // rebuild drops it rather than failing the whole import.
       if (!reference) {
         stats.droppedUnknownEvidence += 1;
@@ -875,8 +878,8 @@ function emptyRetained(): Retained {
 /**
  * Accepted enrichment survives a rebuild with its own provenance: generated
  * entries are carried whole, accepted language groups authored for an imported
- * entry are carried per language, and generated examples on imported meanings
- * are re-attached by their meaning identifier.
+ * entry are carried per language, and generated examples on imported senses
+ * are re-attached by their sense identifier.
  */
 function readRetained(path: string): Retained {
   const db = new Database(path, { readonly: true });
@@ -968,7 +971,7 @@ function readRetained(path: string): Retained {
        order by example.sense_id, example.position
     `).all().filter((example) => !retainedSenseIds.has(String(example.sense_id)));
 
-    // A generated example on an imported meaning carries its own generation
+    // A generated example on an imported sense carries its own generation
     // reference, so the row it points at is retained with it.
     const exampleGenerationIds = [...new Set(
       examples.map((example) => example.generation_id).filter((id): id is string => typeof id === "string")
@@ -1035,7 +1038,7 @@ function restoreRetained(
     for (const example of retained.examples) {
       const senseId = String(example.sense_id);
       if (!db.query<{ id: string }, [string]>("select id from en_senses where id = ?").get(senseId)) continue;
-      // The rebuilt meaning may have gained or lost imported examples, so the
+      // The rebuilt sense may have gained or lost imported examples, so the
       // retained one is appended rather than dropped onto a taken position.
       const next = db.query<{ position: number }, [string]>(
         "select coalesce(max(position), 0) + 1 as position from en_examples where sense_id = ?"
@@ -1081,6 +1084,15 @@ function reattachGroups(db: Database, record: RetainedEntry, entryId: string): n
     moved += 1;
   }
   return moved;
+}
+
+/**
+ * A recognisable name and a resolvable home for one pinned source. An
+ * unrecorded source contributes neither, so it is visibly missing from
+ * `/v1/meta` rather than published as an attribution nobody can act on.
+ */
+function sourceCredit(source: string): { name?: string; url?: string } {
+  return englishSourceCredits[source] ?? {};
 }
 
 function defaultLicense(source: string): string {

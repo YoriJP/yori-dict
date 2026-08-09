@@ -7,7 +7,7 @@ export type { LanguageCoverage };
  * Canonical Japanese dictionary tables.
  *
  * One entry owns identity and written forms. Everything that explains the
- * entry — meanings, glosses, examples, provenance — hangs off `ja_senses`,
+ * entry — senses, glosses, examples, provenance — hangs off `ja_senses`,
  * which carries the explanation language as data. A gloss or example can
  * therefore only ever belong to the one language its owning sense declares,
  * which is what keeps releases and Yomitan packs from mixing languages.
@@ -140,7 +140,7 @@ export function hasJapaneseSchema(db: Database): boolean {
   );
 }
 
-/** Exact entry, meaning, gloss, and example counts by explanation language. */
+/** Exact entry, sense, gloss, and example counts by explanation language. */
 export function readCoverage(db: Database): Record<string, LanguageCoverage> {
   return readLanguageCoverage(db, "ja");
 }

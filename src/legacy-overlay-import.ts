@@ -17,7 +17,7 @@ import { parseApiLang } from "./lang";
  * The old table names appear only here, and only as things to read out of a
  * separate legacy file. Nothing in lookup, enrichment, rebuild, or release
  * knows them. A legacy record held every gloss language against one shared
- * meaning list; it is split into independent language groups on the way in and
+ * sense list; it is split into independent language groups on the way in and
  * keeps the provenance it was written with, including the converter that
  * produced the legacy Simplified Chinese rows. There is no second lookup or
  * storage implementation behind this: after absorption the rows are ordinary
@@ -42,9 +42,9 @@ function importJapaneseOverlay(productionPath: string, overlayPath: string): boo
   try {
     if (hasTable(legacy, "on_demand_entries")) {
       for (const row of legacy.query<{ entry_json: string }, []>("select entry_json from on_demand_entries order by entry_id").all()) {
-        // A legacy record held every gloss language against one meaning list.
+        // A legacy record held every gloss language against one sense list.
         // It is split back into one independent group per language, keeping
-        // each language's own meanings, ids, and order.
+        // each language's own senses, ids, and order.
         for (const [lang, entry] of splitLegacyEntry(JSON.parse(row.entry_json) as PublicLookupItem)) {
           // A legacy group for a headword the dictionary already carries joins
           // that entry's identity. Minting a second entry for the same written
@@ -126,8 +126,8 @@ type LegacyEnglishEntry = Omit<EnglishEntry, "senses" | "pronunciations"> & {
 };
 
 /**
- * A legacy overlay record held one flat meaning list with a single definition
- * string. It is read back as an English-explained group so that the meaning,
+ * A legacy overlay record held one flat sense list with a single definition
+ * string. It is read back as an English-explained group so that the sense,
  * not the table, carries the explanation language.
  */
 function legacyEnglishEntry(entry: LegacyEnglishEntry): EnglishEntry {
@@ -179,7 +179,7 @@ function hasTable(db: Database, table: string): boolean {
 
 /**
  * Splits one legacy multi-language record into independent entry-language
- * groups. Meaning identifiers become language-scoped so that later authoring or
+ * groups. Sense identifiers become language-scoped so that later authoring or
  * review in one language cannot collide with another language's content.
  */
 function splitLegacyEntry(entry: PublicLookupItem): Array<[ApiLang, PublicLookupItem]> {
@@ -201,8 +201,8 @@ function splitLegacyEntry(entry: PublicLookupItem): Array<[ApiLang, PublicLookup
 }
 
 /**
- * Resolves a legacy example, which named one shared meaning, onto the
- * language-scoped meanings that own its paired sentences. Each target keeps
+ * Resolves a legacy example, which named one shared sense, onto the
+ * language-scoped senses that own its paired sentences. Each target keeps
  * only its own language's sentence.
  */
 function legacyExampleTargets(

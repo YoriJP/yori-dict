@@ -57,7 +57,7 @@ export type EvidenceRow = {
   pos: string;
   scope: "sense-local" | "entry-level";
   senseIndex: number | null;
-  sourceMeaning: string | null;
+  sourceGloss: string | null;
   senseHint: string | null;
   translationLocation: string;
   translationOrder: number;
@@ -318,7 +318,7 @@ function evidenceRowsForEntry(entry: WiktextractEntry, context: RowContext): Evi
         pos,
         scope: "sense-local",
         senseIndex,
-        sourceMeaning: glosses[senseIndex] ?? null,
+        sourceGloss: glosses[senseIndex] ?? null,
         sourceSenseId: senseIdOf(sense),
         translationLocation: `senses[${senseIndex}].translations`,
         translationOrder: order,
@@ -341,7 +341,7 @@ function evidenceRowsForEntry(entry: WiktextractEntry, context: RowContext): Evi
       pos,
       scope: "entry-level",
       senseIndex: matchedIndex,
-      sourceMeaning: matchedIndex === null ? null : glosses[matchedIndex] ?? null,
+      sourceGloss: matchedIndex === null ? null : glosses[matchedIndex] ?? null,
       sourceSenseId: matchedIndex === null ? null : senseIdOf(senses[matchedIndex] ?? {}),
       translationLocation: "translations",
       translationOrder: order,
@@ -362,7 +362,7 @@ type BuildRowContext = {
   pos: string;
   scope: "sense-local" | "entry-level";
   senseIndex: number | null;
-  sourceMeaning: string | null;
+  sourceGloss: string | null;
   sourceSenseId: string | null;
   translationLocation: string;
   translationOrder: number;
@@ -409,7 +409,7 @@ function buildRow(translation: WiktextractTranslation, options: BuildRowContext)
     pos: options.pos,
     scope: options.scope,
     senseIndex: options.senseIndex,
-    sourceMeaning: options.sourceMeaning,
+    sourceGloss: options.sourceGloss,
     senseHint: options.senseHint ?? null,
     translationLocation: options.translationLocation,
     translationOrder: options.translationOrder,
@@ -424,8 +424,8 @@ function buildRow(translation: WiktextractTranslation, options: BuildRowContext)
     corroboration: corroborationMatch,
     ambiguous: ambiguityReasons.length > 0,
     ambiguityReasons,
-    // A translation nested under an English meaning is authoring and review
-    // evidence. It never carries its own target-language meaning structure, so
+    // A translation nested under an English sense is authoring and review
+    // evidence. It never carries its own target-language sense structure, so
     // it is never eligible for direct import.
     role: "authoring-evidence",
     directImportEligible: false
@@ -436,7 +436,7 @@ function ambiguityReasonsFor(term: string, options: BuildRowContext): string[] {
   const reasons: string[] = [];
   if (/[,;/、；，]| or /.test(term)) reasons.push("multiple-terms-in-one-record");
   if (options.scope === "entry-level" && options.senseIndex === null && options.senseCount > 1) {
-    reasons.push("entry-level-record-cannot-be-attributed-to-one-meaning");
+    reasons.push("entry-level-record-cannot-be-attributed-to-one-sense");
   }
   return reasons;
 }

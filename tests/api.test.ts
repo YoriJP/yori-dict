@@ -35,9 +35,9 @@ afterAll(() => {
 });
 
 /**
- * Legacy accepted Taiwanese content maps onto an exact imported meaning and
- * becomes that language's own meaning rather than another gloss on the English
- * meaning.
+ * Legacy accepted Taiwanese content maps onto an exact imported sense and
+ * becomes that language's own sense rather than another gloss on the English
+ * sense.
  */
 function addTaiwaneseMeaning(db: Database, baseSenseId: string, gloss: string): void {
   const source = db
@@ -99,20 +99,24 @@ test("returns metadata", async () => {
   const body = await res.json();
   expect(body.apiVersion).toBe("v1");
   expect(body.dictionaryVersion).toBe("2026-06-08");
-  // Both dictionaries ship, so metadata names what each one can be asked for.
+  // Metadata is derived from the rows that exist, so it names only the
+  // languages a query would actually find content in. This database carries
+  // English and legacy Taiwanese Japanese senses and no English dictionary,
+  // and `de` — a supported language with nothing behind it yet — is absent.
   expect(body.dictionaries).toEqual({
-    ja: { languages: ["en", "de", "zh-tw", "zh-cn", "ko"] },
-    en: { languages: ["en", "ja", "zh-tw"] }
+    ja: { languages: ["en", "zh-tw"] },
+    en: { languages: [] }
   });
+  expect(body.languages).toEqual(["en", "zh-tw"]);
+  // Every credit points somewhere a reader can follow.
+  for (const source of body.sources) {
+    expect(source.url).toMatch(/^https:\/\//);
+    expect(source.license).not.toBe("");
+  }
   expect(body.sources).toContainEqual({
     name: "Yori generated zh-CN glosses (legacy records)",
     license: "CC-BY-SA-4.0",
-    url: "sources/ai-glosses/zh-cn.jsonl"
-  });
-  expect(body.sources).toContainEqual({
-    name: "Yori generated Korean glosses (legacy records)",
-    license: "CC-BY-SA-4.0",
-    url: "sources/ai-glosses/ko.jsonl"
+    url: "https://github.com/YoriJP/yori-dict/blob/main/sources/ai-glosses/zh-cn.jsonl"
   });
   expect(body.tags.uk).toBe("word usually written using kana alone");
   expect(body.tags.vt).toBe("transitive verb");
@@ -126,13 +130,13 @@ test("looks up an exact Japanese headword in the requested language", async () =
   expect(entry.headword).toBe("食べる");
   expect(entry.reading).toBe("たべる");
   expect(entry.sources).toEqual(["jmdict:1358280"]);
-  expect(entry.meanings).toHaveLength(1);
-  expect(entry.meanings[0].glosses[0].text).toBe("吃");
+  expect(entry.senses).toHaveLength(1);
+  expect(entry.senses[0].glosses[0].text).toBe("吃");
 });
 
 test("legacy accepted content reads as generated provenance in its own language", async () => {
   const entry = await lookup("食べる", "zh-tw");
-  expect(entry.meanings[0].glosses[0]).toEqual({
+  expect(entry.senses[0].glosses[0]).toEqual({
     text: "吃",
     source: "generated",
     reviewStatus: "checked"
@@ -142,7 +146,7 @@ test("legacy accepted content reads as generated provenance in its own language"
 test("returns sourced examples and the easiest estimated level", async () => {
   const entry = await lookup("食べる");
   expect(entry.estimatedLevel).toBe("N5");
-  expect(entry.meanings[0].examples).toEqual([
+  expect(entry.senses[0].examples).toEqual([
     {
       text: "もっと果物を食べるべきです。",
       translations: [{ lang: "en", text: "You should eat more fruit." }],
@@ -156,20 +160,20 @@ test("returns sourced examples and the easiest estimated level", async () => {
 
 test("matches examples to the exact sense when the source has fewer senses", async () => {
   const entry = await lookup("配う");
-  expect(entry.meanings[0].examples).toEqual([]);
-  expect(entry.meanings[1].examples[0].sourceId).toBe("114734");
+  expect(entry.senses[0].examples).toEqual([]);
+  expect(entry.senses[1].examples[0].sourceId).toBe("114734");
 });
 
 test("omits an example when identical senses make its attachment ambiguous", async () => {
   const entry = await lookup("あいまい語");
-  expect(entry.meanings).toHaveLength(2);
-  expect(entry.meanings[0].examples).toEqual([]);
-  expect(entry.meanings[1].examples).toEqual([]);
+  expect(entry.senses).toHaveLength(2);
+  expect(entry.senses[0].examples).toEqual([]);
+  expect(entry.senses[1].examples).toEqual([]);
 });
 
 test("represents generated examples distinctly without generating them at lookup time", async () => {
   const entry = await lookup("高い");
-  expect(entry.meanings[0].examples).toEqual([
+  expect(entry.senses[0].examples).toEqual([
     {
       text: "それは高かったです。",
       translations: [{ lang: "en", text: "It was expensive." }],
@@ -193,7 +197,7 @@ test("preserves form tags and sense applicability", async () => {
     common: false,
     tags: ["sK"]
   });
-  expect(entry.meanings[0].appliesTo).toEqual({
+  expect(entry.senses[0].appliesTo).toEqual({
     kanji: ["遇う"],
     kana: ["*"]
   });
@@ -201,36 +205,36 @@ test("preserves form tags and sense applicability", async () => {
 
 test("returns sense annotations when JMdict has them", async () => {
   const entry = await lookup("綺麗");
-  const meaning = entry.meanings[0];
-  expect(meaning.misc).toEqual(["uk"]);
-  expect(meaning.info).toEqual(["also written as 奇麗"]);
-  expect(meaning.antonym).toEqual([["汚い", "きたない", 1]]);
-  expect(meaning.glosses[1].type).toBe("figurative");
+  const sense = entry.senses[0];
+  expect(sense.misc).toEqual(["uk"]);
+  expect(sense.info).toEqual(["also written as 奇麗"]);
+  expect(sense.antonym).toEqual([["汚い", "きたない", 1]]);
+  expect(sense.glosses[1].type).toBe("figurative");
 });
 
 test("returns loanword origin and field tags", async () => {
   const entry = await lookup("パソコン");
-  const meaning = entry.meanings[0];
-  expect(meaning.field).toEqual(["comp"]);
-  expect(meaning.related).toEqual([["パーソナルコンピューター"]]);
-  expect(meaning.languageSource).toEqual([
+  const sense = entry.senses[0];
+  expect(sense.field).toEqual(["comp"]);
+  expect(sense.related).toEqual([["パーソナルコンピューター"]]);
+  expect(sense.languageSource).toEqual([
     { lang: "eng", full: false, wasei: true, text: "personal computer" }
   ]);
 });
 
 test("returns dialect tags", async () => {
   const entry = await lookup("あかん");
-  expect(entry.meanings[0].dialect).toEqual(["ksb"]);
-  expect(entry.meanings[0].misc).toEqual(["uk", "col"]);
+  expect(entry.senses[0].dialect).toEqual(["ksb"]);
+  expect(entry.senses[0].misc).toEqual(["uk", "col"]);
 });
 
 test("omits empty sense annotations", async () => {
   const entry = await lookup("食べる");
-  const meaning = entry.meanings[0];
-  expect(meaning).not.toHaveProperty("misc");
-  expect(meaning).not.toHaveProperty("field");
-  expect(meaning).not.toHaveProperty("languageSource");
-  expect(meaning.glosses[0]).not.toHaveProperty("type");
+  const sense = entry.senses[0];
+  expect(sense).not.toHaveProperty("misc");
+  expect(sense).not.toHaveProperty("field");
+  expect(sense).not.toHaveProperty("languageSource");
+  expect(sense.glosses[0]).not.toHaveProperty("type");
 });
 
 test("looks up by reading", async () => {

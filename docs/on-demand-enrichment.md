@@ -26,7 +26,7 @@ type OnDemandDictionary = {
 
 `lang` is the requested explanation language. It scopes the canonical entry key, the example key, and the in-flight deduplication key, so work for one language never blocks or answers for another. Japanese authors en, de, zh-tw, zh-cn, and ko; English authors en, ja, and zh-tw. Each is an independent group written directly in that language; no language is produced by translating or character-converting another. Any other requested language resolves to `null` without a model call.
 
-The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call, and the HTTP layer answers with an error. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted meanings and the example stays missing and retryable.
+The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call, and the HTTP layer answers with an error. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted senses and the example stays missing and retryable.
 
 Build-time consumers may send `X-Yori-Request-Id`. Structured lookup logs and
 private model attempt records retain that trace id, so a Yori News vocabulary
@@ -44,10 +44,10 @@ Public lookup and owner-authorized enrichment are one route family at v1. `GET /
 3. Search the canonical dictionary and indexed licensed sources.
 4. If all miss, ask Luna for one canonical headword or `SKIP`, using the occurrence context for disambiguation.
 5. When Luna changes the headword, repeat source discovery once before generating.
-6. Build a source-evidence bundle and ask Luna to author one complete entry-language group for the requested language. Source evidence is minimum coverage, not a literal translation template, and the author may divide meanings the way that language's dictionaries do.
+6. Build a source-evidence bundle and ask Luna to author one complete entry-language group for the requested language. Source evidence is minimum coverage, not a literal translation template, and the author may divide senses the way that language's dictionaries do.
 7. Run deterministic schema, script, provenance, label, and Taiwan-terminology checks.
 8. Ask Gemini for a reject-only review that returns exactly `ACCEPT` or `REJECT`. Any other output fails closed.
-9. Persist the accepted group in the canonical database, replacing only that entry's meanings in that language, then generate and review one example for each of its meanings that still lacks one. A generated example carries only the meaning's own language pair.
+9. Persist the accepted group in the canonical database, replacing only that entry's senses in that language, then generate and review one example for each of its senses that still lacks one. A generated example carries only the sense's own language pair.
 10. Return the canonical entry. Example failure produces a thinner entry, not a failed lookup.
 
 ## Failure policy
@@ -65,7 +65,7 @@ A first start bootstraps a missing database from the release pinned in `data-rel
 
 `YORI_DB_PATH` selects the single persistent SQLite database. Drizzle migrations change its schema during startup; they never seed or replace content. `bun run db:import -- --japanese <sqlite>` and `--english <sqlite>` explicitly import refreshed source releases while preserving accepted generated content. `bun run japanese:release -- --version <version>` and `bun run english:release -- --version <version>` write complete canonical SQLite, JSONL, and Yomitan v3 snapshots. Publication remains independent by dictionary.
 
-The Japanese canonical store uses concise `ja_*` tables. `ja_senses` carries the explanation language, so an entry shares only identity and written forms while each language owns its meanings, ordering, glosses, examples, and provenance. `bun run build:db` is a deliberate full rebuild: it writes a fresh file from the pinned JMdict and example inputs plus retained accepted generated and legacy content, and only replaces the previous database once it succeeds. A Japanese release publishes one canonical SQLite, one JSONL with sibling language groups under each entry, a manifest with per-language coverage and source versions, and one Yomitan pack per explanation language named `yori-ja-<lang>.zip`.
+The Japanese canonical store uses concise `ja_*` tables. `ja_senses` carries the explanation language, so an entry shares only identity and written forms while each language owns its senses, ordering, glosses, examples, and provenance. `bun run build:db` is a deliberate full rebuild: it writes a fresh file from the pinned JMdict and example inputs plus retained accepted generated and legacy content, and only replaces the previous database once it succeeds. A Japanese release publishes one canonical SQLite, one JSONL with sibling language groups under each entry, a manifest with per-language coverage and source versions, and one Yomitan pack per explanation language named `yori-ja-<lang>.zip`.
 
 ## Runtime configuration
 

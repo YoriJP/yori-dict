@@ -24,11 +24,11 @@ test("Open English WordNet is the primary inventory and keeps its lexical-entry 
   });
 
   expect(result.coverage.en.entries).toBe(2);
-  expect(result.primary.meanings).toBe(5);
-  expect(result.fallback).toEqual({ entries: 0, meanings: 0, referenceOnly: 0 });
+  expect(result.primary.senses).toBe(5);
+  expect(result.fallback).toEqual({ entries: 0, senses: 0, referenceOnly: 0 });
 
   const db = new Database(out, { readonly: true });
-  // Every meaning declares exactly one explanation language, and no gloss row
+  // Every sense declares exactly one explanation language, and no gloss row
   // carries a language of its own that could disagree with it.
   expect(db.query<{ count: number }, []>("select count(*) as count from en_senses where lang is null").get()?.count).toBe(0);
   expect(db.query<{ name: string }, []>("select name from pragma_table_info('en_glosses') where name = 'lang'").all())
@@ -92,11 +92,11 @@ test("Simple English Wiktionary is fallback and reference, never a semantic merg
     retainFrom: null
   });
 
-  expect(result.fallback).toMatchObject({ entries: 1, meanings: 1, referenceOnly: 2 });
+  expect(result.fallback).toMatchObject({ entries: 1, senses: 1, referenceOnly: 2 });
 
   const db = new Database(out, { readonly: true });
-  // A headword the primary source covers keeps only primary meanings: the
-  // fallback wording is reference content, not a canonical meaning.
+  // A headword the primary source covers keeps only primary senses: the
+  // fallback wording is reference content, not a canonical sense.
   expect(db.query<{ source_name: string }, []>(`
     select distinct sense.source_name from en_senses sense
       join en_entries entry on entry.id = sense.entry_id
@@ -115,7 +115,7 @@ test("Simple English Wiktionary is fallback and reference, never a semantic merg
     source: "wiktionary",
     reviewStatus: "source"
   });
-  // An imported example with an exact meaning mapping is retained.
+  // An imported example with an exact sense mapping is retained.
   expect(selfie.senses[0].examples.map(({ text }) => text)).toEqual(["She posted a selfie."]);
   // A fallback pronunciation only ever fills a gap the primary entry left.
   expect(lookup.lookup("CPU", "en")?.pronunciations).toEqual([
@@ -125,11 +125,11 @@ test("Simple English Wiktionary is fallback and reference, never a semantic merg
   lookup.close();
 });
 
-test("a secondary canonical meaning requires an exact evidence identifier", async () => {
+test("a secondary canonical sense requires an exact evidence identifier", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-secondary-"));
   const mappings = join(root, "secondary.jsonl");
   await writeFile(mappings, [
-    // Exact identifier of a fallback meaning: admitted after the primary ones.
+    // Exact identifier of a fallback sense: admitted after the primary ones.
     JSON.stringify({ evidenceId: "wiktionary:en:bank:noun:1:1" }),
     // No such evidence in the pinned sources: never published.
     JSON.stringify({ evidenceId: "wiktionary:en:bank:noun:9:1" })
@@ -158,7 +158,7 @@ test("a secondary canonical meaning requires an exact evidence identifier", asyn
   lookup.close();
 });
 
-test("a rebuild retains accepted generated content and does not reorder imported meanings", async () => {
+test("a rebuild retains accepted generated content and does not reorder imported senses", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-retain-"));
   const out = join(root, "english.sqlite");
   const sources = [await fixtureWordNet(root)];
@@ -201,7 +201,7 @@ test("a rebuild retains accepted generated content and does not reorder imported
   expect(generated.senses[0].glosses[0].text).toBe("a fictional test object");
   expect(generated.senses[0].generation).toMatchObject({ model: "gpt-5.6-luna", reviewOutcome: "accepted" });
   const bank = lookup.lookup("bank", "en")!;
-  // A generated addition never renumbers or rewrites imported meanings.
+  // A generated addition never renumbers or rewrites imported senses.
   expect(bank.senses[0].position).toBe(1);
   expect(bank.senses[0].provenance).toBe("source");
   expect(bank.senses[0].examples.map(({ source }) => source)).toEqual(["sourced", "generated"]);

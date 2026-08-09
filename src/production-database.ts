@@ -42,7 +42,7 @@ export async function ensureJapaneseProductionDatabase(path: string): Promise<bo
  * Grafts a rebuilt English release onto the production database. Imported
  * content is replaced wholesale while accepted generated entries, accepted
  * language groups authored for imported entries, and accepted generated
- * examples on imported meanings are retained with their provenance.
+ * examples on imported senses are retained with their provenance.
  */
 export function importEnglishRelease(path: string, releasePath: string): boolean {
   const production = new Database(path);
@@ -165,7 +165,7 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
  * Grafts a rebuilt Japanese release onto the production database. Imported
  * content is replaced wholesale while accepted generated entries, accepted
  * language groups authored for imported entries, and accepted generated
- * examples on imported meanings are retained with their provenance.
+ * examples on imported senses are retained with their provenance.
  */
 export function importJapaneseRelease(path: string, releasePath: string): boolean {
   const production = new Database(path);
@@ -334,7 +334,7 @@ export function clearReplaceableLegacyStore(path: string): void {
  * Accepted content in a pre-ja-2 store that a replacement could not rebuild
  * from the pinned sources. It lived in four places, none of which survive the
  * ja-2 migration: authored Japanese entries, generated examples on imported
- * Japanese meanings, authored English entries, and generated English examples.
+ * Japanese senses, authored English entries, and generated English examples.
  * A table that never existed contributes nothing.
  */
 function countLegacyAcceptedContent(path: string): Record<string, number> {

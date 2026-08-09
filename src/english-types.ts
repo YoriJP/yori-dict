@@ -3,16 +3,16 @@ import type { ApiLang } from "./types";
 export type EnglishSourceName = "open-english-wordnet" | "wiktionary";
 
 /**
- * One meaning as it is written in a pinned source, addressed by a stable
+ * One sense as it is written in a pinned source, addressed by a stable
  * evidence identifier. Records of this shape are import inputs and enrichment
  * evidence; the complete raw source payload never becomes a canonical row.
  */
 export type EnglishSourceSense = {
   evidenceId: string;
   /**
-   * Concept identifier the source itself gives this meaning, when it has one.
+   * Concept identifier the source itself gives this sense, when it has one.
    * It is what another source's validated concept mapping can name; it is never
-   * used to order meanings.
+   * used to order senses.
    */
   synset?: string;
   partOfSpeech: string;
@@ -59,7 +59,7 @@ export type EnglishGloss = {
 
 export type EnglishExample = {
   text: string;
-  /** Empty for an English meaning; a later language group carries its own pair. */
+  /** Empty for an English sense; a later language group carries its own pair. */
   translations?: Array<{ lang: string; text: string }>;
   source: "sourced" | "generated";
   sourceName?: string;
@@ -86,9 +86,9 @@ export type EnglishGeneration = {
 };
 
 /**
- * One entry with the meanings of exactly one explanation language. `lang` is
- * stored on every meaning, so adding another explanation language for the same
- * English headword adds meanings rather than tables or columns.
+ * One entry with the senses of exactly one explanation language. `lang` is
+ * stored on every sense, so adding another explanation language for the same
+ * English headword adds senses rather than tables or columns.
  */
 export type EnglishEntry = {
   id: string;

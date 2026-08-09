@@ -10,7 +10,7 @@ import { rebuildJapaneseDictionary } from "../src/japanese-rebuild";
 import { migrateProductionDatabase } from "../src/production-database";
 import type { PublicLookupItem } from "../src/types";
 
-test("a rebuild gives every explanation language its own ordered meanings", async () => {
+test("a rebuild gives every explanation language its own ordered senses", async () => {
   const out = join(mkdtempSync(join(tmpdir(), "yori-ja-rebuild-")), "yori.sqlite");
   const result = await rebuildJapaneseDictionary({
     input: "fixtures/jmdict-sample.json",
@@ -19,28 +19,33 @@ test("a rebuild gives every explanation language its own ordered meanings", asyn
   });
 
   expect(result.coverage.en.entries).toBe(14);
-  expect(result.coverage.de.entries).toBe(2);
+  expect(result.coverage["zh-tw"]).toBeUndefined();
 
   const db = new Database(out, { readonly: true });
-  // Every meaning declares exactly one explanation language, and no gloss row
+  // Every sense declares exactly one explanation language, and no gloss row
   // carries a language of its own that could disagree with it.
   expect(db.query<{ count: number }, []>("select count(*) as count from ja_senses where lang is null").get()?.count).toBe(0);
   expect(db.query<{ name: string }, []>("select name from pragma_table_info('ja_glosses') where name = 'lang'").all())
     .toEqual([]);
 
-  // German covers only the meanings JMdict glosses in German, numbered from 1
-  // inside that language, while English keeps JMdict's full editorial order.
+  // Each language numbers its senses from 1 inside that language, and English
+  // keeps JMdict's full editorial order.
   expect(db.query<{ id: string; position: number }, []>(
     "select id, position from ja_senses where entry_id = 'yori:e_jmdict_1206730' order by lang, position"
   ).all()).toEqual([
-    { id: "yori:s_jmdict_1206730_1:de", position: 1 },
     { id: "yori:s_jmdict_1206730_1:en", position: 1 }
   ]);
+  // A source language Yori Dict has no grant for is unmapped, so the fixture's
+  // German glosses on 学校 never become senses.
+  expect(db.query<{ count: number }, []>("select count(*) as count from ja_senses where lang = 'de'").get()?.count).toBe(0);
   db.close();
 
   const lookup = openLookupDb(out);
-  expect(lookup.lookup("学校", "de").item?.senses[0].glosses.map((gloss) => gloss.text)).toEqual(["Schule"]);
+  // `de` remains a valid explanation language with nothing behind it yet: a
+  // gap Enrich-on-Lookup fills, not a language the API refuses.
+  expect(lookup.lookup("学校", "de").item).toBeNull();
   expect(lookup.lookup("学校", "ko").item).toBeNull();
+  expect(lookup.lookup("学校", "en").item?.senses[0].glosses.map((gloss) => gloss.text)).toEqual(["school"]);
   lookup.close();
 });
 
@@ -64,13 +69,13 @@ test("a sourced example stays with the language its paired sentence is written i
   db.close();
 });
 
-test("legacy content becomes canonical only through an exact meaning identifier", async () => {
+test("legacy content becomes canonical only through an exact sense identifier", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-ja-legacy-"));
   const glossPath = join(root, "zh-tw.jsonl");
   await writeFile(glossPath, [
-    // Exact identifier of an imported meaning: admitted as its own Taiwanese meaning.
+    // Exact identifier of an imported sense: admitted as its own Taiwanese sense.
     JSON.stringify({ senseId: "yori:s_jmdict_1358280_1", lang: "zh-tw", glosses: ["吃"] }),
-    // No such imported meaning in the pinned source: never published.
+    // No such imported sense in the pinned source: never published.
     JSON.stringify({ senseId: "yori:s_jmdict_9999999_1", lang: "zh-tw", glosses: ["不存在"] })
   ].join("\n"));
 
@@ -85,8 +90,8 @@ test("legacy content becomes canonical only through an exact meaning identifier"
   const lookup = openLookupDb(out);
   const taiwanese = lookup.lookup("食べる", "zh-tw").item;
   expect(taiwanese?.senses.map((sense) => sense.glosses[0].text)).toEqual(["吃"]);
-  // The legacy meaning is its own Taiwanese meaning, not a gloss bolted onto
-  // the English meaning, and it keeps generated provenance.
+  // The legacy sense is its own Taiwanese sense, not a gloss bolted onto
+  // the English sense, and it keeps generated provenance.
   expect(taiwanese?.senses[0].id).toBe("yori:s_jmdict_1358280_1:zh-tw");
   expect(taiwanese?.senses[0].provenance).toBe("generated");
   expect(lookup.lookup("食べる", "en").item?.senses[0].glosses.map((gloss) => gloss.text)).toEqual(["to eat"]);
@@ -97,7 +102,7 @@ test("legacy content becomes canonical only through an exact meaning identifier"
   db.close();
 });
 
-test("a rebuild retains accepted generated content and does not reorder imported meanings", async () => {
+test("a rebuild retains accepted generated content and does not reorder imported senses", async () => {
   const out = join(mkdtempSync(join(tmpdir(), "yori-ja-retain-")), "yori.sqlite");
   await rebuildJapaneseDictionary({ input: "fixtures/jmdict-sample.json", out });
   migrateProductionDatabase(out);
@@ -158,10 +163,10 @@ test("a rebuild retains accepted generated content and does not reorder imported
   expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
   expect(taiwanese?.senses[0].provenance).toBe("generated");
   // The source-provenance authored group survived too: enrichment is marked by
-  // its generation reference, not by every meaning claiming to be generated.
+  // its generation reference, not by every sense claiming to be generated.
   expect(reopened.lookup("学校", "ko").item?.senses[0].glosses[0].text).toBe("학교");
   expect(reopened.lookup("学校", "en").item?.senses[0].examples?.[0].text).toBe("学校へ行きます。");
-  // A generated addition never renumbers imported meanings.
+  // A generated addition never renumbers imported senses.
   expect(reopened.lookup("食べる", "en").item?.senses[0].position).toBe(1);
   reopened.close();
 

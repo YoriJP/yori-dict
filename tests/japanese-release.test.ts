@@ -34,31 +34,29 @@ test("the Japanese release publishes sibling language groups, per-language packs
 
   const generated = rows.find((entry) => entry.word === "未知語");
   expect(Object.keys(generated.languages).sort()).toEqual(["en", "zh-tw"]);
-  // One entry, different meaning counts, identifiers, wording, and order per
+  // One entry, different sense counts, identifiers, wording, and order per
   // explanation language.
-  expect(generated.languages.en.meanings.map((meaning: { glosses: Array<{ text: string }> }) =>
-    meaning.glosses.map(({ text }) => text)
+  expect(generated.languages.en.senses.map((sense: { glosses: Array<{ text: string }> }) =>
+    sense.glosses.map(({ text }) => text)
   )).toEqual([["unknown term"], ["unlisted word"]]);
-  expect(generated.languages["zh-tw"].meanings.map((meaning: { glosses: Array<{ text: string }> }) =>
-    meaning.glosses.map(({ text }) => text)
+  expect(generated.languages["zh-tw"].senses.map((sense: { glosses: Array<{ text: string }> }) =>
+    sense.glosses.map(({ text }) => text)
   )).toEqual([["未知詞"]]);
-  expect(generated.languages.en.meanings[0].id).not.toBe(generated.languages["zh-tw"].meanings[0].id);
-  expect(generated.languages.en.meanings[0].provenance).toBe("generated");
+  expect(generated.languages.en.senses[0].id).not.toBe(generated.languages["zh-tw"].senses[0].id);
+  expect(generated.languages.en.senses[0].provenance).toBe("generated");
 
-  // Imported meanings keep JMdict order inside each language and carry concise
+  // Imported senses keep JMdict order inside each language and carry concise
   // source identifiers rather than raw source payloads.
   const eat = rows.find((entry) => entry.word === "食べる");
-  expect(eat.languages.en.meanings[0].sources).toEqual(["jmdict:1358280:1"]);
+  expect(eat.languages.en.senses[0].sources).toEqual(["jmdict:1358280:1"]);
   expect(JSON.stringify(rows)).not.toContain("rawRecord");
 
   const manifest = JSON.parse(await Bun.file(artifacts.manifest).text());
   expect(manifest.entries).toBe(15);
-  expect(manifest.coverage.en).toEqual({ entries: 15, meanings: 18, glosses: 21, examples: 2 });
-  expect(manifest.coverage.de).toEqual({ entries: 2, meanings: 2, glosses: 2, examples: 0 });
-  expect(manifest.coverage["zh-tw"]).toEqual({ entries: 2, meanings: 2, glosses: 2, examples: 0 });
+  expect(manifest.coverage.en).toEqual({ entries: 15, senses: 18, glosses: 21, examples: 2 });
+  expect(manifest.coverage["zh-tw"]).toEqual({ entries: 2, senses: 2, glosses: 2, examples: 0 });
   expect(manifest.yomitan).toEqual({
     en: "yori-ja-en.zip",
-    de: "yori-ja-de.zip",
     "zh-tw": "yori-ja-zh-tw.zip"
   });
   expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
@@ -77,7 +75,7 @@ test("no release artifact mixes explanation languages", async () => {
   const released = new Database(artifacts.sqlite, { readonly: true });
 
   // Every gloss and example in the released SQLite belongs to exactly one
-  // meaning, and that meaning declares exactly one explanation language.
+  // sense, and that sense declares exactly one explanation language.
   expect(released.query<{ count: number }, []>(`
     select count(*) as count from ja_glosses gloss
      where (select count(*) from ja_senses sense where sense.id = gloss.sense_id) <> 1
@@ -103,13 +101,13 @@ test("no release artifact mixes explanation languages", async () => {
 
   for (const row of (await Bun.file(artifacts.jsonl).text()).trim().split("\n")) {
     const entry = JSON.parse(row) as {
-      languages: Record<string, { meanings: Array<{ lang: string; glosses: Array<{ text: string }>; examples: Array<{ translations: Array<{ lang: string }> }> }> }>;
+      languages: Record<string, { senses: Array<{ lang: string; glosses: Array<{ text: string }>; examples: Array<{ translations: Array<{ lang: string }> }> }> }>;
     };
     for (const [lang, group] of Object.entries(entry.languages)) {
-      for (const meaning of group.meanings) {
-        expect(meaning.lang).toBe(lang);
-        for (const gloss of meaning.glosses) expect(foreignToLanguage(lang, gloss.text)).toBe(false);
-        for (const example of meaning.examples) {
+      for (const sense of group.senses) {
+        expect(sense.lang).toBe(lang);
+        for (const gloss of sense.glosses) expect(foreignToLanguage(lang, gloss.text)).toBe(false);
+        for (const example of sense.examples) {
           expect(example.translations.map(({ lang: pairLang }) => pairLang)).toEqual([lang]);
         }
       }
@@ -133,20 +131,37 @@ test("no release artifact mixes explanation languages", async () => {
 
 test("imported gloss language survives release into its own pack", async () => {
   const { artifacts } = await release();
-  // 学校 is a fixture entry with both English and German imported glosses on
-  // the same JMdict meaning.
-  const germanTerms = JSON.parse(await packEntry(artifacts.yomitan.de, "term_bank_1.json")) as unknown[][];
-  expect(germanTerms.map((term) => [term[0], term[5]])).toEqual([
-    ["学校", ["Schule"]],
-    ["食べる", ["essen"]]
-  ]);
-
+  // 学校 is a fixture entry with imported glosses on the same JMdict sense in
+  // more than one source language.
   const englishTerms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
-  const english = englishTerms.find((term) => term[0] === "学校");
-  expect(english?.[5]).toEqual(["school"]);
+  expect(englishTerms.find((term) => term[0] === "学校")?.[5]).toEqual(["school"]);
+
+  const taiwaneseTerms = JSON.parse(await packEntry(artifacts.yomitan["zh-tw"], "term_bank_1.json")) as unknown[][];
+  expect(taiwaneseTerms.find((term) => term[0] === "食べる")?.[5]).toEqual(["吃"]);
 });
 
-test("a Yomitan pack keeps its language's meaning order and coexists with the others", async () => {
+test("a JMdict component EDRDG does not license never reaches a release", async () => {
+  const { artifacts } = await release();
+  // The fixture carries German glosses on 学校 and 食べる. EDRDG's licence
+  // covers only the Japanese and English components, so those glosses are
+  // dropped at import and no artifact mentions them.
+  expect(artifacts.yomitan.de).toBeUndefined();
+
+  const manifest = JSON.parse(await Bun.file(artifacts.manifest).text());
+  expect(manifest.coverage.de).toBeUndefined();
+  expect(Object.keys(manifest.yomitan)).not.toContain("de");
+
+  const jsonl = await Bun.file(artifacts.jsonl).text();
+  expect(jsonl).not.toContain("Schule");
+  expect(jsonl).not.toContain('"de"');
+
+  const released = new Database(artifacts.sqlite, { readonly: true });
+  expect(released.query<{ lang: string }, []>("select distinct lang from ja_senses order by lang").all())
+    .toEqual([{ lang: "en" }, { lang: "zh-tw" }]);
+  released.close();
+});
+
+test("a Yomitan pack keeps its language's sense order and coexists with the others", async () => {
   const { artifacts } = await release();
   const terms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
   const generated = terms.find((term) => term[0] === "未知語");
@@ -200,7 +215,7 @@ const generation = {
   createdAt: "2026-08-08T00:00:00.000Z"
 };
 
-/** One authored entry-language group with its own meanings, ids, and order. */
+/** One authored entry-language group with its own senses, ids, and order. */
 function generatedGroup(lang: ApiLang, glosses: string[]): PublicLookupItem {
   return {
     id: "yori:e_generated_release_test",
@@ -224,8 +239,8 @@ function generatedGroup(lang: ApiLang, glosses: string[]): PublicLookupItem {
 }
 
 /**
- * Legacy accepted Taiwanese content enters through an exact imported meaning
- * identifier and becomes that language's own meaning.
+ * Legacy accepted Taiwanese content enters through an exact imported sense
+ * identifier and becomes that language's own sense.
  */
 function addLegacyTaiwaneseMeaning(path: string, baseSenseId: string, gloss: string): void {
   const db = new Database(path);

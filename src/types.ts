@@ -8,6 +8,20 @@ export type SourceLang = "eng" | "ger" | string;
  */
 export type ApiLang = "en" | "de" | "zh-tw" | "zh-cn" | "ko" | "ja";
 
+/** One source credit as `/v1/meta` and the release manifests publish it. */
+export type PublicSource = { name: string; license: string; url: string };
+
+/**
+ * What one dictionary can truthfully say about itself. Both fields are read
+ * from the rows that exist rather than declared, so a language pair that
+ * returns null for every query is never advertised and a source the served
+ * data does not draw on is never credited.
+ */
+export type DictionaryMeta = {
+  languages: ApiLang[];
+  sources: PublicSource[];
+};
+
 /**
  * Cross-reference to another entry. JMdict-simplified emits one of:
  * [word], [word, senseIndex], [word, reading], [word, reading, senseIndex].

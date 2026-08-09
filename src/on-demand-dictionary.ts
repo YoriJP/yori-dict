@@ -455,7 +455,7 @@ async function resolveMissing(
     if (existing) return completeEntryExamples(options, existing, request);
   }
 
-  // The entry may already exist with only other languages' meanings. That is a
+  // The entry may already exist with only other languages' senses. That is a
   // missing language group, not an unknown word, so it is authored directly.
   const known = options.repository.canonicalEntry?.(request.query.trim())
     ?? (headword === request.query.trim() ? null : options.repository.canonicalEntry?.(headword))
@@ -638,7 +638,7 @@ async function completeEntryExamples(
 
 /**
  * A generated example is optional content. When the provider cannot deliver
- * one, the meaning keeps its accepted glosses and the example stays missing
+ * one, the sense keeps its accepted glosses and the example stays missing
  * and retryable instead of failing the whole lookup.
  */
 function missingExample(error: unknown): null {
@@ -695,7 +695,7 @@ async function completeExampleWork(
   const review = reviewOutcome(reviewed.text);
   recordOutcome(options.repository, reviewed.attempt, review);
   if (review !== "accepted") {
-    // A refused example is never saved and never removes accepted meanings. It
+    // A refused example is never saved and never removes accepted senses. It
     // stays missing, and a later owner-authorized lookup tries a fresh
     // candidate.
     logRefusal(options, request, "example", entry.word, `reviewer returned ${review}`);
@@ -844,7 +844,7 @@ function effectiveMode(mode: ResolveRequest["mode"]): "on-demand" | "bulk" {
 }
 
 /**
- * Parses one authored entry-language group. The author writes meanings for a
+ * Parses one authored entry-language group. The author writes senses for a
  * single explanation language; nothing here derives one language from another.
  */
 function parseAuthoredEntry(
@@ -941,7 +941,7 @@ function parseAuthoredEntry(
       provenance: sense.provenance
     };
   });
-  if (Array.from(knownEvidence.keys()).some((id) => !usedEvidence.has(id))) throw new Error("Source meaning was omitted");
+  if (Array.from(knownEvidence.keys()).some((id) => !usedEvidence.has(id))) throw new Error("Source sense was omitted");
 
   const reading = value.reading.trim();
   return {
@@ -985,8 +985,8 @@ const inflectionBoundaries = new Set(["は", "が", "を", "に", "へ", "と", 
 
 /**
  * A generated example is a bilingual pair: the Japanese sentence and its
- * sentence in the meaning's own explanation language. It carries no other
- * language, so it can only ever be shown under the meaning that owns it.
+ * sentence in the sense's own explanation language. It carries no other
+ * language, so it can only ever be shown under the sense that owns it.
  */
 function parseExample(text: string, headword: string, lang: ApiLang): PublicExample {
   const value = parseObject(text);
@@ -1129,10 +1129,10 @@ function entryAuthorPrompt(
 ): string {
   return [
     `Author one canonical Japanese dictionary entry explained in ${japaneseLanguageNames[request.lang]}, as JSON.`,
-    "Preserve every source meaning and evidence id. Separate distinct parts of speech, registers, domains, pronunciations, and pragmatic functions.",
+    "Preserve every source sense and evidence id. Separate distinct parts of speech, registers, domains, pronunciations, and pragmatic functions.",
     "Include every schema array; use an empty array when a field does not apply.",
     "You may add an established missing sense with provenance generated and no evidence ids.",
-    `Write every gloss as natural ${japaneseLanguageNames[request.lang]} dictionary wording. Divide meanings the way a ${japaneseLanguageNames[request.lang]} dictionary would; do not translate another language's wording line by line.`,
+    `Write every gloss as natural ${japaneseLanguageNames[request.lang]} dictionary wording. Divide senses the way a ${japaneseLanguageNames[request.lang]} dictionary would; do not translate another language's wording line by line.`,
     // The schema enumerates the label codes. This line exists only because the
     // model's observed failure was to translate them into the explanation
     // language; without it the codes are the one field it renders, not selects.
@@ -1177,10 +1177,10 @@ const entryReviewCriteria =
  */
 const languageGroupReviewCriteria = [
   "The candidate is one explanation group written in explanationLanguage for a headword.",
-  "The group is authored, not imported: every meaning is provenance generated with no evidence ids,",
+  "The group is authored, not imported: every sense is provenance generated with no evidence ids,",
   "and the group carries no pronunciations. Neither is a defect.",
   "Reference facts describe coverage to match, never wording to copy.",
-  "Check that each definition is natural dictionary wording in explanationLanguage, that the meaning",
+  "Check that each definition is natural dictionary wording in explanationLanguage, that the sense",
   "division suits that language rather than mirroring the reference, that labels are right, that a",
   "zh-tw group uses Taiwan terminology, and that the content is accurate and safe."
 ].join(" ");
@@ -1251,7 +1251,7 @@ const englishEntrySchemaFor = (vocabulary: EnglishLabelVocabulary, languageGroup
             dated: { type: "boolean" }, usage: stringArraySchema,
             evidenceIds: stringArraySchema,
             // A language group is written, never carried across from the English
-            // meanings, so `source` is the one value its parser always refuses.
+            // senses, so `source` is the one value its parser always refuses.
             provenance: { type: "string", enum: languageGroup ? ["generated"] : ["source", "generated"] }
           },
           required: [
@@ -1360,7 +1360,7 @@ export function createEnglishOnDemandDictionary(options: {
 }
 
 /**
- * A canonical entry is never rewritten. Imported meanings stay exactly as the
+ * A canonical entry is never rewritten. Imported senses stay exactly as the
  * pinned sources wrote them; only a missing generated example is filled in.
  */
 function completeCanonicalEnglishEntry(
@@ -1465,7 +1465,7 @@ async function authorEnglishEntry(
       explanationLanguage: request.lang,
       entry,
       // English source facts are reference for another language, never the
-      // meaning list the group had to mirror.
+      // sense list the group had to mirror.
       [request.lang === "en" ? "sourceEvidence" : "englishReferenceFacts"]: sources
     }, request.lang === "en" ? entryReviewCriteria : languageGroupReviewCriteria),
     request.mode,
@@ -1483,7 +1483,7 @@ async function authorEnglishEntry(
   options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
   // Read the group back so an authored language group answers with the entry's
   // own pronunciations and source facts, exactly as a later lookup would. The
-  // author writes meanings only; it never writes those entry-level facts.
+  // author writes senses only; it never writes those entry-level facts.
   const stored = options.repository.find(entry.headword, request.lang) ?? entry;
   return completeEnglishExamples(stored, request, options);
 }
@@ -1551,7 +1551,7 @@ async function completeEnglishExample(
     const outcome = reviewOutcome(reviewed.text);
     englishRecordOutcome(options.repository, reviewed.attempt, outcome);
     if (outcome !== "accepted") {
-      // A refused example is never saved and never removes accepted meanings.
+      // A refused example is never saved and never removes accepted senses.
       // It stays missing, and a later owner-authorized lookup tries a fresh
       // candidate.
       logRefusal(options, request, "example", entry.headword, `reviewer returned ${outcome}`);
@@ -1563,13 +1563,13 @@ async function completeEnglishExample(
 
 /**
  * Parses one authored entry-language group for an English headword. The author
- * writes meanings for a single explanation language; nothing here derives one
- * language from another, and nothing rewrites an imported meaning.
+ * writes senses for a single explanation language; nothing here derives one
+ * language from another, and nothing rewrites an imported sense.
  *
  * The English group is grounded in English source evidence. Every other
  * explanation language is an independent sibling group: it may read the English
  * facts but may not claim their evidence identifiers, is not required to
- * produce one meaning per English meaning, and is checked against the
+ * produce one sense per English sense, and is checked against the
  * target-language deterministic rules below.
  */
 function parseEnglishEntry(
@@ -1592,7 +1592,7 @@ function parseEnglishEntry(
  * They catch the failure modes a machine can see: text written in the wrong
  * language, Mainland terminology published as Taiwanese, and wording carried
  * across from the English group. They cannot tell fluent, independently divided
- * target-language wording from a fluent meaning-by-meaning translation; the
+ * target-language wording from a fluent sense-by-sense translation; the
  * prompt and the separate reviewer carry that judgement.
  */
 function parseEnglishLanguageGroup(
@@ -1629,9 +1629,9 @@ function parseEnglishLanguageGroup(
       throw new Error("Invalid English sense content");
     }
     // The group is written, not derived: it may not attach itself to an English
-    // source meaning, which is what a line-by-line translation would do.
-    if (sense.provenance !== "generated") throw new Error("A language group meaning is authored, not imported");
-    if (requiredStringList(sense.evidenceIds).length > 0) throw new Error("A language group meaning claims English evidence");
+    // source sense, which is what a line-by-line translation would do.
+    if (sense.provenance !== "generated") throw new Error("A language group sense is authored, not imported");
+    if (requiredStringList(sense.evidenceIds).length > 0) throw new Error("A language group sense claims English evidence");
     // Part of speech stays in the shared English label vocabulary so packs and
     // canonical rows read the same way across languages. The schema enumerates
     // the codes for the model; this is the check that enforces them, so a
@@ -1663,7 +1663,7 @@ function parseEnglishLanguageGroup(
       generation
     };
   });
-  if (new Set(senses.map((sense) => sense.id)).size !== senses.length) throw new Error("Duplicate language group meaning");
+  if (new Set(senses.map((sense) => sense.id)).size !== senses.length) throw new Error("Duplicate language group sense");
 
   return {
     id: entryId,
@@ -1677,7 +1677,7 @@ function parseEnglishLanguageGroup(
 }
 
 /**
- * One generated example for one target-language meaning. For English it is a
+ * One generated example for one target-language sense. For English it is a
  * single sentence; for another explanation language it is a true bilingual
  * pair, the English sentence kept together with its target-language sentence.
  */
@@ -1790,7 +1790,7 @@ function parseEnglishCanonicalGroup(
       ...(sense.provenance === "generated" ? { generation: acceptedGeneration(authorAttempt) } : {})
     } as EnglishEntry["senses"][number];
   });
-  if (Array.from(knownSenseEvidence.keys()).some((id) => !usedEvidence.has(id))) throw new Error("Source meaning was omitted");
+  if (Array.from(knownSenseEvidence.keys()).some((id) => !usedEvidence.has(id))) throw new Error("Source sense was omitted");
   if (!Array.isArray(value.pronunciations)) throw new Error("Invalid pronunciations");
   const pronunciations = value.pronunciations.map((raw: unknown) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid pronunciation");
@@ -1864,19 +1864,19 @@ function englishEntryAuthorPrompt(
     return [
       `Author the ${language} explanation group for one English headword, as JSON.`,
       `Write every definition as natural ${language} dictionary wording that a ${language} learner's dictionary would print.`,
-      "Divide the meanings the way a dictionary in that language would. Do not translate the English definitions line by line, and do not produce one meaning per English meaning unless that division is genuinely right.",
-      "Every meaning has provenance generated and an empty evidenceIds array. Return an empty pronunciations array.",
+      "Divide the senses the way a dictionary in that language would. Do not translate the English definitions line by line, and do not produce one sense per English sense unless that division is genuinely right.",
+      "Every sense has provenance generated and an empty evidenceIds array. Return an empty pronunciations array.",
       `candidateId: ${candidateId}`,
       `explanation_language: ${request.lang}`,
       `headword: ${headword}`,
       `context: ${request.context?.sentence ?? ""}`,
-      // English facts inform the author; they are not the meaning list to copy.
+      // English facts inform the author; they are not the sense list to copy.
       `english_reference_facts: ${JSON.stringify(sources)}`
     ].join("\n");
   }
   return [
     "Author one canonical English dictionary entry as JSON.",
-    "Preserve every source meaning and evidence id. Keep parts of speech, pronunciations, registers, regions, domains, dated status, and usage distinct.",
+    "Preserve every source sense and evidence id. Keep parts of speech, pronunciations, registers, regions, domains, dated status, and usage distinct.",
     "Deduplicate only truly equivalent senses. You may add an established missing sense as generated with no evidence ids.",
     `candidateId: ${candidateId}`,
     `headword: ${headword}`,
@@ -1896,7 +1896,7 @@ function englishExamplePrompt(
   if (lang !== "en") {
     const language = englishExplanationLanguageNames[lang] ?? lang;
     return [
-      "Write one natural, safe English learner sentence that demonstrates exactly this meaning.",
+      "Write one natural, safe English learner sentence that demonstrates exactly this sense.",
       `Return JSON with that English sentence and its ${language} translation as a matching pair.`,
       `candidateId: ${candidateId}`,
       `explanation_language: ${lang}`,

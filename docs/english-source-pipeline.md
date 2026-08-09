@@ -46,21 +46,21 @@ archive with the same tool version produces byte-identical files; bump
 
 Each evidence row keeps a stable `sourceEntryId` built from source, dump date, page,
 part of speech, etymology number, and occurrence, plus the source page id and sense id
-where Wiktextract supplies them. It also keeps the source meaning text and its index, the
+where Wiktextract supplies them. It also keeps the source sense text and its index, the
 translation's location and order within the entry, the target language and locale, the
 term, romanization, and qualifiers, and whether the record was `sense-local` or
 `entry-level`.
 
 ## The independent-language rule
 
-A Japanese or Chinese translation nested under an English meaning is evidence for
-authoring and review. It has no target-language meaning structure of its own, so every
+A Japanese or Chinese translation nested under an English sense is evidence for
+authoring and review. It has no target-language sense structure of its own, so every
 emitted row carries `role: "authoring-evidence"` and `directImportEligible: false`.
 
 `classifySourceRecord` in `scripts/english-evidence-sources.ts` is the direct-import gate.
 A record may become canonical target-language content only when all of these hold:
 
-- the source supplies its own target-language meaning structure
+- the source supplies its own target-language sense structure
 - the record's locale equals the target locale
 - the match is an exact source identifier or an explicit maintained mapping, never a
   string or reverse-gloss match
@@ -81,13 +81,13 @@ its version and mapping provenance stay attached.
 Taiwan government terminology is domain-specific evidence. Every row keeps its agency,
 dataset, domain, version, attribution, and the exact English/Chinese term pair; a record
 missing any of those is rejected as incomplete provenance. A bare term pair corroborates
-wording but is not a direct-import candidate, because it carries no Taiwanese meaning text.
+wording but is not a direct-import candidate, because it carries no Taiwanese sense text.
 
 Both mapped sources are configured in the lock and point at operator-supplied downloads.
 A configured but absent file is skipped with a warning so the Wiktionary filter still runs.
 
 The English rebuild reads the same two mapped sources through the same gate when
-`languageSources` is configured, so what may become a canonical `ja` or `zh-tw` meaning is
+`languageSources` is configured, so what may become a canonical `ja` or `zh-tw` sense is
 decided in one place. See [Independent English dictionary](english-dictionary.md).
 
 ## Taiwanese labelling
@@ -105,5 +105,5 @@ axes over the same accepted rows; `rejected` counts records dropped before emiss
 
 Rejected records are dropped for a missing term, malformed placeholder text, or the wrong
 script. Ambiguous records are kept as evidence and flagged: a record listing several terms
-at once, or an entry-level record that cannot be attributed to a single source meaning.
+at once, or an entry-level record that cannot be attributed to a single source sense.
 Ambiguity blocks direct publication; it does not delete evidence.

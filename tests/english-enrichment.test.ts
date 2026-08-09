@@ -23,7 +23,7 @@ import { importEnglishRelease, migrateProductionDatabase } from "../src/producti
 import { createStoredZip } from "../src/stored-zip";
 
 /**
- * Responses are scripted per role because examples for different meanings are
+ * Responses are scripted per role because examples for different senses are
  * generated concurrently. Any unscripted call fails the test, so public lookup
  * cannot spend.
  */
@@ -143,12 +143,12 @@ test("the released English dictionary answers lookups with zero model calls", as
   const bank = await read("BANK");
   expect(bank.dictionary).toBe("en");
   expect(bank.lang).toBe("en");
-  // The complete ordered meaning group, with pronunciations and labels intact.
-  expect(bank.meanings.map((meaning: { glosses: Array<{ text: string }> }) => meaning.glosses[0].text)).toEqual([
+  // The complete ordered sense group, with pronunciations and labels intact.
+  expect(bank.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text)).toEqual([
     "sloping land beside water",
     "a financial institution that accepts deposits"
   ]);
-  expect(bank.meanings[1]).toMatchObject({
+  expect(bank.senses[1]).toMatchObject({
     position: 2,
     partOfSpeech: ["noun"],
     domains: ["finance"],
@@ -160,7 +160,7 @@ test("the released English dictionary answers lookups with zero model calls", as
 
   // English-specific register, region, dated, and usage labels stay intact.
   const telly = await read("telly");
-  expect(telly.meanings[0]).toMatchObject({
+  expect(telly.senses[0]).toMatchObject({
     registers: ["informal"],
     regions: ["UK"],
     dated: true,
@@ -186,14 +186,14 @@ test("one author request and one reviewer fill a missing English group", async (
 
   const entry = await enrich("florp");
   expect(entry.lang).toBe("en");
-  expect(entry.meanings.map((meaning: { glosses: Array<{ text: string }> }) => meaning.glosses[0].text))
+  expect(entry.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text))
     .toEqual(["a fictional test object", "a fictional test action"]);
   expect(gateway.roles().filter((role) => role.startsWith("entry"))).toEqual(["entry-author", "entry-review"]);
 
   const published = await read("florp");
-  expect(published.meanings).toHaveLength(2);
-  expect(published.meanings[0]).toMatchObject({ provenance: "generated", sources: [] });
-  expect(published.meanings[0].examples[0]).toMatchObject({
+  expect(published.senses).toHaveLength(2);
+  expect(published.senses[0]).toMatchObject({ provenance: "generated", sources: [] });
+  expect(published.senses[0].examples[0]).toMatchObject({
     text: "The florp sat on the table.",
     source: "generated",
     reviewStatus: "checked"
@@ -223,10 +223,10 @@ test("a rejected English group never becomes visible", async () => {
   expect(await enrich("quibble")).toBeNull();
   expect(await read("quibble")).toBeNull();
   // The already accepted group is untouched.
-  expect((await read("florp")).meanings).toHaveLength(2);
+  expect((await read("florp")).senses).toHaveLength(2);
 });
 
-test("a rejected example keeps accepted meanings and allows one fresh later attempt", async () => {
+test("a rejected example keeps accepted senses and allows one fresh later attempt", async () => {
   gateway.reset();
   gateway.script("eligibility", "blorp");
   gateway.script("entry-author", JSON.stringify({
@@ -242,16 +242,16 @@ test("a rejected example keeps accepted meanings and allows one fresh later atte
   gateway.script("example-review", "REJECT");
   const rejected = await enrich("blorp");
 
-  expect(rejected.meanings).toHaveLength(1);
-  expect(rejected.meanings[0].examples).toEqual([]);
-  expect((await read("blorp")).meanings[0].examples).toEqual([]);
+  expect(rejected.senses).toHaveLength(1);
+  expect(rejected.senses[0].examples).toEqual([]);
+  expect((await read("blorp")).senses[0].examples).toEqual([]);
 
   gateway.reset();
   gateway.script("example-author", JSON.stringify({ sentence: "The blorp echoed." }));
   gateway.script("example-review", "ACCEPT");
   const retried = await enrich("blorp");
   expect(gateway.roles()).toEqual(["example-author", "example-review"]);
-  expect(retried.meanings[0].examples[0].text).toBe("The blorp echoed.");
+  expect(retried.senses[0].examples[0].text).toBe("The blorp echoed.");
 
   // Once one accepted example exists, a later owner lookup stops generating.
   gateway.reset();
@@ -262,27 +262,27 @@ test("a rejected example keeps accepted meanings and allows one fresh later atte
 test("enrichment never rewrites correct imported content", async () => {
   gateway.reset();
   const before = await read("bank");
-  expect(before.meanings[0].glosses[0].text).toBe("sloping land beside water");
+  expect(before.senses[0].glosses[0].text).toBe("sloping land beside water");
 
   gateway.script("example-author", JSON.stringify({ sentence: "She deposited her salary at the bank." }));
   gateway.script("example-review", "ACCEPT");
   const enriched = await enrich("bank");
-  // Only the observable gap is filled: the first meaning already carries an
-  // imported example, so only the second meaning gets a generated one.
+  // Only the observable gap is filled: the first sense already carries an
+  // imported example, so only the second sense gets a generated one.
   expect(gateway.roles()).toEqual(["example-author", "example-review"]);
-  expect(enriched.meanings.map((meaning: { glosses: Array<{ text: string }> }) => meaning.glosses[0].text))
-    .toEqual(before.meanings.map((meaning: { glosses: Array<{ text: string }> }) => meaning.glosses[0].text));
-  expect(enriched.meanings[0].examples).toEqual(before.meanings[0].examples);
-  expect(enriched.meanings[0].examples[0]).toMatchObject({
+  expect(enriched.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text))
+    .toEqual(before.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text));
+  expect(enriched.senses[0].examples).toEqual(before.senses[0].examples);
+  expect(enriched.senses[0].examples[0]).toMatchObject({
     text: "They walked along the bank.",
     source: "sourced",
     reviewStatus: "source"
   });
-  expect(enriched.meanings[1].examples.map(({ text }: { text: string }) => text))
+  expect(enriched.senses[1].examples.map(({ text }: { text: string }) => text))
     .toEqual(["She deposited her salary at the bank."]);
 });
 
-test("a later release keeps accepted English content and refreshes imported meanings", async () => {
+test("a later release keeps accepted English content and refreshes imported senses", async () => {
   gateway.reset();
   const rebuilt = await rebuildEnglishDictionary({
     sources: [await fixtureWordNet(root, { extended: true })],
@@ -294,17 +294,17 @@ test("a later release keeps accepted English content and refreshes imported mean
   expect(importEnglishRelease(dbPath, release.sqlite)).toBe(true);
 
   // Accepted generated entries and accepted generated examples survive.
-  expect((await read("florp")).meanings).toHaveLength(2);
-  expect((await read("blorp")).meanings[0].examples[0].text).toBe("The blorp echoed.");
+  expect((await read("florp")).senses).toHaveLength(2);
+  expect((await read("blorp")).senses[0].examples[0].text).toBe("The blorp echoed.");
   const bank = await read("bank");
-  expect(bank.meanings.map((meaning: { glosses: Array<{ text: string }> }) => meaning.glosses[0].text)).toEqual([
+  expect(bank.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text)).toEqual([
     "sloping land beside water",
     "a financial institution that accepts deposits",
     "an arrangement of similar objects in a row"
   ]);
-  expect(bank.meanings[0].examples.map(({ text }: { text: string }) => text))
+  expect(bank.senses[0].examples.map(({ text }: { text: string }) => text))
     .toEqual(["They walked along the bank."]);
-  expect(bank.meanings[1].examples.map(({ text }: { text: string }) => text))
+  expect(bank.senses[1].examples.map(({ text }: { text: string }) => text))
     .toEqual(["She deposited her salary at the bank."]);
   expect(gateway.calls).toEqual([]);
 

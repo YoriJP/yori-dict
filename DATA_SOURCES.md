@@ -22,6 +22,40 @@ Source:
 - https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project
 - https://www.edrdg.org/edrdg/licence.html
 
+### Which JMdict components Yori Dict may redistribute
+
+EDRDG's licence covers the Japanese and English components of JMdict only. It
+says so explicitly: *"the Japanese and English components (the translational
+equivalents in other languages, e.g. German, French, Dutch, etc. are covered by
+separate copyright held by the compilers of that material.)"* No grant from
+EDRDG can transfer rights it does not hold, so every other translational
+component is excluded, and no attribution string can substitute for the missing
+grant.
+
+The excluded components and why:
+
+| Component | Compiler | Terms | Status |
+| --- | --- | --- | --- |
+| German (`ger`) | WaDokuJT, © Ulrich Apel / Wadoku e.V. | Custom, non-commercial | Excluded — incompatible with CC BY-SA 4.0 in both directions |
+| Dutch (`dut`) | Compiler's own | CC BY-NC-SA 4.0 | Permanent exclusion — the NC clause cannot be relicensed |
+| Russian (`rus`), French (`fre`), Spanish (`spa`), Hungarian (`hun`), Slovenian (`slv`), Swedish (`swe`) | Various | Not stated | Excluded — no transferable grant under the same EDRDG carve-out |
+
+German was previously imported and published as `yori-ja-de.zip`. That was not a
+decision: `build:db` imported the full JMdict and German came along with it. The
+asset was withdrawn and the `ger` mapping removed.
+
+Removal is enforced in one place. `src/lang.ts` maps JMdict source language
+codes to Explanation Languages, and unmapped source glosses are discarded at
+import, so an excluded component reaches neither the canonical tables, nor
+either Data Release format, nor the Yomitan packs. **Adding a code to that map is
+what admits a component; do not add one without recording its grant here.**
+
+Removing a component is not the same as dropping the language. German remains a
+supported Explanation Language: `lang=de` is a valid request served from Yori
+Dict's own authored content through Enrich-on-Lookup. Two upstream projects ship
+JMdict's German and Dutch components under a blanket CC BY-SA claim; that
+practice is non-compliant with EDRDG's own carve-out and is not a defence.
+
 ## Legacy Generated Glosses
 
 Older Japanese releases include reviewed generated gloss sources committed at:

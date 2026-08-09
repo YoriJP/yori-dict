@@ -59,7 +59,7 @@ export function openEnrichmentRepository(
   const clearGeneratedExamples = db.prepare(
     "delete from ja_examples where sense_id = ? and source = 'generated'"
   );
-  // A generated example is appended after the meaning's imported examples, so
+  // A generated example is appended after the sense's imported examples, so
   // accepting or retrying one never overwrites sourced content.
   const insertGeneratedExample = db.prepare(`
     insert into ja_examples (
@@ -76,7 +76,7 @@ export function openEnrichmentRepository(
     translations: string,
     generationRef: string | null
   ) => insertGeneratedExample.run(senseId, senseId, text, translations, generationRef);
-  /** One accepted generated example per meaning: a retry replaces the previous one. */
+  /** One accepted generated example per sense: a retry replaces the previous one. */
   const saveExampleRow = (
     senseId: string,
     text: string,
@@ -120,7 +120,7 @@ export function openEnrichmentRepository(
       return sourceLookup(query, targetDictionary);
     },
     /**
-     * Writes one entry-language group atomically. Only meanings in `lang` are
+     * Writes one entry-language group atomically. Only senses in `lang` are
      * replaced, so authoring or rejecting one language never disturbs another
      * language's accepted content for the same entry.
      */
@@ -249,7 +249,7 @@ export function openEnrichmentRepository(
         gloss.type ?? null
       );
     });
-    // The meaning was just rewritten, so its examples are appended in the order
+    // The sense was just rewritten, so its examples are appended in the order
     // they arrived rather than competing for one fixed position.
     (sense.examples ?? []).forEach((example) => {
       appendExample(sense.id, example.text, JSON.stringify(example.translations), generationRef);

@@ -10,6 +10,24 @@ export const wiktionaryLicense = "CC-BY-SA-4.0 AND GFDL-1.1-or-later";
 export const wiktionaryAttribution =
   "Simple English Wiktionary contributors; extracted with Wiktextract";
 
+/**
+ * Display name and home for each pinned source. A credit a consumer inherits
+ * has to be actionable, and neither the internal source identifier nor a
+ * repository-relative file path is a name a reader recognises or a place they
+ * can go. A source missing from this table publishes no `/v1/meta` credit,
+ * which is the visible symptom of admitting a source without recording where
+ * it came from.
+ */
+export const englishSourceCredits: Record<string, { name: string; url: string }> = {
+  "open-english-wordnet": { name: "Open English WordNet", url: "https://en-word.net/" },
+  wiktionary: {
+    name: "Simple English Wiktionary",
+    url: "https://simple.wiktionary.org/wiki/Wiktionary:Copyrights"
+  },
+  "japanese-wordnet": { name: "Japanese WordNet", url: "https://bond-lab.github.io/wnja/" },
+  "taiwan-terminology": { name: "Taiwan government terminology", url: "https://terms.naer.edu.tw/" }
+};
+
 /** One synset as the pinned Open English WordNet JSON export writes it. */
 export type OewnSynset = {
   definition?: unknown;
@@ -35,7 +53,7 @@ export type OewnEntryRecord = EnglishSourceRecord & {
 /**
  * Reads one Open English WordNet lexical entry into source records that keep
  * the archive's own editorial order: one record per part-of-speech block, and
- * one meaning per element of that block's `sense` array, in array order. The
+ * one sense per element of that block's `sense` array, in array order. The
  * synset identifier is only ever used to look a definition up — never to sort.
  */
 export function importOpenEnglishWordNetEntry(
@@ -74,7 +92,7 @@ export function importOpenEnglishWordNetEntry(
         }),
         dated: false,
         usage: [],
-        // A synset example belongs to exactly the meaning that names the
+        // A synset example belongs to exactly the sense that names the
         // synset, so it is an exactly mapped imported example.
         examples: stringList(synset?.example).map((text, index): EnglishExample => ({
           text,

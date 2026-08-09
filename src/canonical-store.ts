@@ -17,21 +17,21 @@ import { resolve } from "node:path";
 /** Per-explanation-language counts, the unit every manifest reports. */
 export type LanguageCoverage = {
   entries: number;
-  meanings: number;
+  senses: number;
   glosses: number;
   examples: number;
 };
 
 /**
  * Coverage for one dictionary's canonical tables, keyed by explanation
- * language. Language lives on meanings, so glosses and examples are counted
- * through the meaning that owns them.
+ * language. Language lives on senses, so glosses and examples are counted
+ * through the sense that owns them.
  */
 export function readLanguageCoverage(db: Database, prefix: string): Record<string, LanguageCoverage> {
   const rows = db.query<{ lang: string } & LanguageCoverage, []>(`
     select sense.lang as lang,
            count(distinct sense.entry_id) as entries,
-           count(distinct sense.id) as meanings,
+           count(distinct sense.id) as senses,
            (select count(*) from ${prefix}_glosses g
               join ${prefix}_senses s on s.id = g.sense_id where s.lang = sense.lang) as glosses,
            (select count(*) from ${prefix}_examples e

@@ -82,7 +82,7 @@ export async function buildJapaneseRelease(
         "",
         "",
         0,
-        // Meanings keep this language's own stored order.
+        // Senses keep this language's own stored order.
         group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text)),
         sequence,
         ""
@@ -131,19 +131,19 @@ export async function buildJapaneseRelease(
 /**
  * One canonical record per entry: shared identity and written forms, then one
  * sibling group per explanation language with that language's own ordered
- * meanings, glosses, examples, and concise source identifiers.
+ * senses, glosses, examples, and concise source identifiers.
  */
 function canonicalRecord(record: JapaneseEntryGroups) {
   return {
     ...record.entry,
     languages: Object.fromEntries(record.groups.map((group) => [
       group.lang,
-      { meanings: group.senses.map((sense) => releaseMeaning(sense, group.lang)) }
+      { senses: group.senses.map((sense) => releaseSense(sense, group.lang)) }
     ]))
   };
 }
 
-function releaseMeaning(sense: PublicSense, lang: ApiLang) {
+function releaseSense(sense: PublicSense, lang: ApiLang) {
   const { glosses, examples, evidenceIds, provenance, ...rest } = sense;
   return {
     ...rest,
