@@ -34,12 +34,13 @@ type Rule = { suffix: string; replacement: string };
  * tried as `wishe`.
  */
 const rules: readonly Rule[] = [
-  // Plurals whose stem is recoverable from the suffix alone.
+  // Plurals whose stem is recoverable from the suffix alone. There is no
+  // `-shes`, `-zes` or `-ses` rule: the bare `-es` below already reaches
+  // `wish`, `quiz` and `bus`, so they only ever fired first with a worse
+  // answer — `-ses` alone took `corpses` to `corps`, `doses` to `dos` and
+  // `vases` to `vas`.
   { suffix: "ches", replacement: "ch" },
-  { suffix: "shes", replacement: "sh" },
-  { suffix: "ses", replacement: "s" },
   { suffix: "xes", replacement: "x" },
-  { suffix: "zes", replacement: "z" },
   { suffix: "ies", replacement: "y" },
   { suffix: "men", replacement: "man" },
   // Third person and the bare plural.

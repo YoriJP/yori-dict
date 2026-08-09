@@ -122,7 +122,20 @@ test("a doubled consonant is undoubled, because doubling is regular", () => {
 test("candidates are deduplicated and keep rule order", () => {
   const candidates = englishLemmaCandidates("bases");
   expect(candidates).toEqual([...new Set(candidates)]);
-  // `ses` is tried before the bare `es` and `s`, so `base` beats `bas`.
-  expect(candidates.indexOf("bas")).toBeLessThan(candidates.indexOf("base"));
-  expect(resolveEnglishLemma("bases", lexicon("base", "bas"))).toBe("bas");
+  // `-es` restoring the `e` is tried before dropping it, so `base` beats `bas`.
+  expect(candidates.indexOf("base")).toBeLessThan(candidates.indexOf("bas"));
+  expect(resolveEnglishLemma("bases", lexicon("base", "bas"))).toBe("base");
+});
+
+test("a sibilant plural needs no rule of its own", () => {
+  // `-shes`, `-zes` and `-ses` rules would only fire ahead of the bare `-es`
+  // with a worse answer: `corpses` reaching `corps` and `doses` reaching `dos`.
+  // Dropping the `e` already reaches the stem for every one of them.
+  for (const [surface, lemma] of [
+    ["wishes", "wish"], ["buses", "bus"], ["gases", "gas"], ["quizzes", "quiz"]
+  ] as const) {
+    expect(resolveEnglishLemma(surface, lexicon(lemma))).toBe(lemma);
+  }
+  expect(resolveEnglishLemma("corpses", lexicon("corpse", "corps"))).toBe("corpse");
+  expect(resolveEnglishLemma("doses", lexicon("dose", "dos"))).toBe("dose");
 });
