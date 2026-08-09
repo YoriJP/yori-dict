@@ -309,6 +309,47 @@ export function hasEnglishDictionary(path: string): boolean {
 }
 
 /**
+ * Removes imported German senses from a store that was bootstrapped before the
+ * `ger` mapping was dropped.
+ *
+ * JMdict's German component is compiled by WaDokuJT and is carved out of
+ * EDRDG's licence, so Yori Dict has no grant to serve or redistribute it.
+ * Dropping the mapping stopped it entering new builds, but a volume that
+ * already holds it never re-bootstraps: `ensureJapaneseProductionDatabase`
+ * returns early once a Japanese dictionary is present. Without this the rows
+ * stay served indefinitely.
+ *
+ * Only imported senses go. Authored German is Yori's own CC BY-SA content and
+ * is exactly what Enrich-on-Lookup is expected to write, so `generated` rows
+ * are left alone. Returns the number of senses removed, and is a no-op on a
+ * store with no Japanese dictionary or no German left.
+ */
+export function removeImportedGerman(path: string): number {
+  if (!hasJapaneseDictionary(path)) return 0;
+  const db = new Database(path);
+  try {
+    db.exec("pragma busy_timeout = 5000;");
+    const imported = "select id from ja_senses where lang = 'de' and provenance = 'source'";
+    const count = db.query<{ count: number }, []>(
+      `select count(*) as count from (${imported})`
+    ).get()?.count ?? 0;
+    if (count === 0) return 0;
+    // Subqueries rather than bound ids: the store this exists for holds about
+    // 165,000 German senses, far past SQLite's variable limit.
+    db.transaction(() => {
+      db.exec(`
+        delete from ja_examples where sense_id in (${imported});
+        delete from ja_glosses where sense_id in (${imported});
+        delete from ja_senses where lang = 'de' and provenance = 'source';
+      `);
+    })();
+    return count;
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * Clears a volume written before the `ja_*` rebuild so this start can bootstrap
  * from the pinned release.
  *

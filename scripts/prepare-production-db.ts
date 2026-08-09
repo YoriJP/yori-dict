@@ -7,7 +7,8 @@ import {
   ensureJapaneseProductionDatabase,
   hasEnglishDictionary,
   importEnglishRelease,
-  migrateProductionDatabase
+  migrateProductionDatabase,
+  removeImportedGerman
 } from "../src/production-database";
 
 const path = resolve(process.env.YORI_DB_PATH ?? "data/yori.sqlite");
@@ -18,6 +19,11 @@ const localEnglishRelease = resolve(`releases/english/yori-english-${englishVers
 
 const installedJapanese = await ensureJapaneseProductionDatabase(path);
 migrateProductionDatabase(path);
+// A volume bootstrapped from a release built before the `ger` mapping was
+// dropped still serves German that Yori Dict has no grant to redistribute, and
+// never re-bootstraps on its own. Idempotent: nothing to remove after the
+// first start, and nothing to remove on a store built from current sources.
+const removedGerman = removeImportedGerman(path);
 
 let installedEnglish = false;
 if (!hasEnglishDictionary(path)) {
@@ -56,6 +62,7 @@ console.log(JSON.stringify({
   path,
   installedJapanese,
   installedEnglish,
+  removedGerman,
   importedLegacyJapanese: legacy.japanese,
   importedLegacyEnglish: legacy.english
 }));
