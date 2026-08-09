@@ -329,26 +329,39 @@ function readMatchingItems(
   // language's senses, and never a reason to hide a sibling entry that does
   // explain the word in the requested language.
   //
-  // All of them are returned rather than only the first. Ranking says which is
-  // likeliest, and for a bare kana query that is a judgement rather than a
-  // fact: こと reaches 事 and 琴, and whichever loses is still a word the
-  // reader may have meant. The caller shows the rest; nothing here has to be
-  // right about which one it was.
-  const items: PublicLookupItem[] = [];
-  const seen = new Set<string>();
-  for (const candidate of [...candidates].sort((a, b) => a.rank - b.rank)) {
-    for (const entryId of candidate.entryIds) {
-      // A surface that both matches directly and deinflects to the same entry
-      // reaches it twice. The earlier candidate is the better explanation of
-      // how it was reached, so the later one is dropped.
-      if (seen.has(entryId)) continue;
-      const entry = readEntry(db, entryId, lang);
-      if (!entry || entry.senses.length === 0) continue;
-      seen.add(entryId);
-      items.push(toLookupItem(entry, candidate.inflectionPath));
-    }
+  // Every entry of one tier is returned rather than only the first, and only
+  // that tier. Within a tier the ranking says which is likeliest, and for a
+  // bare kana query that is a judgement rather than a fact: こと reaches 事 and
+  // 琴, and whichever loses is still a word the reader may have meant.
+  //
+  // Across tiers it is not a judgement but a different reading of the input.
+  // した is a word, and it also deinflects to する, しる and す. Offering the
+  // entries of those as alternatives to the word the reader actually wrote
+  // would bury it under guesses about a verb they did not use. A lower tier is
+  // still consulted when the better one cannot answer in this language, which
+  // is the rule that was already here — this only stops the tiers mixing.
+  const tiers = new Map<number, LookupCandidate[]>();
+  for (const candidate of candidates) {
+    tiers.set(candidate.rank, [...(tiers.get(candidate.rank) ?? []), candidate]);
   }
-  return items;
+  for (const rank of [...tiers.keys()].sort((a, b) => a - b)) {
+    const items: PublicLookupItem[] = [];
+    const seen = new Set<string>();
+    for (const candidate of tiers.get(rank)!) {
+      for (const entryId of candidate.entryIds) {
+        // Two deinflections of one surface can reach the same entry. The first
+        // is the better explanation of how it was reached, so the later one is
+        // dropped rather than repeated with a second inflection path.
+        if (seen.has(entryId)) continue;
+        const entry = readEntry(db, entryId, lang);
+        if (!entry || entry.senses.length === 0) continue;
+        seen.add(entryId);
+        items.push(toLookupItem(entry, candidate.inflectionPath));
+      }
+    }
+    if (items.length > 0) return items;
+  }
+  return [];
 }
 
 function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): PublicLookupItem {

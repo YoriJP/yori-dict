@@ -246,13 +246,22 @@ test("a retained headword the sources explain as an inflection is dropped, not c
   migrateProductionDatabase(out);
 
   const repository = openEnglishEnrichmentRepository(out);
-  const form = generatedEntry();
-  repository.saveEntry({
-    ...form,
-    id: "yori:en:e_generated_form",
-    headword: "banking",
-    senses: form.senses.map((sense) => ({ ...sense, id: "yori:en:s_generated_form" }))
-  }, "en", generation);
+  const saveForm = (id: string, headword: string) => {
+    const form = generatedEntry();
+    repository.saveEntry({
+      ...form,
+      id: `yori:en:e_generated_${id}`,
+      headword,
+      senses: form.senses.map((sense) => ({ ...sense, id: `yori:en:s_generated_${id}` }))
+    }, "en", generation);
+  };
+  // The source records `banked` among `bank`'s forms, so the lexicon indexes
+  // the surface itself. Inflection Stripping refuses a surface that is already
+  // a lookup term — the rule that keeps `bus` from becoming `bu` — so asking it
+  // alone would call this a lexeme and restore the stub beside the real lemma.
+  saveForm("indexed", "banked");
+  // `banking` is listed by no source and reaches `bank` only through the rules.
+  saveForm("stripped", "banking");
   // A genuinely new lexeme reaches no lemma and is retained as before, so the
   // rule separates the two rather than distrusting generated entries.
   repository.saveEntry(generatedEntry(), "en", generation);
@@ -263,11 +272,25 @@ test("a retained headword the sources explain as an inflection is dropped, not c
 
   const lookup = openEnglishLookupDb(out);
   expect(lookup.lookup("florp", "en")).not.toBeNull();
-  // `banking` is gone as a headword, and the surface now strips to the lexeme
-  // the sources do explain.
-  expect(lookup.lookup("banking", "en")?.headword).toBe("bank");
+  // Both surfaces answer with the lexeme the sources explain them as part of,
+  // and neither stub survived to sit beside it under the same term.
+  for (const surface of ["banked", "banking"]) {
+    expect(lookup.lookup(surface, "en")?.headword).toBe("bank");
+  }
+  expect(retainedEntryIds(out)).toEqual(["yori:en:e_generated_rebuild_test"]);
   lookup.close();
 });
+
+function retainedEntryIds(path: string): string[] {
+  const db = new Database(path, { readonly: true });
+  try {
+    return db.query<{ id: string }, []>(
+      "select id from en_entries where source = 'generated' order by id"
+    ).all().map((row) => row.id);
+  } finally {
+    db.close();
+  }
+}
 
 test("a headword the sources start providing keeps the groups it was enriched with", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-promote-"));

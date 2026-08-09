@@ -241,3 +241,47 @@ function generatedEntry(): PublicLookupItem {
     }]
   };
 }
+
+test("alternatives come from one match tier, never mixing a word with a guess about it", async () => {
+  // した is a word, and it also deinflects to しる. Offering しる's entries
+  // beside the word the reader actually wrote would bury it under a verb they
+  // did not use. A lower tier is still consulted when the better one cannot
+  // answer, which is the rule that was already here.
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-tier-"));
+  const input = join(root, "jmdict.json");
+  await Bun.write(input, JSON.stringify({
+    words: [
+      tierWord("3000001", "舌", "した", "tongue"),
+      tierWord("3000002", "下", "した", "below"),
+      tierWord("3000003", "知る", "しる", "to know")
+    ]
+  }));
+  const out = join(root, "yori.sqlite");
+  await rebuildJapaneseDictionary({ input, out });
+
+  const lookup = openLookupDb(out);
+  const exact = lookup.lookup("した", "en");
+  // Both exact readings answer; the deinflected 知る does not join them.
+  expect([exact.item!.word, ...exact.alternatives.map((item) => item.word)].sort()).toEqual(["下", "舌"]);
+  expect(exact.alternatives.every((item) => item.inflectionPath === undefined)).toBe(true);
+
+  // The lower tier is still reached when nothing matches the surface itself.
+  const deinflected = lookup.lookup("しった", "en");
+  expect(deinflected.item?.word).toBe("知る");
+  lookup.close();
+});
+
+function tierWord(id: string, kanji: string, kana: string, gloss: string) {
+  return {
+    id,
+    kanji: [{ text: kanji, common: true, tags: [] }],
+    kana: [{ text: kana, common: true, tags: [], appliesToKanji: ["*"] }],
+    sense: [{
+      partOfSpeech: ["n"],
+      appliesToKanji: ["*"],
+      appliesToKana: ["*"],
+      related: [], antonym: [], field: [], dialect: [], misc: [], info: [], languageSource: [],
+      gloss: [{ lang: "eng", gender: null, type: null, text: gloss }]
+    }]
+  };
+}

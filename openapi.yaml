@@ -382,7 +382,9 @@ components:
       type: array
       description: >-
         The other entries this query reached, in ranking order, after the one
-        that answered it. Absent when there are none, which is most queries.
+        that answered it, from that match tier only. Absent when there are
+        none, which is most queries. A surface that is itself a word does not
+        carry the entries of what it deinflects to.
         One written form can be several unrelated words — こと is both 事 and 琴,
         `best` is three lexemes — and the order is a ranking, not a verdict, so
         a client showing a popup can offer the rest instead of trusting the
