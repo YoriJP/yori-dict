@@ -111,11 +111,52 @@ test("batch enrichment accepts contextual candidates while preserving order", as
   expect(entries.map((entry: { headword: string }) => entry.headword)).toEqual(["未知語", "未知語"]);
 });
 
-test("a failed batch enrichment fails the request instead of reporting a miss", async () => {
+test("one failed word is a miss and the rest of the batch survives", async () => {
+  const events: Record<string, unknown>[] = [];
   const released = generatedEntry();
   released.source = "jmdict";
   const db = emptyDb();
-  db.lookup = () => ({ item: released });
+  db.lookup = () => ({ item: released, alternatives: [] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    logger: (event) => events.push(event as Record<string, unknown>),
+    onDemand: {
+      async resolve(request) {
+        if (request.query === "壊れた語") throw new Error("provider unavailable");
+        return null;
+      }
+    }
+  });
+
+  const response = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer secret" },
+    body: JSON.stringify({ dictionary: "ja", lang: "en", enrich: true, queries: ["学校", "壊れた語", "学校"] })
+  });
+
+  expect(response.status).toBe(200);
+  const { entries } = await response.json();
+  expect(entries).toHaveLength(3);
+  expect(entries[0]?.headword).toBe("未知語");
+  expect(entries[1]).toBeNull();
+  expect(entries[2]?.headword).toBe("未知語");
+  expect(events.filter((event) => event.event === "lookup_failed")).toEqual([
+    {
+      event: "lookup_failed",
+      traceId: expect.any(String),
+      dictionary: "ja",
+      lang: "en",
+      query: "壊れた語",
+      error: "provider unavailable"
+    }
+  ]);
+});
+
+test("a batch where every word failed fails the request instead of reporting misses", async () => {
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const db = emptyDb();
+  db.lookup = () => ({ item: released, alternatives: [] });
   const app = createApp(db, {
     enrichmentToken: "secret",
     onDemand: { async resolve() { throw new Error("provider unavailable"); } }

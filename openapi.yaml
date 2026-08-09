@@ -407,6 +407,11 @@ components:
           description: >-
             Same length and order as the submitted queries. Duplicate queries keep
             separate positions and the submitted query strings are not repeated.
+            A query whose enrichment failed is null, the same as a miss, so one
+            unavailable word never discards the entries beside it; the failure is
+            recorded in the server log. A batch in which every query failed
+            returns 500 instead, so a total outage cannot be mistaken for a
+            dictionary with nothing in it.
           items:
             $ref: "#/components/schemas/LookupResult"
     LookupEntry:

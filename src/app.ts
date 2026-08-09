@@ -144,7 +144,16 @@ export function createApp(
       return c.json({ error: "Enrichment requires a valid bearer token" }, 401);
     }
     const traceId = c.req.header("x-yori-request-id") ?? crypto.randomUUID();
-    const entries = await Promise.all(body.queries.map(async (candidate) => {
+    // One word must not decide the fate of the other ninety-nine. A provider
+    // that fails for a single query is reported as a miss for that query, and
+    // the batch keeps every entry it did resolve. The word is not lost: the
+    // failure is logged, and the next enriched lookup of it attempts again.
+    //
+    // A batch where *every* query failed is the other thing entirely — an
+    // expired token, a provider outage, a misconfigured key — and answering it
+    // with a full set of misses would let a consumer publish an empty
+    // dictionary and believe it. That one fails loudly.
+    const settled = await Promise.allSettled(body.queries.map(async (candidate) => {
       const request = typeof candidate === "string"
         ? resolveRequest(candidate, dictionary, lang, {}, "bulk", traceId)
         : resolveRequest(candidate.query, dictionary, lang, {
@@ -152,21 +161,30 @@ export function createApp(
             reading: candidate.reading,
             sentence: candidate.context
           }, "bulk", traceId);
-      const enriched = body.enrich && options.onDemand
-        ? await options.onDemand.resolve(request)
-        : null;
-      const entry = readEntry(
-        db,
-        options,
-        dictionary,
-        lang,
-        request.query,
-        request.context?.lemma,
-        enriched
-      );
-      logLookup(options, traceId, dictionary, lang, request.query, body.enrich === true, entry);
-      return entry;
+      try {
+        const enriched = body.enrich && options.onDemand
+          ? await options.onDemand.resolve(request)
+          : null;
+        const entry = readEntry(
+          db,
+          options,
+          dictionary,
+          lang,
+          request.query,
+          request.context?.lemma,
+          enriched
+        );
+        logLookup(options, traceId, dictionary, lang, request.query, body.enrich === true, entry);
+        return entry;
+      } catch (error) {
+        logLookupFailure(options, traceId, dictionary, lang, request.query, error);
+        throw error;
+      }
     }));
+    if (settled.every((result) => result.status === "rejected")) {
+      return c.json({ error: "Lookup is temporarily unavailable" }, 500);
+    }
+    const entries = settled.map((result) => (result.status === "fulfilled" ? result.value : null));
     return c.json({ entries });
   });
 
@@ -276,6 +294,30 @@ function unsupportedLanguage(dictionary: LookupDictionary): string {
 
 function isAuthorized(header: string | undefined, token: string | undefined): boolean {
   return Boolean(token && header === `Bearer ${token}`);
+}
+
+/**
+ * Records the one query that failed, so a miss caused by a provider is
+ * separable in the log from a word the dictionary genuinely cannot explain.
+ * The response cannot carry that distinction without a shape every consumer
+ * would have to learn, and the operator is who acts on it.
+ */
+function logLookupFailure(
+  options: AppOptions,
+  traceId: string | undefined,
+  dictionary: LookupDictionary,
+  lang: ApiLang,
+  query: string,
+  error: unknown
+): void {
+  options.logger?.({
+    event: "lookup_failed",
+    traceId,
+    dictionary,
+    lang,
+    query,
+    error: error instanceof Error ? error.message : String(error)
+  });
 }
 
 function logLookup(

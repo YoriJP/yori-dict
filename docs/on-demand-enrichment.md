@@ -35,7 +35,9 @@ publishing prompts or model traces.
 
 ## Lookup contract
 
-Public lookup and owner-authorized enrichment are one route family at v1. `GET /v1/lookup` and `POST /v1/lookup/batch` both require an explicit `dictionary` and `lang`; an unsupported pair is a 400. Single lookup returns the entry or `null`; batch returns `entries` with one entry or `null` per submitted query, in order, without repeating the queries. Ordinary lookup is always model-free, including on a miss. `enrich=true` requires the owner bearer token and is checked before any model call; a token alone does not trigger generation. Database, persistence, configuration, and provider failures return 500 rather than `null`, and one failed batch item fails the whole batch.
+Public lookup and owner-authorized enrichment are one route family at v1. `GET /v1/lookup` and `POST /v1/lookup/batch` both require an explicit `dictionary` and `lang`; an unsupported pair is a 400. Single lookup returns the entry or `null`; batch returns `entries` with one entry or `null` per submitted query, in order, without repeating the queries. Ordinary lookup is always model-free, including on a miss. `enrich=true` requires the owner bearer token and is checked before any model call; a token alone does not trigger generation. Database, persistence, configuration, and provider failures return 500 rather than `null` for a single lookup.
+
+A batch is answered one query at a time. A query whose enrichment failed is `null`, the same as a miss, and the failure is recorded in the log as `lookup_failed` with that query on it. The alternative — failing the batch — meant one unavailable word discarded every entry beside it, which a consumer sending a page of text cannot afford. A batch in which *every* query failed still returns 500, because that is an expired token or a dead provider rather than a dictionary, and answering it with a full set of misses would let a consumer publish an empty artifact and believe it.
 
 ## Resolution flow
 
