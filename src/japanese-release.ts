@@ -209,6 +209,12 @@ function japaneseSources(metadata: { jmdictSimplifiedVersion: string | null; dic
     },
     { name: "Tatoeba example sentences", license: "CC-BY-2.0-FR", url: "https://tatoeba.org/en/terms_of_use" },
     { name: "yomitan-jlpt-vocab", license: "CC-BY-SA-4.0", url: "https://github.com/stephenmk/yomitan-jlpt-vocab" },
-    { name: "Yori generated dictionary content", license: "CC-BY-SA-4.0" }
+    {
+      name: "Yori generated dictionary content",
+      license: "CC-BY-SA-4.0",
+      // Every credit resolves somewhere. An attribution a redistributor cannot
+      // follow is not one they can satisfy.
+      url: "https://github.com/YoriJP/yori-dict/blob/main/DATA_SOURCES.md"
+    }
   ];
 }

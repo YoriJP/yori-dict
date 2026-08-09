@@ -61,6 +61,11 @@ test("the Japanese release publishes sibling language groups, per-language packs
   });
   expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
   expect(manifest.sources.map((source: { license: string }) => source.license)).toContain("CC-BY-SA-4.0");
+  // An attribution record a redistributor cannot follow is not actionable.
+  for (const source of manifest.sources as Array<{ license: string; url: string }>) {
+    expect(source.license).not.toBe("");
+    expect(source.url).toMatch(/^https:\/\//);
+  }
   expect(manifest.jmdictSimplifiedVersion).toBeTruthy();
 
   const released = new Database(artifacts.sqlite, { readonly: true });
