@@ -7,6 +7,7 @@ import { dataReleaseUrl } from "./data-release";
 import {
   englishLookupEntry,
   japaneseLookupEntry,
+  lookupLanguages,
   parseLookupDictionary,
   parseLookupLang,
   type LookupDictionary,
@@ -74,6 +75,15 @@ export function createApp(
   // credits everything the served data draws on, both dictionaries together,
   // because the attribution obligations a consumer inherits are not per
   // dictionary. The version and tags describe the Japanese release.
+  //
+  // `languages` and `accepts` answer two different questions, and reporting
+  // only the first made the endpoint say less than the API does. `languages`
+  // is observed: what senses exist right now. It moves on its own, because an
+  // authorized enrichment writes a language the released data did not have —
+  // `en`+`ja` appeared this way. `accepts` is the contract, and it is fixed:
+  // what a lookup will take and enrichment can fill. A consumer deciding which
+  // locales to offer its readers wants `accepts`; one deciding what it can
+  // serve today without paying for a model wants `languages`.
   app.get("/v1/meta", (c) => {
     const japanese = db.meta();
     const english = options.englishMeta?.() ?? { languages: [], sources: [] };
@@ -81,8 +91,8 @@ export function createApp(
       ...japanese,
       sources: mergeSources(japanese.sources, english.sources),
       dictionaries: {
-        ja: { languages: japanese.languages },
-        en: { languages: english.languages }
+        ja: { languages: japanese.languages, accepts: lookupLanguages.ja },
+        en: { languages: english.languages, accepts: lookupLanguages.en }
       }
     });
   });

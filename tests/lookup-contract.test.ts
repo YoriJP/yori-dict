@@ -164,9 +164,13 @@ test("metadata advertises only explanation languages with senses behind them", a
   // Each dictionary reports its own languages, derived from its own rows.
   // This database holds English and legacy Taiwanese Japanese senses and an
   // English-explained English dictionary, and nothing else.
+  // `accepts` is the contract and does not move; `languages` is observed and
+  // does. A consumer choosing which locales to offer reads `accepts`, because
+  // a language absent from `languages` is a coverage gap Enrich-on-Lookup can
+  // fill, not a language the API will refuse.
   expect(meta.dictionaries).toEqual({
-    ja: { languages: ["en", "zh-tw"] },
-    en: { languages: ["en"] }
+    ja: { languages: ["en", "zh-tw"], accepts: ["en", "de", "zh-tw", "zh-cn", "ko"] },
+    en: { languages: ["en"], accepts: ["en", "ja", "zh-tw"] }
   });
 
   // A supported language with no rows behind it is not advertised, so a

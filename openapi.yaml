@@ -98,8 +98,10 @@ paths:
                 dictionaries:
                   ja:
                     languages: [en, ko, zh-cn, zh-tw]
+                    accepts: [en, de, zh-tw, zh-cn, ko]
                   en:
-                    languages: [en, ja, zh-tw]
+                    languages: [en]
+                    accepts: [en, ja, zh-tw]
                 tags:
                   uk: word usually written using kana alone
                   vt: transitive verb
@@ -326,18 +328,30 @@ components:
         dictionaries:
           type: object
           description: >-
-            Every headword dictionary this API serves, with the explanation
-            languages it currently holds senses in, derived per dictionary from
-            its own rows. A language listed here has content behind it. A
-            language absent from it may still be requested: the pair is a gap
-            Enrich-on-Lookup fills, not a request error. The two dictionaries
-            are independent and no union of their lists is implied.
+            Every headword dictionary this API serves. The two dictionaries are
+            independent and no union of their lists is implied.
           additionalProperties:
             type: object
-            required: [languages]
+            required: [languages, accepts]
             properties:
               languages:
                 type: array
+                description: >-
+                  The explanation languages this dictionary currently holds
+                  senses in, derived from its own rows. Observed, not declared,
+                  so it grows when Enrich-on-Lookup authors a language the
+                  released data did not carry. Read it to know what can be
+                  served today without a model call.
+                items:
+                  $ref: "#/components/schemas/ApiLang"
+              accepts:
+                type: array
+                description: >-
+                  The explanation languages a lookup will accept for this
+                  dictionary. Fixed by the contract and unaffected by coverage.
+                  A language here but not in `languages` is a gap
+                  Enrich-on-Lookup fills, never a request error. Read this to
+                  decide which locales to offer.
                 items:
                   $ref: "#/components/schemas/ApiLang"
         tags:

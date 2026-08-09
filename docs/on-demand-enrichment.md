@@ -39,6 +39,8 @@ Public lookup and owner-authorized enrichment are one route family at v1. `GET /
 
 A batch is answered one query at a time. A query whose enrichment failed is `null`, the same as a miss, and the failure is recorded in the log as `lookup_failed` with that query on it. The alternative — failing the batch — meant one unavailable word discarded every entry beside it, which a consumer sending a page of text cannot afford. A batch in which *every* query failed still returns 500, because that is an expired token or a dead provider rather than a dictionary, and answering it with a full set of misses would let a consumer publish an empty artifact and believe it.
 
+`/v1/meta` reports two lists per dictionary. `languages` is observed — the explanation languages that hold senses right now — so it moves when Enrich-on-Lookup authors a language the released data did not carry. `accepts` is the contract and does not move. A consumer choosing which locales to offer reads `accepts`; one asking what it can serve today without paying for a model reads `languages`.
+
 ## Resolution flow
 
 1. Reject only obvious invalid requests: empty or multiline text, control characters, markup, URLs, or excessive length.

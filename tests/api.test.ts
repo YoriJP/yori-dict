@@ -103,9 +103,11 @@ test("returns metadata", async () => {
   // languages a query would actually find content in. This database carries
   // English and legacy Taiwanese Japanese senses and no English dictionary,
   // and `de` — a supported language with nothing behind it yet — is absent.
+  // `accepts` stays put while `languages` follows the rows, so a dictionary
+  // with nothing mounted still reports what a lookup would take.
   expect(body.dictionaries).toEqual({
-    ja: { languages: ["en", "zh-tw"] },
-    en: { languages: [] }
+    ja: { languages: ["en", "zh-tw"], accepts: ["en", "de", "zh-tw", "zh-cn", "ko"] },
+    en: { languages: [], accepts: ["en", "ja", "zh-tw"] }
   });
   expect(body.languages).toEqual(["en", "zh-tw"]);
   // Every credit points somewhere a reader can follow.
