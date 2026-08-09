@@ -13,6 +13,7 @@ import {
   type LookupDictionary,
   type LookupEntry
 } from "./lookup-contract";
+import { ModelGatewayError } from "./on-demand-dictionary";
 import type { OnDemandDictionary, OnDemandEntry, ResolveRequest } from "./on-demand-dictionary";
 
 type AppOptions = {
@@ -157,20 +158,11 @@ export function createApp(
       return c.json({ error: "Enrichment requires a valid bearer token" }, 401);
     }
     const traceId = c.req.header("x-yori-request-id") ?? crypto.randomUUID();
-    // One word must not decide the fate of the other ninety-nine. A provider
-    // that fails for a single query is reported as a miss for that query, and
-    // the batch keeps every entry it did resolve. The word is not lost: the
-    // failure is logged, and the next enriched lookup of it attempts again.
-    //
-    // A batch where *every* query failed is the other thing entirely — an
-    // expired token, a provider outage, a misconfigured key — and answering it
-    // with a full set of misses would let a consumer publish an empty
-    // dictionary and believe it. That one fails loudly.
-    // Only the enrichment call is isolated, and only its failure becomes a
-    // miss. Reading and projecting an entry is this server's own storage: a
-    // malformed row or an unreadable database is not a fact about the word,
-    // and reporting it as one would let a consumer record a gap that never
-    // existed. Those still fail the request, as they do for a single lookup.
+    // A batch is answered query by query, and only a provider failure becomes
+    // a miss. Anything else — an unreadable database, a malformed row — is
+    // this server's own problem rather than a fact about the word, and
+    // reporting it as one would let a consumer record a gap that never
+    // existed. Those fail the request, as they do for a single lookup.
     let unavailable = 0;
     const entries = await Promise.all(body.queries.map(async (candidate) => {
       const request = typeof candidate === "string"
@@ -185,8 +177,15 @@ export function createApp(
         try {
           enriched = await options.onDemand.resolve(request);
         } catch (error) {
-          // One word must not decide the fate of the other ninety-nine. The
-          // word is not lost: the failure is logged, and the next enriched
+          // Only a provider failure is isolated, and `ModelGatewayError` is
+          // what says so. `resolve` also writes attempt records and accepted
+          // entries, so a locked or failing database throws from inside it
+          // too; narrowing the call is not enough to tell the two apart, and
+          // reading the error type is. One word must not decide the fate of
+          // the other ninety-nine, but a broken database is not a fact about
+          // any word and must not be reported as one.
+          if (!(error instanceof ModelGatewayError)) throw error;
+          // The word is not lost: the failure is logged, and the next enriched
           // lookup of it attempts again.
           logLookupFailure(options, traceId, dictionary, lang, request.query, error);
           unavailable += 1;

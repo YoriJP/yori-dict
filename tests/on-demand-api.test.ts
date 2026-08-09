@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import type { LookupDb } from "../src/db";
-import { createOnDemandDictionary } from "../src/on-demand-dictionary";
+import { createOnDemandDictionary, ModelGatewayError } from "../src/on-demand-dictionary";
 import type {
   EnglishOnDemandDictionary,
   JapaneseOnDemandDictionary,
@@ -122,7 +122,7 @@ test("one failed word is a miss and the rest of the batch survives", async () =>
     logger: (event) => events.push(event as Record<string, unknown>),
     onDemand: {
       async resolve(request) {
-        if (request.query === "壊れた語") throw new Error("provider unavailable");
+        if (request.query === "壊れた語") throw new ModelGatewayError("permanent", "provider unavailable");
         return null;
       }
     }
@@ -179,10 +179,39 @@ test("an enriched hit on a released word keeps the siblings that word reached", 
   expect(entry.alternatives[0].id).toBe("yori:e_sibling");
 });
 
+test("a storage failure inside resolve fails the batch, unlike a provider failure", async () => {
+  // `resolve` writes attempt records and accepted entries as it goes, so a
+  // locked database throws from inside it just as a dead provider does.
+  // Narrowing which call is wrapped cannot separate them; only the error type
+  // can. A word that reached no provider is not a word the dictionary lacks.
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const db = emptyDb();
+  db.lookup = () => ({ item: released, alternatives: [] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    onDemand: {
+      async resolve(request) {
+        if (request.query === "壊れた語") throw new Error("database is locked");
+        return null;
+      }
+    }
+  });
+
+  const response = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer secret" },
+    body: JSON.stringify({ dictionary: "ja", lang: "en", enrich: true, queries: ["学校", "壊れた語"] })
+  });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: "Lookup is temporarily unavailable" });
+});
+
 test("a storage failure fails the batch instead of reporting the word as missing", async () => {
-  // Only a failed provider call is a miss. An unreadable row is this server's
-  // own problem, and reporting it as a gap would let a consumer record one
-  // that never existed.
+  // The same rule for a read: an unreadable row is this server's own problem,
+  // and reporting it as a gap would let a consumer record one that never
+  // existed.
   const released = generatedEntry();
   released.source = "jmdict";
   const db = emptyDb();
@@ -209,7 +238,7 @@ test("a batch where every word failed fails the request instead of reporting mis
   db.lookup = () => ({ item: released, alternatives: [] });
   const app = createApp(db, {
     enrichmentToken: "secret",
-    onDemand: { async resolve() { throw new Error("provider unavailable"); } }
+    onDemand: { async resolve() { throw new ModelGatewayError("permanent", "provider unavailable"); } }
   });
 
   const response = await app.request("/v1/lookup/batch", {
