@@ -43,6 +43,10 @@ A batch is answered one query at a time. A query whose enrichment failed is `nul
 
 `/v1/meta` reports two lists per dictionary. `languages` is observed — the explanation languages that hold senses right now — so it moves when Enrich-on-Lookup authors a language the released data did not carry. `accepts` is the contract and does not move. A consumer choosing which locales to offer reads `accepts`; one asking what it can serve today without paying for a model reads `languages`.
 
+### Changing the response shape
+
+Renaming or removing a response field breaks consumers silently: the reader gets `undefined`, every word becomes a miss, and nothing raises an error. `results` → `entries` and `meanings` → `senses` both shipped this way and both cost a downstream backfill. So a change to the shape of a response — a rename, a removal, a type change — is a release note, named field by field, in the release that carries it. Adding a field is not, since nothing reading the old shape can notice.
+
 ## Resolution flow
 
 1. Reject only obvious invalid requests: empty or multiline text, control characters, markup, URLs, or excessive length.
