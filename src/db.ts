@@ -251,12 +251,40 @@ function lookup(db: Database, query: string, lang: ApiLang): LookupResponse {
   return { item: readBestItem(db, candidates, lang) };
 }
 
+/**
+ * The entries a lookup term reaches, best answer first.
+ *
+ * The ordering matters most for a bare kana query, where one reading reaches
+ * several unrelated entries and only one of them is the word a reader meant.
+ * こと reaches both 事 and 琴, and both carry a common こと form, so the first
+ * two keys tie and something has to break it.
+ *
+ * Estimated Level breaks it. An easier band means the word is met earlier,
+ * which is the closest thing this database holds to "which of these is the
+ * ordinary word". It is a proxy, and the honest reason it is used is that
+ * JMdict's own frequency bands do not survive the import: jmdict-simplified
+ * folds `ichi1`, `news1` and `nf01`–`nf48` into one boolean per form, so every
+ * common form looks equally common here. Those bands would not beat this
+ * anyway — they rank a written form in a newspaper corpus, and 琴 sits at nf05
+ * against 事 at nf08, so importing them would pick the zither.
+ *
+ * `misc: uk` is deliberately not a key. It says a word is usually written in
+ * kana, which sounds like exactly the question, but it is recorded per sense
+ * and does not separate these entries: sorting by it puts 様 above 用 for よう
+ * while fixing nothing that Estimated Level does not already fix.
+ *
+ * An entry with no band sorts last rather than in the middle. That costs 家 the
+ * query うち to 内, because the JLPT list records 家 under いえ and leaves this
+ * entry unbanded. Ranking unbanded entries higher to recover it would hand こと
+ * to 古都, which is worse.
+ */
 function findEntryIds(db: Database, term: string): string[] {
   return db
     .query<{ entry_id: string }, [string]>(
       `select lt.entry_id
        from ja_lookup_terms lt
        join ja_forms f on f.entry_id = lt.entry_id and f.text = lt.term
+       join ja_entries e on e.id = lt.entry_id
        where lt.term = ?
        group by lt.entry_id
        order by
@@ -268,6 +296,14 @@ function findEntryIds(db: Database, term: string): string[] {
            order by best.common desc, case best.kind when 'kanji' then 0 else 1 end, best.text, best.reading
            limit 1
          ) = lt.term then 0 else 1 end,
+         case e.estimated_level
+           when 'N5' then 0
+           when 'N4' then 1
+           when 'N3' then 2
+           when 'N2' then 3
+           when 'N1' then 4
+           else 5
+         end,
          lt.entry_id`
     )
     .all(term)
