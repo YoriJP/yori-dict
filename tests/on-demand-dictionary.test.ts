@@ -1001,3 +1001,48 @@ class MemoryRepository implements EnrichmentRepository {
     return this.vocabulary;
   }
 }
+
+test("an inflected Japanese proposal becomes the entry it deinflects to", async () => {
+  // Relatedness deinflects the inputs to reach the proposal but never the
+  // proposal itself, so an inflection of a word the dictionary already carries
+  // could be authored as a second public headword. It becomes that word
+  // instead: refusing would answer nothing while holding 送る.
+  const send: PublicLookupItem = {
+    ...existingEntry(),
+    id: "yori:e_jmdict_1331100",
+    word: "送る",
+    reading: "おくる",
+    sourceId: "1331100",
+    headwords: [{ text: "送る", reading: "おくる", kind: "kanji", common: true, tags: [] }]
+  };
+  const repository = new MemoryRepository({ released: [["送る", send]] });
+  const gateway = new ScriptedGateway(["送られる"]);
+
+  const resolved = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolve(request("送られる"));
+
+  expect(resolved?.word).toBe("送る");
+  // Answered from the entry we already hold: no author or reviewer call, and
+  // no second entry minted for the inflected surface.
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility"]);
+  expect(repository.entries.size).toBe(0);
+});
+
+test("a Japanese dictionary form is still authored", async () => {
+  // 読む is a dictionary form: it reduces to nothing the dictionary carries,
+  // so the guard must not swallow it.
+  const repository = new MemoryRepository();
+  const gateway = new ScriptedGateway([
+    "読む",
+    authoredEntry({ headword: "読む", reading: "よむ", partOfSpeech: ["v5m"], provenance: "generated" }),
+    reviewForPrompt,
+    exampleFor("読む"),
+    reviewForPrompt
+  ]);
+
+  const resolved = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolve(request("読む"));
+
+  expect(resolved?.word).toBe("読む");
+  expect(repository.entries.size).toBe(1);
+});

@@ -42,7 +42,7 @@ Public lookup and owner-authorized enrichment are one route family at v1. `GET /
 1. Reject only obvious invalid requests: empty or multiline text, control characters, markup, URLs, or excessive length.
 2. Normalize the query and use any lemma and reading supplied by the consumer.
 3. Search the canonical dictionary and indexed licensed sources.
-4. If all miss, ask Luna for one canonical headword or `SKIP`, using the occurrence context for disambiguation.
+4. If all miss, ask Luna for one canonical headword or `SKIP`, using the occurrence context for disambiguation. The proposal is then checked deterministically: it must be related to the query, and it must not itself be an inflection of an entry that already exists — Japanese by deinflecting the proposal, English by stripping it. A model asked about an unknown surface will propose the surface itself, and a word form is not a lexeme.
 5. When Luna changes the headword, repeat source discovery once before generating.
 6. Build a source-evidence bundle and ask Luna to author one complete entry-language group for the requested language. Source evidence is minimum coverage, not a literal translation template, and the author may divide senses the way that language's dictionaries do.
 7. Run deterministic schema, script, provenance, label, and Taiwan-terminology checks.

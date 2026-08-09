@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { findPrcTerms } from "../scripts/taiwan-terminology";
 import { deinflect } from "./deinflect";
+import { resolveEnglishLemma } from "./english-strip";
 import type { ApiLang, PublicExample, PublicLookupItem, PublicSense } from "./types";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./english-types";
 import type { LookupDictionary } from "./lookup-contract";
@@ -162,6 +163,13 @@ export type JapaneseOnDemandDictionary = DictionaryResolver<PublicLookupItem>;
  */
 export type EnglishEnrichmentRepository = {
   find(query: string, lang: ApiLang): EnglishEntry | null;
+  /**
+   * Whether this exact lookup term is stored, with no inflection stripping and
+   * no explanation language. `find` resolves an inflected surface to its lemma,
+   * which is right for answering a reader but useless for asking whether a
+   * surface is itself an entry — the question the authoring guard needs.
+   */
+  hasLookupTerm(term: string): boolean;
   findSources(query: string): EnglishSourceRecord[];
   saveEntry(entry: EnglishEntry, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: EnglishExample, generation?: GenerationProvenance): void;
@@ -501,7 +509,14 @@ async function resolveMissing(
       logRefusal(options, request, "eligibility", eligibility.headword, "headword is unrelated to the query");
       return null;
     }
-    const canonicalHeadword = eligibility.headword;
+    // Relatedness deinflects the inputs to reach the proposal, but never the
+    // proposal itself, so an inflection of an unknown word could be authored
+    // as a public headword. 送られ deinflects to 送る, and if 送る is already
+    // an entry then 送られ is one of its forms, not a second lexeme — so the
+    // proposal becomes 送る. Refusing instead would answer nothing while
+    // holding the entry the reader asked for.
+    const canonicalHeadword = inflectedJapaneseProposal(eligibility.headword, request, options)
+      ?? eligibility.headword;
     if (canonicalHeadword !== headword) {
       headword = canonicalHeadword;
       const existing = options.repository.find(headword, request.targetDictionary, request.lang);
@@ -1097,6 +1112,24 @@ function isJapaneseLexicalText(value: string): boolean {
   return /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Z・ー]+$/u.test(value);
 }
 
+/**
+ * The dictionary form a proposed Japanese headword reduces to, when that form
+ * is already an entry, and null otherwise. The Japanese counterpart of the
+ * English stripper guard: both refuse to mint a word form as a lexeme, each
+ * reusing the reduction its own language already has.
+ */
+function inflectedJapaneseProposal(
+  headword: string,
+  request: ResolveRequest,
+  options: RuntimeOptions
+): string | null {
+  for (const candidate of deinflect(headword)) {
+    if (candidate.text === headword) continue;
+    if (options.repository.find(candidate.text, request.targetDictionary, request.lang)) return candidate.text;
+  }
+  return null;
+}
+
 function relatedHeadword(request: ResolveRequest, headword: string): boolean {
   const inputs = [request.query, request.context?.lemma, request.context?.reading].filter(nonemptyString);
   if (inputs.includes(headword)) return true;
@@ -1390,7 +1423,14 @@ async function resolveMissingEnglish(
   } else {
     const decision = await englishEligibility(request, options);
     if (!decision || !relatedEnglishHeadword(request, decision)) return null;
-    headword = decision;
+    // A model asked about an unknown surface will happily propose the surface
+    // itself. An inflected form is not a lexeme, so a proposal that strips to
+    // an entry the dictionary already carries becomes that entry rather than a
+    // second, competing one for the same word. Answering nothing here would
+    // waste a lemma we have just proved we hold — and would leave the reader
+    // with a miss that no later enrichment can fill, because the next lookup
+    // reaches exactly the same refusal.
+    headword = inflectedEnglishProposal(decision, options.repository) ?? decision;
     const existing = options.repository.find(headword, request.lang);
     if (existing) return existing;
     sources = options.repository.findSources(headword);
@@ -1930,6 +1970,20 @@ function isEnglishLexicalText(value: string): boolean {
 
 function normalizeEnglishHeadword(value: string): string {
   return value.trim().normalize("NFKC").toLocaleLowerCase("en-US").replace(/\s+/g, " ");
+}
+
+/**
+ * The lemma a proposed English headword inflects from, when the dictionary
+ * already carries it, and null otherwise. This is the deterministic half of
+ * the same rule the English import applies to source records: one module
+ * decides what an inflected surface is, so the import filter, lookup
+ * resolution, and this guard cannot disagree.
+ */
+function inflectedEnglishProposal(
+  headword: string,
+  repository: EnglishEnrichmentRepository
+): string | null {
+  return resolveEnglishLemma(headword, (candidate) => repository.hasLookupTerm(candidate));
 }
 
 function relatedEnglishHeadword(request: ResolveRequest, headword: string): boolean {
