@@ -117,6 +117,14 @@ test("a doubled consonant is undoubled, because doubling is regular", () => {
   // lexicon says so.
   expect(resolveEnglishLemma("spelled", lexicon("spell"))).toBe("spell");
   expect(resolveEnglishLemma("dressed", lexicon("dress"))).toBe("dress");
+  // `k` and `v` double like the rest. They matter least for lookup, where a
+  // source usually stores the form, and most for the authoring guard, which
+  // has only these rules to relate `trekking` to `trek`.
+  expect(resolveEnglishLemma("trekking", lexicon("trek"))).toBe("trek");
+  expect(resolveEnglishLemma("yakked", lexicon("yak"))).toBe("yak");
+  expect(resolveEnglishLemma("revved", lexicon("rev"))).toBe("rev");
+  // `c` takes a `k` rather than doubling, so there is nothing to undouble.
+  expect(resolveEnglishLemma("picnicked", lexicon("picnic"))).toBeNull();
 });
 
 test("candidates are deduplicated and keep rule order", () => {

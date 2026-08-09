@@ -104,13 +104,20 @@ export function englishLemmaCandidates(surface: string): string[] {
   return [...candidates];
 }
 
+/**
+ * The consonants English doubles before a vowel-initial suffix. `c` is absent
+ * because it takes a `k` instead of doubling, and `h`, `j`, `q`, `w`, `x` and
+ * `y` do not double at all.
+ */
+const doubling = /[bdfgklmnprstvz]/;
+
 function isDoubledConsonant(stem: string): boolean {
   const last = stem.at(-1);
   return (
     stem.length > 2
     && last !== undefined
     && last === stem.at(-2)
-    && /[bdfglmnprstz]/.test(last)
+    && doubling.test(last)
   );
 }
 
