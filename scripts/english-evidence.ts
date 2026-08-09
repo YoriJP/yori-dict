@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 
 // Bumping this invalidates previously produced evidence artifacts: a repeat run
 // only has to be byte-identical for the same pinned archive and the same tool
-// version.
-export const evidenceToolVersion = "1.0.0";
+// version. 2.0.0 renamed the emitted `sourceMeaning` field to `sourceGloss`, so
+// a 1.0.0 artifact and a 2.0.0 one describe the same rows with different keys.
+export const evidenceToolVersion = "2.0.0";
 export const evidenceToolName = "english-evidence-filter";
 
 export type HttpMetadata = {

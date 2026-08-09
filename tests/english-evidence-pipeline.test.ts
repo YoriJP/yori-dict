@@ -23,7 +23,7 @@ test("filters a streamed archive into Japanese and Chinese evidence with a repro
     allowDownload: false
   });
 
-  expect(manifest.tool).toEqual({ name: "english-evidence-filter", version: "1.0.0" });
+  expect(manifest.tool).toEqual({ name: "english-evidence-filter", version: "2.0.0" });
   expect(manifest.upstream).toMatchObject({
     source: "wiktionary",
     edition: "en",
