@@ -126,7 +126,66 @@ test("no release artifact mixes explanation languages", async () => {
     packs.set(lang, definitions);
   }
   expect(new Set(packs.get("en"))).not.toEqual(new Set(packs.get("zh-tw")));
-  expect(packs.get("zh-tw")).toEqual(["未知詞", "吃"]);
+  // 食べる carries a variant written form, and each form gets its own row so a
+  // reader scanning the variant finds the entry too.
+  expect(packs.get("zh-tw")).toEqual(["未知詞", "吃", "吃"]);
+});
+
+test("a pack row carries the inflection class Yomitan validates deinflections against", async () => {
+  const { artifacts } = await release();
+  const terms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
+  const rules = (word: string) => terms.find((term) => term[0] === word)?.[3];
+
+  // An ichidan verb, so a reader scanning 食べた reaches this entry instead of
+  // having the conditions check reject every inflected candidate.
+  expect(rules("食べる")).toBe("v1");
+  // Every godan class collapses to the one condition Yomitan branches on.
+  expect(rules("読む")).toBe("v5");
+  expect(rules("行く")).toBe("v5");
+  expect(rules("高い")).toBe("adj-i");
+  // A noun does not inflect, and the empty value is what the schema means by
+  // "no grammatical category" rather than a wildcard.
+  expect(rules("学校")).toBe("");
+});
+
+test("a pack row ranks common written forms above the rest", async () => {
+  const { artifacts } = await release();
+  const terms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
+  const scores = new Map(terms.map((term) => [term[0] as string, term[4] as number]));
+
+  // 食べる is a common JMdict headword and 遇う is not. Without a score both
+  // are ranked by locale collation.
+  expect(scores.get("食べる")!).toBeGreaterThan(scores.get("遇う")!);
+  expect(scores.get("食べる")).toBeGreaterThan(0);
+  // Inside one entry the preferred written form outranks its variants, and no
+  // variant can climb past a common form of another entry.
+  expect(scores.get("遇う")!).toBeGreaterThan(scores.get("配う")!);
+  expect(scores.get("配う")!).toBeLessThan(scores.get("食べる")!);
+  for (const score of scores.values()) expect(Number.isInteger(score)).toBe(true);
+});
+
+test("one entry's written forms share one sequence rather than becoming separate entries", async () => {
+  const { artifacts } = await release();
+  const terms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
+  const sequence = (word: string) => terms.find((term) => term[0] === word)?.[6];
+
+  // The pack is `sequenced`, so a shared sequence is what tells Yomitan these
+  // are one entry's spellings rather than three unrelated entries.
+  expect(sequence("遇う")).toBe(sequence("配う"));
+  expect(sequence("遇う")).toBe(sequence("あしらう"));
+  expect(sequence("遇う")).not.toBe(sequence("食べる"));
+});
+
+test("a pack credits EDRDG where a Yomitan user will actually read it", async () => {
+  const { artifacts } = await release();
+  for (const path of Object.values(artifacts.yomitan)) {
+    const index = JSON.parse(await packEntry(path, "index.json"));
+    // The licence requires the acknowledgement reach a user, and the details
+    // pane is the one place Yomitan renders this field.
+    expect(index.attribution).toContain("Electronic Dictionary Research and Development Group");
+    expect(index.attribution).toContain("JMdict/EDICT");
+    expect(index.attribution).toContain("https://www.edrdg.org/");
+  }
 });
 
 test("imported gloss language survives release into its own pack", async () => {

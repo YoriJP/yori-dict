@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { Database } from "bun:sqlite";
-import { createLanguageBanks, writeYomitanPacks } from "./yomitan-pack";
+import { createLanguageBanks, writeYomitanPacks, yomitanRules, yomitanScore } from "./yomitan-pack";
 import {
   fileSha256,
   readCoverageFrom,
@@ -28,6 +28,20 @@ export type JapaneseReleaseArtifacts = {
   /** One Yomitan pack per explanation language, keyed by that language. */
   yomitan: Record<string, string>;
 };
+
+/**
+ * EDRDG's own sanctioned acknowledgement wording, verbatim and with its URL.
+ *
+ * The licence requires this reach a user, and the dictionary details pane is
+ * the one place Yomitan renders `attribution`. Naming neither EDRDG nor a URL
+ * and pointing at a release manifest — which no Yomitan user will ever open —
+ * did not satisfy that.
+ */
+const japaneseAttribution =
+  "This dictionary uses the JMdict/EDICT dictionary files. These files are the property of the "
+  + "Electronic Dictionary Research and Development Group, and are used in conformance with the "
+  + "Group's licence. https://www.edrdg.org/ Additional content authored and reviewed by Yori Dict "
+  + "is distributed under CC BY-SA 4.0; see the release manifest.";
 
 const yomitanTitles: Record<string, string> = {
   en: "Yori Japanese–English",
@@ -76,17 +90,23 @@ export async function buildJapaneseRelease(
     writer.write(`${JSON.stringify(canonicalRecord(record))}\n`);
     entries += 1;
     for (const group of record.groups) {
-      banks.add(group.lang, (sequence) => [
-        record.entry.word,
-        record.entry.reading ?? "",
+      // One row per written form, so a reader scanning a variant spelling
+      // finds the entry rather than only its preferred form. Each row carries
+      // that form's own common flag and its position in the entry's ordering,
+      // which is what `score` ranks on.
+      const rules = yomitanRules(group.senses.flatMap((sense) => sense.partOfSpeech));
+      const glossary = group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text));
+      banks.add(group.lang, record.entry.headwords.map((headword, index) => (sequence: number) => [
+        headword.text,
+        headword.reading ?? "",
         "",
-        "",
-        0,
+        rules,
+        yomitanScore(headword.common, index),
         // Senses keep this language's own stored order.
-        group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text)),
+        glossary,
         sequence,
         ""
-      ]);
+      ]));
     }
   });
   await writer.end();
@@ -96,7 +116,7 @@ export async function buildJapaneseRelease(
     path: (lang) => artifacts.yomitan[lang]!,
     index: (lang) => ({
       title: yomitanTitles[lang] ?? `Yori Japanese (${lang})`,
-      attribution: "JMdict and Yori Dict contributors; see the release manifest.",
+      attribution: japaneseAttribution,
       // Named explanation language of this pack; it contains no other.
       description: `Japanese headwords explained in ${lang}.`
     })

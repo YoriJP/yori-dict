@@ -88,7 +88,11 @@ export async function buildEnglishRelease(
     writer.write(`${JSON.stringify(canonicalRecord(record))}\n`);
     entries += 1;
     for (const group of record.groups) {
-      banks.add(group.lang, (sequence) => [
+      // English carries one written form per entry and no common flag, and its
+      // parts of speech are WordNet's rather than JMdict's, so neither `rules`
+      // nor `score` has a value here that would not be invented. They stay at
+      // the schema's "no grammatical category" and "unranked".
+      banks.add(group.lang, [(sequence) => [
         record.entry.headword,
         "",
         [...new Set(group.senses.map(({ partOfSpeech }) => partOfSpeech))].join(" "),
@@ -98,7 +102,7 @@ export async function buildEnglishRelease(
         group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text)),
         sequence,
         ""
-      ]);
+      ]]);
     }
   });
   await writer.end();
