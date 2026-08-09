@@ -57,6 +57,12 @@ const rules: readonly Rule[] = [
   // is tried as `welcome` before `welcom`.
   { suffix: "ed", replacement: "e" },
   { suffix: "ed", replacement: "" },
+  // `-ied` restores the `y` the suffix consumed, and comes last of the three
+  // for the same reason `-ves` follows `-es`: the y-stems are the smaller
+  // class. Trying it first would take `died` to `dy` and `skied` to `sky`,
+  // while `studied` still reaches `study` here because neither `studie` nor
+  // `studi` is a word.
+  { suffix: "ied", replacement: "y" },
   { suffix: "ing", replacement: "e" },
   { suffix: "ing", replacement: "" },
   // Comparative and superlative.

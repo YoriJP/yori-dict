@@ -39,6 +39,19 @@ test("a regular inflected surface resolves to the lemma the lexicon carries", ()
   }
 });
 
+test("a -ied surface restores the y the suffix consumed", () => {
+  // A lemma whose source never indexed its inflections has only the rules to
+  // reach it, and `studie` and `studi` are not words.
+  expect(resolveEnglishLemma("studied", lexicon("study"))).toBe("study");
+  expect(resolveEnglishLemma("partied", lexicon("party"))).toBe("party");
+  expect(resolveEnglishLemma("guarantied", lexicon("guaranty"))).toBe("guaranty");
+  // The rule comes last of the three, so an -ie verb keeps its own past form.
+  // Trying `-ied` first would take these to `dy` and `sky`.
+  expect(resolveEnglishLemma("died", lexicon("die", "dy"))).toBe("die");
+  expect(resolveEnglishLemma("skied", lexicon("ski", "sky"))).toBe("ski");
+  expect(resolveEnglishLemma("lied", lexicon("lie", "ly"))).toBe("lie");
+});
+
 test("a -ves surface prefers the verb, because the -f nouns are a closed set", () => {
   // Both readings are reachable, so rule order decides, and it decides for the
   // open class. The closed one loses nothing in practice: a real lexicon
