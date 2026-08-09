@@ -166,7 +166,13 @@ export function createApp(
     // expired token, a provider outage, a misconfigured key — and answering it
     // with a full set of misses would let a consumer publish an empty
     // dictionary and believe it. That one fails loudly.
-    const settled = await Promise.allSettled(body.queries.map(async (candidate) => {
+    // Only the enrichment call is isolated, and only its failure becomes a
+    // miss. Reading and projecting an entry is this server's own storage: a
+    // malformed row or an unreadable database is not a fact about the word,
+    // and reporting it as one would let a consumer record a gap that never
+    // existed. Those still fail the request, as they do for a single lookup.
+    let unavailable = 0;
+    const entries = await Promise.all(body.queries.map(async (candidate) => {
       const request = typeof candidate === "string"
         ? resolveRequest(candidate, dictionary, lang, {}, "bulk", traceId)
         : resolveRequest(candidate.query, dictionary, lang, {
@@ -174,30 +180,38 @@ export function createApp(
             reading: candidate.reading,
             sentence: candidate.context
           }, "bulk", traceId);
-      try {
-        const enriched = body.enrich && options.onDemand
-          ? await options.onDemand.resolve(request)
-          : null;
-        const entry = readEntry(
-          db,
-          options,
-          dictionary,
-          lang,
-          request.query,
-          request.context?.lemma,
-          enriched
-        );
-        logLookup(options, traceId, dictionary, lang, request.query, body.enrich === true, entry);
-        return entry;
-      } catch (error) {
-        logLookupFailure(options, traceId, dictionary, lang, request.query, error);
-        throw error;
+      let enriched: OnDemandEntry | null = null;
+      if (body.enrich && options.onDemand) {
+        try {
+          enriched = await options.onDemand.resolve(request);
+        } catch (error) {
+          // One word must not decide the fate of the other ninety-nine. The
+          // word is not lost: the failure is logged, and the next enriched
+          // lookup of it attempts again.
+          logLookupFailure(options, traceId, dictionary, lang, request.query, error);
+          unavailable += 1;
+          return null;
+        }
       }
+      const entry = readEntry(
+        db,
+        options,
+        dictionary,
+        lang,
+        request.query,
+        request.context?.lemma,
+        enriched
+      );
+      logLookup(options, traceId, dictionary, lang, request.query, body.enrich === true, entry);
+      return entry;
     }));
-    if (settled.every((result) => result.status === "rejected")) {
+    // A batch where *every* query failed is a different thing entirely — an
+    // expired token, a provider outage, a misconfigured key — and answering it
+    // with a full set of misses would let a consumer publish an empty
+    // dictionary and believe it. That one fails loudly.
+    if (unavailable > 0 && unavailable === body.queries.length) {
       return c.json({ error: "Lookup is temporarily unavailable" }, 500);
     }
-    const entries = settled.map((result) => (result.status === "fulfilled" ? result.value : null));
     return c.json({ entries });
   });
 
@@ -220,20 +234,35 @@ function readEntry(
   enriched: OnDemandEntry | null
 ): LookupEntry | null {
   if (dictionary === "en") {
-    // Authored content answers for the word it was authored for and has no
-    // siblings to offer, so enrichment yields one entry and no alternatives.
-    const authored = asEnglishEntry(enriched);
-    if (authored) return englishLookupEntry(authored, lang);
     const entries = options.englishLookupAll?.(query, lang) ?? [];
-    const resolved = entries.length > 0 || !lemma || lemma === query
+    const released = entries.length > 0 || !lemma || lemma === query
       ? entries
       : options.englishLookupAll?.(lemma, lang) ?? [];
-    return withAlternatives(resolved.map((entry) => englishLookupEntry(entry, lang)));
+    return withAlternatives(
+      leadWithAuthored(asEnglishEntry(enriched), released).map((entry) => englishLookupEntry(entry, lang))
+    );
   }
-  const authored = asJapaneseEntry(enriched);
-  if (authored) return japaneseLookupEntry(authored, lang);
   const { item, alternatives } = db.lookup(query, lang);
-  return withAlternatives([item, ...alternatives].map((match) => match && japaneseLookupEntry(match, lang)));
+  const released = [item, ...alternatives].filter((match): match is PublicLookupItem => match !== null);
+  return withAlternatives(
+    leadWithAuthored(asJapaneseEntry(enriched), released).map((match) => japaneseLookupEntry(match, lang))
+  );
+}
+
+/**
+ * The entries to answer with, best first, when enrichment also ran.
+ *
+ * An authored entry leads, because it is the newer copy: enrichment either
+ * created it for a word the store missed, or completed the store's own entry
+ * with the examples it lacked. `resolve` returns a released entry unchanged
+ * when it is already complete, so an authored entry is not evidence that the
+ * query was a miss — and the siblings that query reached still belong to the
+ * reader. Matching by id is what keeps the completed copy from appearing twice,
+ * once as the answer and once as an alternative to itself.
+ */
+function leadWithAuthored<T extends { id: string }>(authored: T | null, released: T[]): T[] {
+  if (!authored) return released;
+  return [authored, ...released.filter((entry) => entry.id !== authored.id)];
 }
 
 /**

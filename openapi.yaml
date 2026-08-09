@@ -437,7 +437,8 @@ components:
             unavailable word never discards the entries beside it; the failure is
             recorded in the server log. A batch in which every query failed
             returns 500 instead, so a total outage cannot be mistaken for a
-            dictionary with nothing in it.
+            dictionary with nothing in it. Only enrichment is isolated this
+            way; a storage or projection error still fails the request.
           items:
             $ref: "#/components/schemas/LookupResult"
     LookupEntry:

@@ -152,6 +152,56 @@ test("one failed word is a miss and the rest of the batch survives", async () =>
   ]);
 });
 
+test("an enriched hit on a released word keeps the siblings that word reached", async () => {
+  // `resolve` returns the released entry unchanged when it is already
+  // complete, so an authored entry is not evidence that the query was a miss.
+  // Treating it as one dropped alternatives for exactly the enriched path
+  // yori-news and yori-web use.
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const sibling = { ...generatedEntry(), id: "yori:e_sibling", word: "琴" };
+  const db = emptyDb();
+  db.lookup = () => ({ item: released, alternatives: [sibling] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    // The completed copy of the same entry, by id.
+    onDemand: { async resolve() { return released; } }
+  });
+
+  const response = await app.request("/v1/lookup?q=%E3%81%93%E3%81%A8&dictionary=ja&lang=en&enrich=true", {
+    headers: { authorization: "Bearer secret" }
+  });
+  const entry = await response.json();
+  expect(entry.id).toBe(released.id);
+  // The sibling survives, and the completed entry does not become an
+  // alternative to itself.
+  expect(entry.alternatives).toHaveLength(1);
+  expect(entry.alternatives[0].id).toBe("yori:e_sibling");
+});
+
+test("a storage failure fails the batch instead of reporting the word as missing", async () => {
+  // Only a failed provider call is a miss. An unreadable row is this server's
+  // own problem, and reporting it as a gap would let a consumer record one
+  // that never existed.
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const db = emptyDb();
+  db.lookup = (query: string) => {
+    if (query === "壊れた行") throw new Error("malformed stored entry");
+    return { item: released, alternatives: [] };
+  };
+  const app = createApp(db, { enrichmentToken: "secret" });
+
+  const response = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dictionary: "ja", lang: "en", queries: ["学校", "壊れた行"] })
+  });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: "Lookup is temporarily unavailable" });
+});
+
 test("a batch where every word failed fails the request instead of reporting misses", async () => {
   const released = generatedEntry();
   released.source = "jmdict";
