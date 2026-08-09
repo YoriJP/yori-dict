@@ -329,7 +329,11 @@ export function removeImportedGerman(path: string): number {
   const db = new Database(path);
   try {
     db.exec("pragma busy_timeout = 5000;");
-    const imported = "select id from ja_senses where lang = 'de' and provenance = 'source'";
+    const imported = `select id from ja_senses
+      where lang = 'de'
+        and provenance = 'source'
+        and source_name = 'jmdict'
+        and generation_id is null`;
     const count = db.query<{ count: number }, []>(
       `select count(*) as count from (${imported})`
     ).get()?.count ?? 0;
@@ -340,7 +344,7 @@ export function removeImportedGerman(path: string): number {
       db.exec(`
         delete from ja_examples where sense_id in (${imported});
         delete from ja_glosses where sense_id in (${imported});
-        delete from ja_senses where lang = 'de' and provenance = 'source';
+        delete from ja_senses where id in (${imported});
       `);
     })();
     return count;

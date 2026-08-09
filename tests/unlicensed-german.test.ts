@@ -29,8 +29,10 @@ function store(): string {
       values ('s_en', 1, 'to eat', 'jmdict', 'source');
 
     insert into ja_senses (id, entry_id, lang, position, part_of_speech, provenance,
-      applies_to_kanji, applies_to_kana, misc, field, dialect, info, related, antonym, language_source)
-      values ('s_de', 'e1', 'de', 1, '["v1"]', 'source', '["*"]', '["*"]', '[]', '[]', '[]', '[]', '[]', '[]', '[]');
+      applies_to_kanji, applies_to_kana, misc, field, dialect, info, related, antonym, language_source,
+      source_name, source_ref)
+      values ('s_de', 'e1', 'de', 1, '["v1"]', 'source', '["*"]', '["*"]', '[]', '[]', '[]', '[]', '[]', '[]', '[]',
+        'jmdict', 'jmdict:1358280:1');
     insert into ja_glosses (sense_id, position, text, source, review_status)
       values ('s_de', 1, 'essen', 'jmdict', 'source');
     insert into ja_examples (sense_id, position, text, translations, source, review_status)
@@ -41,14 +43,25 @@ function store(): string {
       values ('s_de_gen', 'e1', 'de', 2, '["v1"]', 'generated', '["*"]', '["*"]', '[]', '[]', '[]', '[]', '[]', '[]', '[]');
     insert into ja_glosses (sense_id, position, text, source, review_status)
       values ('s_de_gen', 1, 'speisen', 'generated', 'checked');
+
+    insert into ja_generations
+      (id, model, provider, reasoning_effort, prompt_version, review_outcome, created_at)
+      values ('gen_de_source', 'test', 'test', 'test', 'test', 'accepted', '2026-08-10');
+    insert into ja_senses (id, entry_id, lang, position, part_of_speech, provenance,
+      applies_to_kanji, applies_to_kana, misc, field, dialect, info, related, antonym, language_source,
+      source_name, source_ref, generation_id)
+      values ('s_de_source', 'e1', 'de', 3, '["v1"]', 'source', '["*"]', '["*"]', '[]', '[]', '[]', '[]', '[]', '[]', '[]',
+        'jmdict', 'jmdict:1358280:1', 'gen_de_source');
+    insert into ja_glosses (sense_id, position, text, source, review_status)
+      values ('s_de_source', 1, 'Nahrung zu sich nehmen', 'jmdict', 'source');
   `);
   // `exec` does not surface a constraint failure in a later statement, so a
   // schema change could otherwise leave this fixture empty and the assertions
   // below vacuously true.
   const seededSenses = db.query<{ count: number }, []>("select count(*) as count from ja_senses").get()?.count;
   const seededExamples = db.query<{ count: number }, []>("select count(*) as count from ja_examples").get()?.count;
-  if (seededSenses !== 3 || seededExamples !== 1) {
-    throw new Error(`Fixture seeded ${seededSenses} senses and ${seededExamples} examples, expected 3 and 1`);
+  if (seededSenses !== 4 || seededExamples !== 1) {
+    throw new Error(`Fixture seeded ${seededSenses} senses and ${seededExamples} examples, expected 4 and 1`);
   }
   db.close();
   return path;
@@ -77,10 +90,12 @@ test("imported German is removed, because Yori Dict has no grant to serve it", (
   ).get()?.count).toBe(0);
   db.close();
 
-  // English is untouched, and authored German survives: the problem was an
-  // unlicensed source, not the language, and that group is Yori's own content.
+  // English is untouched, and authored German survives regardless of whether
+  // it was generated or grounded in licensed evidence. The generation
+  // reference, not provenance alone, distinguishes enrichment from import.
   expect(langs(path)).toEqual([
     { id: "s_de_gen", lang: "de", provenance: "generated" },
+    { id: "s_de_source", lang: "de", provenance: "source" },
     { id: "s_en", lang: "en", provenance: "source" }
   ]);
 });
