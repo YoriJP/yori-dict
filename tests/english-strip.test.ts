@@ -52,6 +52,20 @@ test("a -ied surface restores the y the suffix consumed", () => {
   expect(resolveEnglishLemma("lied", lexicon("lie", "ly"))).toBe("lie");
 });
 
+test("a -ier or -iest surface restores the y before trying to restore an e", () => {
+  // The opposite order to `-ied`, and for a measured reason: here the `-er`
+  // competitor lands on a real but unrelated word more often than on the
+  // right one. `crappie` is a fish and `junkie` is a person.
+  expect(resolveEnglishLemma("crappier", lexicon("crappy", "crappie"))).toBe("crappy");
+  expect(resolveEnglishLemma("junkiest", lexicon("junky", "junkie"))).toBe("junky");
+  expect(resolveEnglishLemma("pointier", lexicon("pointy"))).toBe("pointy");
+  expect(resolveEnglishLemma("stickiest", lexicon("sticky"))).toBe("sticky");
+  // A noun that merely ends in -ier reaches no -y word, so the lexicon still
+  // settles it and the eager order costs nothing: `cashy` is not a word.
+  expect(resolveEnglishLemma("cashier", lexicon("cash"))).toBeNull();
+  expect(resolveEnglishLemma("soldier", lexicon("sold"))).toBeNull();
+});
+
 test("a -ves surface prefers the verb, because the -f nouns are a closed set", () => {
   // Both readings are reachable, so rule order decides, and it decides for the
   // open class. The closed one loses nothing in practice: a real lexicon

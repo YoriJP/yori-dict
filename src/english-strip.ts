@@ -65,7 +65,14 @@ const rules: readonly Rule[] = [
   { suffix: "ied", replacement: "y" },
   { suffix: "ing", replacement: "e" },
   { suffix: "ing", replacement: "" },
-  // Comparative and superlative.
+  // Comparative and superlative. Here the y-restoring rules come *first*,
+  // the opposite of `-ied`, because the competitor is wrong more often than
+  // it is right: `-er` with the `e` restored turns `crappier` into the fish
+  // `crappie` and `junkier` into `junkie`, where `-ier` gives the adjectives
+  // those surfaces actually compare. Nothing is lost by trying it first,
+  // because `tier`, `cashier` and `terrier` reach no `-y` word at all.
+  { suffix: "iest", replacement: "y" },
+  { suffix: "ier", replacement: "y" },
   { suffix: "est", replacement: "e" },
   { suffix: "est", replacement: "" },
   { suffix: "er", replacement: "e" },
