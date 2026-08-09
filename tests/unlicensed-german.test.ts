@@ -33,8 +33,8 @@ function store(): string {
       values ('s_de', 'e1', 'de', 1, '["v1"]', 'source', '["*"]', '["*"]', '[]', '[]', '[]', '[]', '[]', '[]', '[]');
     insert into ja_glosses (sense_id, position, text, source, review_status)
       values ('s_de', 1, 'essen', 'jmdict', 'source');
-    insert into ja_examples (sense_id, position, text, source, review_status)
-      values ('s_de', 1, 'Ich esse.', 'sourced', 'source');
+    insert into ja_examples (sense_id, position, text, translations, source, review_status)
+      values ('s_de', 1, '私は食べる。', '[{"lang":"de","text":"Ich esse."}]', 'sourced', 'source');
 
     insert into ja_senses (id, entry_id, lang, position, part_of_speech, provenance,
       applies_to_kanji, applies_to_kana, misc, field, dialect, info, related, antonym, language_source)
@@ -45,8 +45,11 @@ function store(): string {
   // `exec` does not surface a constraint failure in a later statement, so a
   // schema change could otherwise leave this fixture empty and the assertions
   // below vacuously true.
-  const seeded = db.query<{ count: number }, []>("select count(*) as count from ja_senses").get()?.count;
-  if (seeded !== 3) throw new Error(`Fixture seeded ${seeded} senses, expected 3`);
+  const seededSenses = db.query<{ count: number }, []>("select count(*) as count from ja_senses").get()?.count;
+  const seededExamples = db.query<{ count: number }, []>("select count(*) as count from ja_examples").get()?.count;
+  if (seededSenses !== 3 || seededExamples !== 1) {
+    throw new Error(`Fixture seeded ${seededSenses} senses and ${seededExamples} examples, expected 3 and 1`);
+  }
   db.close();
   return path;
 }
