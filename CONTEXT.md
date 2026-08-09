@@ -12,6 +12,10 @@ _Avoid_: Track, locale, translation
 An outside dictionary or corpus whose license permits Yori Dict to import and redistribute selected material.
 _Avoid_: Provider, model source
 
+**Licence Gate**:
+A source is admitted only if its licence permits redistribution under CC BY-SA 4.0. Licence is a gate, not a trade-off: fitness, quality, and coverage are judged only after it passes, and no attribution string substitutes for a missing grant. A coverage gap is recoverable through Enrich-on-Lookup; an unlicensed source is not. A dataset that bundles separately-owned components is admitted component by component, never wholesale.
+_Avoid_: License check, compliance review
+
 **Source Evidence**:
 The combined senses, labels, pronunciations, and examples supplied to generation from licensed source datasets. It establishes minimum coverage but is not text to translate mechanically.
 _Avoid_: Prompt context, source gloss
@@ -35,20 +39,16 @@ One written form of an entry, either kanji or kana, carrying JMdict's common fla
 _Avoid_: Form, spelling, surface
 
 **Sense**:
-One meaning of an entry in one explanation language, with its own part of speech and annotations. Each explanation language owns its senses: their identifiers, order, and divisions never have to line up across languages.
-_Avoid_: Definition
-
-**Meaning**:
-What a sense is called in the public API and in writing aimed at dictionary users, where `senses` would read as jargon. The API field is `meanings`; the canonical tables are `ja_senses` and `en_senses`. They name the same thing, and no third word is used for it.
-_Avoid_: Definition, entry
+One meaning of an entry in one explanation language, with its own part of speech and annotations. Each explanation language owns its senses: their identifiers, order, and divisions never have to line up across languages. This is the only word for the concept: the API field is `senses`, the release JSONL key is `senses`, and the canonical tables are `ja_senses` and `en_senses`.
+_Avoid_: Definition, meaning
 
 **Explanation Language**:
 The language a sense explains an entry in, stored on the sense rather than encoded into a table name. A lookup names one, and gets that language's own senses or nothing.
 _Avoid_: Target language, gloss language, language pair
 
 **Gloss**:
-A sense rendered into one language.
-_Avoid_: Definition, translation, meaning
+A sense rendered into one language. A sense holds one or more glosses; the two are not interchangeable.
+_Avoid_: Definition, translation, sense
 
 **Lookup Term**:
 An indexed string that resolves a query to entries, matched by kanji or by reading.
@@ -57,6 +57,10 @@ _Avoid_: Key, query, index
 **Deinflection**:
 Word-level reduction of an inflected form back to a dictionary form. It is lookup help, not sentence parsing.
 _Avoid_: Parsing, tokenization, lemmatization
+
+**Inflection Stripping**:
+Deinflection's English counterpart: regular suffix substitutions that generate candidate lemmas, validated against the stored Lookup Terms. It is deliberately small because the lexicon rejects the wrong guesses, and it carries no irregular exception list. One module serves both callers — lookup resolution and the authoring guard — so they cannot disagree about what an inflected surface is. Import is not a caller: a source that declares which of its own senses are word forms is telling us, and stripping its headwords on top of that deletes lexemes the primary inventory merely lacks. Unlike Deinflection it is silent: English has no Inflection Path.
+_Avoid_: Lemmatization, stemming, English deinflection
 
 **Inflection Path**:
 The ordered steps deinflection took to reach a dictionary form, returned so a learner can see why 食べました resolves to 食べる.
@@ -81,7 +85,7 @@ The eligibility result produced after lookup and source discovery miss: one cano
 _Avoid_: Classification, rejection report
 
 **Source-Grounded Authoring**:
-Creating a canonical entry from source evidence plus lexical knowledge. The author may clarify, split, or add established senses, but must preserve every supported meaning and its provenance.
+Creating a canonical entry from source evidence plus lexical knowledge. The author may clarify, split, or add established senses, but must preserve every supported sense and its provenance.
 _Avoid_: Direct translation, free generation
 
 **Production Database**:

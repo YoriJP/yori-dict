@@ -294,6 +294,12 @@ class MemoryEnglishRepository implements EnglishEnrichmentRepository {
     this.released = new Map(options.released ?? []);
     this.sources = new Map(options.sources ?? []);
   }
+  hasLookupTerm(term: string) {
+    const normalized = term.toLowerCase();
+    return this.released.has(normalized)
+      || this.entry?.headword === normalized
+      || this.sources.has(normalized);
+  }
   find(query: string, lang: ApiLang) {
     const entry = this.entry?.headword === query.toLowerCase()
       ? this.entry
@@ -343,3 +349,110 @@ function releasedEntry(): EnglishEntry {
     }]
   };
 }
+
+test("a new word first seen in an inflected form is still authored", async () => {
+  // Relatedness reduces the query with the same stripper lookup uses. A
+  // hand-rolled `+s`/`+es`/`+ed`/`+ing` set looks equivalent and is not: it
+  // rejected `run` for `running`, so a word the dictionary has never seen,
+  // first encountered in a doubled or y-changing form, could never be authored.
+  const repository = new MemoryEnglishRepository();
+  const gateway = new ScriptedGateway([
+    "blog",
+    JSON.stringify({
+      headword: "blog",
+      pronunciations: [],
+      senses: [{
+        partOfSpeech: "verb",
+        definition: "to write an entry on a personal website",
+        registers: [], regions: [], domains: [], dated: false, usage: [],
+        provenance: "generated", evidenceIds: []
+      }]
+    }),
+    reviewAccepted,
+    JSON.stringify({ sentence: "She blogs about food every week." }),
+    reviewAccepted
+  ]);
+
+  const resolved = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "blogging", targetDictionary: "en", lang: "en" });
+
+  expect(resolved?.headword).toBe("blog");
+  expect(repository.savedLangs).toEqual(["en"]);
+});
+
+test("an inflected English proposal becomes the lemma's entry, not a refusal", async () => {
+  // `robot` is a published entry, so `robots` is one of its forms rather than
+  // a second lexeme. Answering nothing would waste an entry we hold, and no
+  // later enrichment could fix it: the next lookup reaches the same decision.
+  const robot = releasedEntry();
+  robot.headword = "robot";
+  const repository = new MemoryEnglishRepository({ released: [["robot", robot]] });
+  const gateway = new ScriptedGateway(["robots"]);
+
+  const resolved = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "robots", targetDictionary: "en", lang: "en" });
+
+  expect(resolved?.headword).toBe("robot");
+  // The lemma was already complete, so no author or reviewer call was paid for
+  // and no second entry was minted for the surface.
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility"]);
+  expect(repository.savedLangs).toEqual([]);
+});
+
+test("an inflected proposal whose lemma lacks the language authors the lemma", async () => {
+  // The lemma exists but carries no group in the requested language. That is a
+  // real gap, so it is filled — for `robot`, never for the surface `robots`.
+  const robot = releasedEntry();
+  robot.headword = "robot";
+  const repository = new MemoryEnglishRepository({ released: [["robot", robot]] });
+  const gateway = new ScriptedGateway([
+    "robots",
+    JSON.stringify({
+      headword: "robot",
+      pronunciations: [],
+      senses: [{
+        partOfSpeech: "noun",
+        definition: "機械で動く人型の装置",
+        registers: [], regions: [], domains: [], dated: false, usage: [],
+        provenance: "generated", evidenceIds: []
+      }]
+    }),
+    reviewAccepted,
+    JSON.stringify({ sentence: "その工場では robot が働いている。" }),
+    reviewAccepted
+  ]);
+
+  const resolved = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "robots", targetDictionary: "en", lang: "ja" });
+
+  expect(resolved?.headword).toBe("robot");
+  expect(repository.savedLangs).toEqual(["ja"]);
+});
+
+test("an English headword that is a lexeme in its own right is still authored", async () => {
+  // The guard must not swallow a real word that merely looks inflected. `bus`
+  // strips to `bu`, which is not an entry, so authoring proceeds.
+  const repository = new MemoryEnglishRepository();
+  const gateway = new ScriptedGateway([
+    "bus",
+    JSON.stringify({
+      headword: "bus",
+      pronunciations: [],
+      senses: [{
+        partOfSpeech: "noun",
+        definition: "a large road vehicle that carries many passengers",
+        registers: [], regions: [], domains: [], dated: false, usage: [],
+        provenance: "generated", evidenceIds: []
+      }]
+    }),
+    reviewAccepted,
+    JSON.stringify({ sentence: "She caught the bus to work." }),
+    reviewAccepted
+  ]);
+
+  const resolved = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "bus", targetDictionary: "en", lang: "en" });
+
+  expect(resolved?.headword).toBe("bus");
+  expect(repository.savedLangs).toEqual(["en"]);
+});

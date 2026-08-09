@@ -12,7 +12,7 @@ import { openEnglishLookupDb } from "../src/english-dictionary";
 import { importEnglishRelease, migrateProductionDatabase } from "../src/production-database";
 import type { ApiLang } from "../src/types";
 
-test("the English release is deterministic and keeps the source's meaning order end to end", async () => {
+test("the English release is deterministic and keeps the source's sense order end to end", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-release-"));
   const sources = [await fixtureWordNet(root), await fixtureWiktionary(root)];
   const first = await rebuildEnglishDictionary({ sources, out: join(root, "first.sqlite"), version: "2026.08.1", retainFrom: null });
@@ -40,13 +40,17 @@ test("the English release is deterministic and keeps the source's meaning order 
       fallback: "wiktionary",
       secondary: "exact evidence identifier mappings only"
     },
-    coverage: { en: { entries: 3, meanings: 5, glosses: 5, examples: 1 } },
+    coverage: { en: { entries: 3, senses: 5, glosses: 5, examples: 1 } },
     yomitan: { en: "yori-en-en.zip" }
   });
   expect(manifest.sha256).toMatch(/^[0-9a-f]{64}$/);
   expect(manifest.sources).toEqual([
     {
       source: "open-english-wordnet",
+      // Every manifest source carries a recognisable name and a URL a reader
+      // can follow, so an inherited attribution obligation is actionable.
+      name: "Open English WordNet",
+      url: "https://en-word.net/",
       lang: "en",
       version: "2025-fixture",
       license: "CC-BY-4.0",
@@ -57,6 +61,8 @@ test("the English release is deterministic and keeps the source's meaning order 
     },
     {
       source: "wiktionary",
+      name: "Simple English Wiktionary",
+      url: "https://simple.wiktionary.org/wiki/Wiktionary:Copyrights",
       lang: "en",
       version: "2026-07-06-fixture",
       license: "CC-BY-SA-4.0 AND GFDL-1.1-or-later",
@@ -83,10 +89,10 @@ test("the English release is deterministic and keeps the source's meaning order 
     .split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const bank = records.find((record) => record.headword === "bank")!;
   expect(Object.keys(bank.languages)).toEqual(["en"]);
-  expect(bank.languages.en.meanings.map((meaning: { glosses: Array<{ text: string }> }) => meaning.glosses[0].text))
+  expect(bank.languages.en.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text))
     .toEqual(["sloping land beside water", "a financial institution that accepts deposits"]);
   // Concise provenance and selected text, never a complete raw source payload.
-  expect(bank.languages.en.meanings[0]).toMatchObject({
+  expect(bank.languages.en.senses[0]).toMatchObject({
     lang: "en",
     provenance: "source",
     sources: ["open-english-wordnet:bank%1:17:01::"],
@@ -99,7 +105,7 @@ test("the English release is deterministic and keeps the source's meaning order 
   expect(index).toMatchObject({ title: "Yori English–English", format: 3, revision: "2026.08.1" });
   const bankTerm = terms.find((term: unknown[]) => term[0] === "bank")!;
   expect(bankTerm.slice(0, 5)).toEqual(["bank", "", "noun", "", 0]);
-  // The adapter reads the canonical order; it never re-sorts the meanings.
+  // The adapter reads the canonical order; it never re-sorts the senses.
   expect(bankTerm[5]).toEqual([
     "sloping land beside water",
     "a financial institution that accepts deposits"

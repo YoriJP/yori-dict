@@ -44,7 +44,7 @@ const yomitanTitles: Record<string, string> = {
  * Publishes the English product from the canonical `en_*` tables: a snapshot
  * SQLite, JSONL with one content group per explanation language, a coverage and
  * source manifest, and one deterministic Yomitan pack per language. The Yomitan
- * adapter reads canonical meanings in their stored order; it never drives the
+ * adapter reads canonical senses in their stored order; it never drives the
  * schema and never flattens two languages into one pack.
  */
 export async function buildEnglishRelease(
@@ -88,17 +88,21 @@ export async function buildEnglishRelease(
     writer.write(`${JSON.stringify(canonicalRecord(record))}\n`);
     entries += 1;
     for (const group of record.groups) {
-      banks.add(group.lang, (sequence) => [
+      // English carries one written form per entry and no common flag, and its
+      // parts of speech are WordNet's rather than JMdict's, so neither `rules`
+      // nor `score` has a value here that would not be invented. They stay at
+      // the schema's "no grammatical category" and "unranked".
+      banks.add(group.lang, [(sequence) => [
         record.entry.headword,
         "",
         [...new Set(group.senses.map(({ partOfSpeech }) => partOfSpeech))].join(" "),
         "",
         0,
-        // Meanings keep this language's own stored order.
+        // Senses keep this language's own stored order.
         group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text)),
         sequence,
         ""
-      ]);
+      ]]);
     }
   });
   await writer.end();
@@ -145,19 +149,19 @@ export async function buildEnglishRelease(
 /**
  * One canonical record per entry: shared identity, written form, pronunciations
  * and concise sources, then one sibling group per explanation language with
- * that language's own ordered meanings, glosses, examples and provenance.
+ * that language's own ordered senses, glosses, examples and provenance.
  */
 function canonicalRecord(record: EnglishEntryGroups) {
   return {
     ...record.entry,
     languages: Object.fromEntries(record.groups.map((group) => [
       group.lang,
-      { meanings: group.senses.map(releaseMeaning) }
+      { senses: group.senses.map(releaseSense) }
     ]))
   };
 }
 
-function releaseMeaning(sense: EnglishSense) {
+function releaseSense(sense: EnglishSense) {
   const { evidenceIds, examples, ...rest } = sense;
   return { ...rest, sources: evidenceIds, examples };
 }

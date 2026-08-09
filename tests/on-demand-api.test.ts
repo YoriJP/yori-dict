@@ -34,7 +34,7 @@ test("public lookup stays model-free while authenticated enrichment delegates th
   expect(response.status).toBe(200);
   const entry = await response.json();
   expect(entry.headword).toBe("未知語");
-  expect(entry.meanings[0].glosses).toEqual([
+  expect(entry.senses[0].glosses).toEqual([
     { text: "unknown term", source: "generated", reviewStatus: "checked" }
   ]);
   expect(calls).toEqual([

@@ -23,7 +23,7 @@ test("filters a streamed archive into Japanese and Chinese evidence with a repro
     allowDownload: false
   });
 
-  expect(manifest.tool).toEqual({ name: "english-evidence-filter", version: "1.0.0" });
+  expect(manifest.tool).toEqual({ name: "english-evidence-filter", version: "2.0.0" });
   expect(manifest.upstream).toMatchObject({
     source: "wiktionary",
     edition: "en",
@@ -56,7 +56,7 @@ test("filters a streamed archive into Japanese and Chinese evidence with a repro
     pos: "noun",
     scope: "sense-local",
     senseIndex: 0,
-    sourceMeaning: "A mammal, Canis familiaris, that has been domesticated for thousands of years.",
+    sourceGloss: "A mammal, Canis familiaris, that has been domesticated for thousands of years.",
     senseHint: null,
     translationLocation: "senses[0].translations",
     translationOrder: 0,
@@ -82,11 +82,11 @@ test("filters a streamed archive into Japanese and Chinese evidence with a repro
     senseHint: "affectionate term",
     translationLocation: "translations",
     ambiguous: true,
-    ambiguityReasons: ["entry-level-record-cannot-be-attributed-to-one-meaning"]
+    ambiguityReasons: ["entry-level-record-cannot-be-attributed-to-one-sense"]
   });
 
   // A free-text entry-level record whose sense text matches exactly one gloss
-  // keeps that meaning index while remaining entry-level.
+  // keeps that sense index while remaining entry-level.
   expect(row(rows, "犬", "zh")).toMatchObject({ scope: "entry-level", senseIndex: 0, targetLocale: "zh-hant" });
   expect(row(rows, "水, お水")).toMatchObject({ ambiguous: true, ambiguityReasons: ["multiple-terms-in-one-record"] });
 

@@ -5,7 +5,7 @@ import type { EvidenceCorroboration, MappedSourceMeta } from "./english-evidence
  * Source policy for the English multilingual evidence pipeline.
  *
  * Direct import means a source record may become canonical target-language
- * dictionary content. It requires the source's own target-language meaning
+ * dictionary content. It requires the source's own target-language sense
  * structure, the correct locale, redistribution rights, and complete
  * provenance. Everything else stays supporting or authoring evidence.
  */
@@ -13,7 +13,7 @@ export type SourceRole = "direct-import-candidate" | "supporting-evidence" | "au
 
 /**
  * Reverse dictionaries and Simplified Chinese resources describe a target-side
- * headword, not a target-language meaning of an English headword. They may
+ * headword, not a target-language sense of an English headword. They may
  * corroborate evidence but never become canonical on a string or reverse-gloss
  * match alone.
  */
@@ -41,8 +41,8 @@ export type DirectImportCandidate = {
   targetLocale: string;
   /** Locale the source record itself declares. */
   recordLocale: string;
-  /** True when the record carries its own meaning text in the target language. */
-  hasTargetLanguageMeaningStructure: boolean;
+  /** True when the record carries its own sense text in the target language. */
+  hasTargetLanguageSenseStructure: boolean;
   matchedBy: "source-identifier" | "explicit-mapping" | "string-match" | "reverse-gloss" | "none";
   license: string | null;
   attribution: string | null;
@@ -72,8 +72,8 @@ export function classifySourceRecord(candidate: DirectImportCandidate): SourceCl
   if (candidate.matchedBy === "string-match" || candidate.matchedBy === "reverse-gloss" || candidate.matchedBy === "none") {
     reasons.push("match-is-not-an-exact-source-identifier-or-explicit-mapping");
   }
-  if (!candidate.hasTargetLanguageMeaningStructure) {
-    reasons.push("source-has-no-target-language-meaning-structure");
+  if (!candidate.hasTargetLanguageSenseStructure) {
+    reasons.push("source-has-no-target-language-sense-structure");
   }
   if (candidate.recordLocale !== candidate.targetLocale) {
     reasons.push("record-locale-does-not-match-the-target-locale");
@@ -177,7 +177,7 @@ export function importJapaneseWordNetEvidence(
       recordId,
       targetLocale: "ja",
       recordLocale: "ja",
-      hasTargetLanguageMeaningStructure: definition !== null,
+      hasTargetLanguageSenseStructure: definition !== null,
       matchedBy: "explicit-mapping",
       license: meta.license,
       attribution: meta.attribution
@@ -277,8 +277,8 @@ export function importTaiwanTerminology(
       targetLocale: "zh-tw",
       recordLocale: "zh-tw",
       // A bare term pair is domain evidence. Only a record carrying its own
-      // Taiwanese meaning text may be a direct-import candidate.
-      hasTargetLanguageMeaningStructure: definition !== null,
+      // Taiwanese sense text may be a direct-import candidate.
+      hasTargetLanguageSenseStructure: definition !== null,
       matchedBy: "source-identifier",
       license: record.license ?? options.license,
       attribution: record.attribution

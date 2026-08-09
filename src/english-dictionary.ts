@@ -8,7 +8,11 @@ import type {
   EnglishSense,
   EnglishSourceReference
 } from "./english-types";
-import type { ApiLang } from "./types";
+import { resolveEnglishLemma } from "./english-strip";
+import { normalizeEnglishLookupTerm } from "./normalize";
+
+export { normalizeEnglishLookupTerm };
+import type { ApiLang, DictionaryMeta, PublicSource } from "./types";
 
 /** One entry with every explanation language it currently carries. */
 export type EnglishEntryGroups = {
@@ -17,14 +21,48 @@ export type EnglishEntryGroups = {
 };
 
 export type EnglishLookupDb = {
-  /** Returns only meanings owned by `lang`; it never falls back to another language. */
+  /** Returns only senses owned by `lang`; it never falls back to another language. */
   lookup(query: string, lang: ApiLang): EnglishEntry | null;
+  meta(): DictionaryMeta;
   close(): void;
 };
 
-export function normalizeEnglishLookupTerm(value: string): string {
-  return value.trim().normalize("NFKC").replace(/\s+/g, " ").toLocaleLowerCase("en-US");
+/**
+ * Explanation languages this dictionary actually holds senses in. A language
+ * with no rows behind it is a gap, not a contract: lookup still accepts it and
+ * Enrich-on-Lookup still fills it, but metadata does not claim it exists.
+ */
+export function readEnglishLanguages(db: Database): ApiLang[] {
+  return db.query<{ lang: ApiLang }, []>("select distinct lang from en_senses order by lang")
+    .all()
+    .map(({ lang }) => lang);
 }
+
+/**
+ * The English dictionary's own source credits, read from the metadata its
+ * rebuild pinned. A source with no usable URL is dropped rather than published
+ * as an attribution a reader cannot act on.
+ */
+export function readEnglishSourceCredits(db: Database): PublicSource[] {
+  const raw = db.query<{ value: string }, [string]>("select value from en_metadata where key = ?")
+    .get("sources")?.value;
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) return [];
+  const credits = new Map<string, PublicSource>();
+  for (const entry of parsed) {
+    const source = entry as { name?: unknown; license?: unknown; url?: unknown };
+    if (typeof source.name !== "string" || source.name === "") continue;
+    if (typeof source.license !== "string" || source.license === "") continue;
+    if (typeof source.url !== "string" || source.url.trim() === "") continue;
+    // One credit per source: the metadata records it once per explanation
+    // language it may publish in, and a reader needs the source, not the pair.
+    credits.set(source.name, { name: source.name, license: source.license, url: source.url });
+  }
+  return [...credits.values()].sort((a, b) => a.name.localeCompare(b.name, "en"));
+}
+
+
 
 export function englishEntryId(lookupTerm: string): string {
   return `yori:en:e_${digest(normalizeEnglishLookupTerm(lookupTerm))}`;
@@ -40,7 +78,7 @@ function digest(value: string): string {
 
 /**
  * Reads canonical English entries out of the `en_*` tables. A lookup names one
- * explanation language and gets that language's own ordered meanings or
+ * explanation language and gets that language's own ordered senses or
  * nothing; there is no substitution from another language.
  */
 export function openEnglishLookupDb(path: string): EnglishLookupDb {
@@ -49,23 +87,44 @@ export function openEnglishLookupDb(path: string): EnglishLookupDb {
     lookup(query, lang) {
       return lookupEnglishEntry(db, query, lang);
     },
+    meta() {
+      return { languages: readEnglishLanguages(db), sources: readEnglishSourceCredits(db) };
+    },
     close() {
       db.close();
     }
   };
 }
 
+/**
+ * Resolves a query to an entry, retrying an inflected surface against its
+ * lemma. A client sends the word as it appeared in the text; making it
+ * lemmatise first would mean reimplementing this with no lexicon to validate
+ * against. The returned entry is the lemma's, with the lemma as `headword`, so
+ * the card titles the real entry rather than the surface — and no field
+ * carries the surface back, because the caller already holds the occurrence it
+ * sent.
+ */
 export function lookupEnglishEntry(db: Database, query: string, lang: ApiLang): EnglishEntry | null {
   const term = normalizeEnglishLookupTerm(query);
   if (!term) return null;
+  const exists = (candidate: string) => englishLookupTermExists(db, candidate);
+  const resolved = exists(term) ? term : resolveEnglishLemma(term, exists);
+  if (!resolved) return null;
   const row = db.query<{ entry_id: string }, [string]>(
     "select entry_id from en_lookup_terms where term = ? order by entry_id limit 1"
-  ).get(term);
+  ).get(resolved);
   if (!row) return null;
   const entry = readEnglishEntry(db, row.entry_id, lang);
-  // An entry with no meaning in the requested language is a miss for that
-  // language, not an entry to answer with another language's meanings.
+  // An entry with no sense in the requested language is a miss for that
+  // language, not an entry to answer with another language's senses.
   return entry && entry.senses.length > 0 ? entry : null;
+}
+
+/** Whether the lexicon carries this exact lookup term. The stripper's validator. */
+export function englishLookupTermExists(db: Database, term: string): boolean {
+  return db.query<{ term: string }, [string]>("select term from en_lookup_terms where term = ? limit 1")
+    .get(term) !== null;
 }
 
 export function readEnglishEntry(db: Database, entryId: string, lang: ApiLang): EnglishEntry | null {
@@ -232,7 +291,7 @@ function readEnglishExamples(db: Database, senseId: string): EnglishExample[] {
 
 /**
  * Streams every canonical entry with its sibling explanation-language groups.
- * Each group is read from its own meanings, so a gloss can never be emitted
+ * Each group is read from its own senses, so a gloss can never be emitted
  * under a language other than the one that owns it.
  */
 export function visitEnglishEntries(path: string, visit: (record: EnglishEntryGroups) => void): void {
@@ -266,7 +325,7 @@ export function visitEnglishEntries(path: string, visit: (record: EnglishEntryGr
  * Structural problems that must never reach a published English release.
  *
  * The dictionary is validated as it streams, so identity checks live in the
- * validator rather than in one call: a duplicate entry or meaning id is only
+ * validator rather than in one call: a duplicate entry or sense id is only
  * visible to a checker that remembers the ids it has already seen.
  */
 export function createEnglishDictionaryValidator(): {
@@ -298,14 +357,14 @@ function validateEntries(
     for (const group of groups) {
       if (group.senses.length === 0) problems.push(`${entry.id}: empty ${group.lang} group`);
       group.senses.forEach((sense, index) => {
-        if (senseIds.has(sense.id)) problems.push(`${sense.id}: duplicate meaning id`);
+        if (senseIds.has(sense.id)) problems.push(`${sense.id}: duplicate sense id`);
         senseIds.add(sense.id);
-        if (sense.lang !== group.lang) problems.push(`${sense.id}: meaning language disagrees with its group`);
-        if (sense.position !== index + 1) problems.push(`${sense.id}: meaning position is out of order`);
+        if (sense.lang !== group.lang) problems.push(`${sense.id}: sense language disagrees with its group`);
+        if (sense.position !== index + 1) problems.push(`${sense.id}: sense position is out of order`);
         if (sense.glosses.length === 0) problems.push(`${sense.id}: no glosses`);
         if (!sense.partOfSpeech.trim()) problems.push(`${sense.id}: empty part of speech`);
         if (sense.provenance === "source" && sense.evidenceIds.length === 0) {
-          problems.push(`${sense.id}: imported meaning has no evidence`);
+          problems.push(`${sense.id}: imported sense has no evidence`);
         }
         if (sense.provenance === "generated" && (sense.evidenceIds.length > 0 || !sense.generation)) {
           problems.push(`${sense.id}: invalid generated provenance`);

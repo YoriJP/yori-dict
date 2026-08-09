@@ -10,11 +10,12 @@ import type {
   PublicLanguageSource,
   PublicLookupItem,
   PublicSense,
+  PublicSource,
   Xref
 } from "./types";
 import { normalizeQuery } from "./normalize";
 import { deinflect, type DeinflectionCandidate } from "./deinflect";
-import { apiLanguages } from "./lang";
+
 
 type EntryRow = {
   id: string;
@@ -78,14 +79,14 @@ type ExampleRow = {
 };
 
 export type LookupDb = {
-  /** Returns only meanings owned by `lang`; it never falls back to another language. */
+  /** Returns only senses owned by `lang`; it never falls back to another language. */
   lookup(query: string, lang: ApiLang): LookupResponse;
   meta(): {
     apiVersion: "v1";
     dictionaryVersion: string | null;
-    languages: string[];
+    languages: ApiLang[];
     tags: Record<string, string>;
-    sources: Array<{ name: string; license: string; url: string }>;
+    sources: PublicSource[];
   };
   close(): void;
 };
@@ -107,7 +108,7 @@ export function openLookupDb(path: string): LookupDb {
       return {
         apiVersion: "v1",
         dictionaryVersion: readMetadata(db, "dictDate"),
-        languages: apiLanguages,
+        languages: readJapaneseLanguages(db),
         tags: readTags(db),
         sources: japaneseSourceCredits
       };
@@ -118,7 +119,27 @@ export function openLookupDb(path: string): LookupDb {
   };
 }
 
-const japaneseSourceCredits = [
+/**
+ * Explanation languages the Japanese dictionary actually holds senses in. A
+ * language with no rows behind it is a gap, not a contract: lookup still
+ * accepts it and Enrich-on-Lookup still fills it, but metadata does not claim
+ * it exists. A consumer generating one artifact per language pair reads this
+ * rather than discovering the emptiness one null at a time.
+ */
+export function readJapaneseLanguages(db: Database): ApiLang[] {
+  return db.query<{ lang: ApiLang }, []>("select distinct lang from ja_senses order by lang")
+    .all()
+    .map(({ lang }) => lang);
+}
+
+/**
+ * Every URL is absolute and resolvable, because an attribution a reader cannot
+ * follow is not an attribution. The repository-relative paths these legacy
+ * gloss credits used to carry named files rather than places.
+ */
+const repository = "https://github.com/YoriJP/yori-dict/blob/main";
+
+const japaneseSourceCredits: PublicSource[] = [
   {
     name: "JMdict",
     license: "CC-BY-SA-4.0",
@@ -126,39 +147,39 @@ const japaneseSourceCredits = [
   },
   {
     name: "Tatoeba example sentences",
-    license: "CC BY 2.0 FR",
-    url: "https://tatoeba.org/"
+    license: "CC-BY-2.0-FR",
+    url: "https://tatoeba.org/en/terms_of_use"
   },
   {
     name: "yomitan-jlpt-vocab estimated levels",
-    license: "CC BY-SA 4.0",
+    license: "CC-BY-SA-4.0",
     url: "https://github.com/stephenmk/yomitan-jlpt-vocab"
   },
   {
     name: "Yori generated zh-TW glosses (legacy records)",
     license: "CC-BY-SA-4.0",
-    url: "sources/ai-glosses/zh-tw.jsonl"
+    url: `${repository}/sources/ai-glosses/zh-tw.jsonl`
   },
   {
     name: "Yori generated zh-CN glosses (legacy records)",
     license: "CC-BY-SA-4.0",
-    url: "sources/ai-glosses/zh-cn.jsonl"
+    url: `${repository}/sources/ai-glosses/zh-cn.jsonl`
   },
   {
     name: "Yori generated Korean glosses (legacy records)",
     license: "CC-BY-SA-4.0",
-    url: "sources/ai-glosses/ko.jsonl"
+    url: `${repository}/sources/ai-glosses/ko.jsonl`
   },
   {
     name: "Yori generated examples",
     license: "CC-BY-SA-4.0",
-    url: "sources/ai-examples/generated.jsonl"
+    url: `${repository}/sources/ai-examples/generated.jsonl`
   }
 ];
 
 /**
  * Streams every canonical entry with its sibling explanation-language groups.
- * Each group is read from its own meanings, so a gloss can never be emitted
+ * Each group is read from its own senses, so a gloss can never be emitted
  * under a language other than the one that owns it.
  */
 export function visitJapaneseEntries(path: string, visit: (record: JapaneseEntryGroups) => void): void {
@@ -266,9 +287,9 @@ function readBestItem(
 ): PublicLookupItem | null {
   // Several entries can share one written form. The requested language decides
   // which of them can answer: the first candidate entry, in match order, that
-  // owns meanings in that language. An entry with no meaning in the requested
+  // owns senses in that language. An entry with no sense in the requested
   // language is a miss for that language, never an entry to answer with
-  // another language's meanings, and never a reason to hide a sibling entry
+  // another language's senses, and never a reason to hide a sibling entry
   // that does explain the word in the requested language.
   for (const candidate of [...candidates].sort((a, b) => a.rank - b.rank)) {
     for (const entryId of candidate.entryIds) {
@@ -387,7 +408,7 @@ function whenPresent<K extends string, T>(key: K, values: T[]): Partial<Record<K
 }
 
 /**
- * The owning meaning's language is stamped onto every gloss it returns, so a
+ * The owning sense's language is stamped onto every gloss it returns, so a
  * gloss never travels without the language that explains it.
  */
 function readGlosses(db: Database, senseId: string, lang: ApiLang): PublicGloss[] {

@@ -94,10 +94,10 @@ paths:
               example:
                 apiVersion: v1
                 dictionaryVersion: "2026-06-01"
-                languages: [en, de, zh-tw, zh-cn, ko]
+                languages: [en, ko, zh-cn, zh-tw]
                 dictionaries:
                   ja:
-                    languages: [en, de, zh-tw, zh-cn, ko]
+                    languages: [en, ko, zh-cn, zh-tw]
                   en:
                     languages: [en, ja, zh-tw]
                 tags:
@@ -109,20 +109,26 @@ paths:
                     license: CC-BY-SA-4.0
                     url: https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project
                   - name: Tatoeba example sentences
-                    license: CC BY 2.0 FR
-                    url: https://tatoeba.org/
+                    license: CC-BY-2.0-FR
+                    url: https://tatoeba.org/en/terms_of_use
                   - name: yomitan-jlpt-vocab estimated levels
-                    license: CC BY-SA 4.0
+                    license: CC-BY-SA-4.0
                     url: https://github.com/stephenmk/yomitan-jlpt-vocab
                   - name: Yori generated zh-TW glosses (legacy records)
                     license: CC-BY-SA-4.0
-                    url: sources/ai-glosses/zh-tw.jsonl
+                    url: https://github.com/YoriJP/yori-dict/blob/main/sources/ai-glosses/zh-tw.jsonl
                   - name: Yori generated zh-CN glosses (legacy records)
                     license: CC-BY-SA-4.0
-                    url: sources/ai-glosses/zh-cn.jsonl
+                    url: https://github.com/YoriJP/yori-dict/blob/main/sources/ai-glosses/zh-cn.jsonl
                   - name: Yori generated Korean glosses (legacy records)
                     license: CC-BY-SA-4.0
-                    url: sources/ai-glosses/ko.jsonl
+                    url: https://github.com/YoriJP/yori-dict/blob/main/sources/ai-glosses/ko.jsonl
+                  - name: Open English WordNet
+                    license: CC-BY-4.0
+                    url: https://en-word.net/
+                  - name: Simple English Wiktionary
+                    license: CC-BY-SA-4.0 AND GFDL-1.1-or-later
+                    url: https://simple.wiktionary.org/wiki/Wiktionary:Copyrights
   /v1/lookup:
     get:
       summary: Look up one term in an independent dictionary
@@ -131,7 +137,11 @@ paths:
         - name: q
           in: query
           required: true
-          description: Japanese word, reading, or inflected form.
+          description: >-
+            The word as it appeared in the text. Japanese resolves an inflected
+            form by deinflection; English resolves a regular inflected surface to
+            its lemma. Either way the response `headword` is the resolved entry's,
+            and the queried surface is not echoed back.
           schema:
             type: string
           example: 食べました
@@ -146,9 +156,11 @@ paths:
           in: query
           required: true
           description: >-
-            Explanation language of the returned meanings. There is no default and no
+            Explanation language of the returned senses. There is no default and no
             fallback. `ja` supports en, de, zh-tw, zh-cn, and ko; `en` supports en,
-            ja, and zh-tw. Any other combination is a request error.
+            ja, and zh-tw. Any other combination is a request error. A supported
+            language with no content yet returns null rather than an error; read
+            `dictionaries` in `/v1/meta` to discover which pairs have content.
           schema:
             $ref: "#/components/schemas/ApiLang"
           example: zh-tw
@@ -306,15 +318,20 @@ components:
         languages:
           type: array
           description: >-
-            The Japanese dictionary's explanation languages. Use `dictionaries`
-            to read the supported languages of either dictionary.
+            The Japanese dictionary's explanation languages, derived from the
+            senses that exist rather than declared. Use `dictionaries` to read
+            either dictionary's own list.
           items:
             $ref: "#/components/schemas/ApiLang"
         dictionaries:
           type: object
           description: >-
             Every headword dictionary this API serves, with the explanation
-            languages it answers in. A lookup names one of each.
+            languages it currently holds senses in, derived per dictionary from
+            its own rows. A language listed here has content behind it. A
+            language absent from it may still be requested: the pair is a gap
+            Enrich-on-Lookup fills, not a request error. The two dictionaries
+            are independent and no union of their lists is implied.
           additionalProperties:
             type: object
             required: [languages]
@@ -397,7 +414,7 @@ components:
       description: >-
         One base entry shape for both dictionaries. Japanese keeps its reading and
         inflection details; English keeps its pronunciations.
-      required: [id, dictionary, lang, headword, headwords, meanings, sources]
+      required: [id, dictionary, lang, headword, headwords, senses, sources]
       properties:
         id:
           type: string
@@ -414,15 +431,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Headword"
-        meanings:
+        senses:
           type: array
           minItems: 1
           description: >-
-            The complete ordered meaning list for the requested explanation language.
-            Meanings without content in that language are absent, and an entry with no
-            such meaning is returned as null instead.
+            The complete ordered sense list for the requested explanation language.
+            Senses without content in that language are absent, and an entry with no
+            such sense is returned as null instead.
           items:
-            $ref: "#/components/schemas/Meaning"
+            $ref: "#/components/schemas/Sense"
         sources:
           type: array
           description: Concise source identifiers, such as `jmdict:1358280` or `generated`.
@@ -506,11 +523,11 @@ components:
         text:
           type: [string, "null"]
           example: personal computer
-    Meaning:
+    Sense:
       type: object
       required: [id, position, partOfSpeech, glosses, examples, sources, provenance]
       description: >-
-        One meaning in the requested explanation language. Annotation fields are omitted
+        One sense in the requested explanation language. Annotation fields are omitted
         when the dictionary has no values for them. Japanese tag codes in misc, field,
         dialect, and partOfSpeech are described by `tags` on /v1/meta.
       properties:
@@ -532,17 +549,17 @@ components:
             $ref: "#/components/schemas/Gloss"
         examples:
           type: array
-          description: Sourced or generated examples, ordered within this meaning. Empty when none exist.
+          description: Sourced or generated examples, ordered within this sense. Empty when none exist.
           items:
             $ref: "#/components/schemas/Example"
         sources:
           type: array
-          description: Concise source evidence identifiers for this meaning. Empty for meanings with no source evidence.
+          description: Concise source evidence identifiers for this sense. Empty for senses with no source evidence.
           items:
             type: string
         provenance:
           type: string
-          description: Whether the meaning is source-backed or added from established model knowledge.
+          description: Whether the sense is source-backed or added from established model knowledge.
           enum: [source, generated]
         appliesTo:
           type: object
@@ -571,13 +588,13 @@ components:
           example: [comp]
         dialect:
           type: array
-          description: Japanese only. Dialects the meaning belongs to, such as `ksb` (Kansai-ben).
+          description: Japanese only. Dialects the sense belongs to, such as `ksb` (Kansai-ben).
           items:
             type: string
           example: [ksb]
         info:
           type: array
-          description: Japanese only. Free-text notes about this meaning.
+          description: Japanese only. Free-text notes about this sense.
           items:
             type: string
         related:
@@ -597,7 +614,7 @@ components:
             $ref: "#/components/schemas/LanguageSource"
         pronunciations:
           type: array
-          description: Japanese only. Meaning-specific readings.
+          description: Japanese only. Sense-specific readings.
           items:
             type: string
         pragmaticFunctions:

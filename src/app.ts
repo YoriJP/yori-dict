@@ -1,13 +1,12 @@
 import { Hono } from "hono";
 import { Scalar } from "@scalar/hono-api-reference";
 import type { LookupDb } from "./db";
-import type { ApiLang, PublicLookupItem } from "./types";
+import type { ApiLang, DictionaryMeta, PublicLookupItem, PublicSource } from "./types";
 import type { EnglishEntry } from "./english-types";
 import { dataReleaseUrl } from "./data-release";
 import {
   englishLookupEntry,
   japaneseLookupEntry,
-  lookupLanguages,
   parseLookupDictionary,
   parseLookupLang,
   type LookupDictionary,
@@ -19,6 +18,12 @@ type AppOptions = {
   onDemand?: OnDemandDictionary;
   /** Reads a published English entry in one explanation language. Never calls a model. */
   englishLookup?: (query: string, lang: ApiLang) => EnglishEntry | null;
+  /**
+   * What the English dictionary can truthfully say about itself. Absent when
+   * no English data is mounted, which is why `/v1/meta` reports the English
+   * dictionary as carrying no languages rather than inventing a list.
+   */
+  englishMeta?: () => DictionaryMeta;
   enrichmentToken?: string;
   logger?: (event: Record<string, unknown>) => void;
 };
@@ -61,15 +66,26 @@ export function createApp(
 
   app.get("/health", (c) => c.json({ ok: true }));
 
-  // Both dictionaries ship, so metadata names the explanation languages each
-  // one answers in. The remaining fields describe the Japanese dictionary,
-  // whose version, tags, and credits come from its own release.
-  app.get("/v1/meta", (c) => c.json({
-    ...db.meta(),
-    dictionaries: Object.fromEntries(
-      Object.entries(lookupLanguages).map(([dictionary, languages]) => [dictionary, { languages }])
-    )
-  }));
+  // Metadata is derived, never declared. Each dictionary reports the
+  // explanation languages it holds senses in, so a language pair that would
+  // return null for every query is not advertised and a downstream generator
+  // can skip it before emitting anything. Per ADR-0005 the two dictionaries
+  // stay independent and no union of their languages is implied. `sources`
+  // credits everything the served data draws on, both dictionaries together,
+  // because the attribution obligations a consumer inherits are not per
+  // dictionary. The version and tags describe the Japanese release.
+  app.get("/v1/meta", (c) => {
+    const japanese = db.meta();
+    const english = options.englishMeta?.() ?? { languages: [], sources: [] };
+    return c.json({
+      ...japanese,
+      sources: mergeSources(japanese.sources, english.sources),
+      dictionaries: {
+        ja: { languages: japanese.languages },
+        en: { languages: english.languages }
+      }
+    });
+  });
 
   app.get("/v1/lookup", async (c) => {
     const query = c.req.query("q");
@@ -239,6 +255,19 @@ function resolveRequest(
     ...(mode ? { mode } : {}),
     ...(Object.keys(compact).length > 0 ? { context: compact } : {})
   };
+}
+
+/**
+ * One credit per source across both dictionaries, in the order they were
+ * given. A source both dictionaries draw on is credited once; a reader
+ * satisfying an obligation does it per source, not per dictionary.
+ */
+function mergeSources(...lists: PublicSource[][]): PublicSource[] {
+  const credits = new Map<string, PublicSource>();
+  for (const source of lists.flat()) {
+    if (!credits.has(source.name)) credits.set(source.name, source);
+  }
+  return [...credits.values()];
 }
 
 function unsupportedLanguage(dictionary: LookupDictionary): string {

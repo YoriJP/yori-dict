@@ -45,27 +45,27 @@ test("one English entry carries independent en, ja and zh-tw groups", async () =
   const english = lookup.lookup("dog", "en")!;
   const japanese = lookup.lookup("dog", "ja")!;
   expect(english.id).toBe(japanese.id);
-  // Same entry identity and written form; different meaning identifiers,
+  // Same entry identity and written form; different sense identifiers,
   // wording and provenance.
   expect(english.senses[0].id).not.toBe(japanese.senses[0].id);
   expect(english.senses.map((sense) => sense.glosses[0].text)).toEqual(["a domesticated carnivorous mammal"]);
   expect(japanese.senses.map((sense) => sense.glosses[0].text)).toEqual(["人間に古くから飼われている哺乳類。"]);
   expect(japanese.senses[0].source).toMatchObject({ name: "japanese-wordnet", version: "1.1-fixture" });
 
-  // Each language group numbers its own meanings from 1.
+  // Each language group numbers its own senses from 1.
   const taiwanese = lookup.lookup("interface", "zh-tw")!;
   expect(taiwanese.senses.map(({ position }) => position)).toEqual([1]);
   expect(taiwanese.senses[0].glosses[0].text).toBe("兩個系統交換訊息的共同邊界。");
   expect(taiwanese.senses[0].domains).toEqual(["資訊科技"]);
 
   // No fallback: a language the entry does not explain is a miss for that
-  // language, never another language's meanings.
+  // language, never another language's senses.
   expect(lookup.lookup("interface", "ja")).toBeNull();
   expect(lookup.lookup("network", "ja")).toBeNull();
   expect(lookup.lookup("network", "zh-tw")).toBeNull();
   expect(lookup.lookup("network", "en")).not.toBeNull();
 
-  // An authored group divides meanings its own way: English has one meaning
+  // An authored group divides senses its own way: English has one sense
   // for ledger, Taiwanese Chinese has two, and none of them share identifiers.
   const authored = lookup.lookup("ledger", "zh-tw")!;
   expect(lookup.lookup("ledger", "en")!.senses).toHaveLength(1);
@@ -75,7 +75,7 @@ test("one English entry carries independent en, ja and zh-tw groups", async () =
   lookup.close();
 });
 
-test("direct import needs the source's own target-language meaning structure", async () => {
+test("direct import needs the source's own target-language sense structure", async () => {
   const { result, path } = await built();
 
   // Japanese WordNet: three mapped records with their own Japanese definition
@@ -85,7 +85,7 @@ test("direct import needs the source's own target-language meaning structure", a
     eligible: 3, imported: 3, evidenceOnly: 1, unmatched: 0, rejected: 3
   });
   // Taiwan terminology: bare English/Chinese term pairs are domain evidence
-  // only; the one row carrying its own Taiwanese meaning text is imported, and
+  // only; the one row carrying its own Taiwanese sense text is imported, and
   // a row for a headword this dictionary does not carry matches nothing.
   expect(result.languages["zh-tw"]).toEqual({
     eligible: 2, imported: 1, evidenceOnly: 2, unmatched: 1, rejected: 1
@@ -99,7 +99,7 @@ test("direct import needs the source's own target-language meaning structure", a
     "select count(*) as count from en_glosses where text like ?"
   ).get("%網%")?.count).toBe(0);
 
-  // Every imported non-English meaning keeps exact provenance.
+  // Every imported non-English sense keeps exact provenance.
   expect(db.query<{ lang: string; source_name: string; source_version: string; source_ref: string }, []>(`
     select sense.lang, sense.source_name, sense.source_version, sense.source_ref
       from en_senses sense where sense.lang <> 'en' and sense.provenance = 'source'
@@ -125,14 +125,14 @@ test("no English release artifact leaks one explanation language into another", 
   const released = new Database(artifacts.sqlite, { readonly: true });
 
   // Over the whole released database: every gloss and example belongs to
-  // exactly one meaning, and that meaning declares exactly one language.
+  // exactly one sense, and that sense declares exactly one language.
   for (const table of ["en_glosses", "en_examples"]) {
     expect(released.query<{ count: number }, []>(`
       select count(*) as count from ${table} child
        where (select count(*) from en_senses sense where sense.id = child.sense_id) <> 1
     `).get()?.count).toBe(0);
   }
-  // No meaning identifier is shared by two languages, and every language's
+  // No sense identifier is shared by two languages, and every language's
   // positions run 1..n inside each entry.
   expect(released.query<{ count: number }, []>(
     "select count(*) as count from (select id from en_senses group by id having count(distinct lang) > 1)"
@@ -156,7 +156,7 @@ test("no English release artifact leaks one explanation language into another", 
   `).all();
   for (const example of examples) {
     // The headword-language sentence stays English; the paired sentence belongs
-    // to the one language that owns the meaning.
+    // to the one language that owns the sense.
     expect(foreignToLanguage("en", example.text)).toBe(false);
     const pairs = JSON.parse(example.translations) as Array<{ lang: string; text: string }>;
     expect(pairs.map(({ lang }) => lang)).toEqual(example.lang === "en" ? [] : [example.lang]);
@@ -166,15 +166,15 @@ test("no English release artifact leaks one explanation language into another", 
 
   for (const line of (await Bun.file(artifacts.jsonl).text()).trim().split("\n")) {
     const entry = JSON.parse(line) as {
-      languages: Record<string, { meanings: Array<{ id: string; lang: string; glosses: Array<{ text: string }> }> }>;
+      languages: Record<string, { senses: Array<{ id: string; lang: string; glosses: Array<{ text: string }> }> }>;
     };
     const seen = new Set<string>();
     for (const [lang, group] of Object.entries(entry.languages)) {
-      for (const meaning of group.meanings) {
-        expect(meaning.lang).toBe(lang);
-        expect(seen.has(meaning.id)).toBe(false);
-        seen.add(meaning.id);
-        for (const gloss of meaning.glosses) expect(foreignToLanguage(lang, gloss.text)).toBe(false);
+      for (const sense of group.senses) {
+        expect(sense.lang).toBe(lang);
+        expect(seen.has(sense.id)).toBe(false);
+        seen.add(sense.id);
+        for (const gloss of sense.glosses) expect(foreignToLanguage(lang, gloss.text)).toBe(false);
       }
     }
   }
@@ -217,9 +217,9 @@ test("the manifest reports exact coverage and source versions for all three lang
   // Imported plus accepted authored content, counted exactly and separately
   // for each explanation language.
   expect(manifest.coverage).toEqual({
-    en: { entries: 6, meanings: 6, glosses: 6, examples: 1 },
-    ja: { entries: 4, meanings: 4, glosses: 4, examples: 1 },
-    "zh-tw": { entries: 2, meanings: 3, glosses: 3, examples: 2 }
+    en: { entries: 6, senses: 6, glosses: 6, examples: 1 },
+    ja: { entries: 4, senses: 4, glosses: 4, examples: 1 },
+    "zh-tw": { entries: 2, senses: 3, glosses: 3, examples: 2 }
   });
   expect(manifest.sourcePolicy.languages).toEqual({
     en: "open-english-wordnet then wiktionary",
@@ -313,7 +313,7 @@ test("missing ja and zh-tw groups are independent concurrent candidates and one 
     expect(candidates.filter((id) => id.endsWith(":ja"))).toHaveLength(2);
     expect(candidates.filter((id) => id.endsWith(":zh-tw"))).toHaveLength(2);
 
-    // The Taiwanese group divides meanings differently from English, with its
+    // The Taiwanese group divides senses differently from English, with its
     // own identifiers and its own bilingual examples.
     const zhTw = repository.find("ledger", "zh-tw")!;
     const english = repository.find("ledger", "en")!;
@@ -326,7 +326,7 @@ test("missing ja and zh-tw groups are independent concurrent candidates and one 
     }]);
 
     // The enriched response carries the entry's own facts, exactly as a later
-    // read does. The author writes meanings; pronunciations belong to the entry.
+    // read does. The author writes senses; pronunciations belong to the entry.
     expect(taiwanese?.id).toBe(english.id);
     expect(taiwanese?.pronunciations).toEqual(english.pronunciations);
     expect(taiwanese?.sources).toEqual(english.sources);
@@ -343,7 +343,7 @@ test("a language group must be written in its own language and may not copy the 
     ["zh-tw", languageGroup([{ definition: "帳簿のこと。", partOfSpeech: "noun" }])],
     // Mainland terminology is not Taiwanese localization.
     ["zh-tw", languageGroup([{ definition: "記錄交易的信息與數據庫。", partOfSpeech: "noun" }])],
-    // A group derived from the English meaning list rather than written.
+    // A group derived from the English sense list rather than written.
     ["ja", languageGroup([{ definition: "会計の記録。", partOfSpeech: "noun", provenance: "source", evidenceIds: ["open-english-wordnet:ledger%1:10:00::"] }])]
   ];
 
@@ -430,7 +430,7 @@ test("correct imported target-language content is never rewritten and only its e
 
   try {
     const entry = await dictionary.resolve({ query: "dog", targetDictionary: "en", lang: "ja" });
-    // The imported Japanese meaning is untouched; only the missing example was
+    // The imported Japanese sense is untouched; only the missing example was
     // authored, and it is a true bilingual pair.
     expect(entry?.senses.map((sense) => sense.glosses[0].text)).toEqual(["人間に古くから飼われている哺乳類。"]);
     expect(entry?.senses[0].provenance).toBe("source");
@@ -446,7 +446,7 @@ test("correct imported target-language content is never rewritten and only its e
   }
 });
 
-test("a rejected example leaves the meaning visible and permits one fresh later attempt", async () => {
+test("a rejected example leaves the sense visible and permits one fresh later attempt", async () => {
   const { repository, gateway, dictionary, close } = await enrichable([
     JSON.stringify({ sentence: "The dog barked.", translation: "犬が吠えた。" }),
     "REJECT",
@@ -458,7 +458,7 @@ test("a rejected example leaves the meaning visible and permits one fresh later 
     const first = await dictionary.resolve({ query: "dog", targetDictionary: "en", lang: "ja" });
     expect(first?.senses).toHaveLength(1);
     expect(first?.senses[0].examples).toEqual([]);
-    // The accepted meaning survives the rejected example.
+    // The accepted sense survives the rejected example.
     expect(repository.find("dog", "ja")?.senses[0].glosses[0].text).toBe("人間に古くから飼われている哺乳類。");
 
     const second = await dictionary.resolve({ query: "dog", targetDictionary: "en", lang: "ja" });
@@ -493,7 +493,7 @@ async function fixtureInputs(root: string): Promise<FixtureInputs> {
 
 /**
  * One published dictionary that carries both kinds of language content:
- * directly imported ja and zh-tw meanings, and accepted authored groups with
+ * directly imported ja and zh-tw senses, and accepted authored groups with
  * their bilingual examples.
  */
 async function buildDictionary(root: string, inputs: FixtureInputs): Promise<Built> {
@@ -574,7 +574,7 @@ async function fixtureWordNet(root: string): Promise<EnglishSourceInput> {
 /**
  * The committed evidence fixtures plus two extra pinned files that cover the
  * cases they deliberately leave out: a mapped Japanese record with no Japanese
- * definition, and a Taiwan row that carries its own Taiwanese meaning text.
+ * definition, and a Taiwan row that carries its own Taiwanese sense text.
  */
 async function fixtureLanguageSources(root: string): Promise<EnglishLanguageSourceInput[]> {
   const japaneseRecords = join(root, "japanese-wordnet.jsonl");

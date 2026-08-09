@@ -14,14 +14,21 @@ download a release.
 | Japanese headwords | `en`, `de`, `zh-tw`, `zh-cn`, `ko` |
 | English headwords | `en`, `ja`, `zh-tw` |
 
-Every language pair owns its own meanings, ordering, examples, and provenance.
-A `zh-tw` meaning is not a translation of the `en` meaning next to it, and
+Every language pair owns its own senses, ordering, examples, and provenance.
+A `zh-tw` sense is not a translation of the `en` sense next to it, and
 `zh-tw` and `zh-cn` are separate content rather than one converted into the
-other. A lookup returns the requested language's complete ordered meaning list
+other. A lookup returns the requested language's complete ordered sense list
 or nothing; it never falls back to another language.
 
+A supported explanation language is one the API will answer in, not a promise
+that content exists for it yet. `de` is currently supported with no imported
+content: JMdict's German component is separately copyrighted and cannot be
+redistributed (see [DATA_SOURCES.md](DATA_SOURCES.md)), so German is filled by
+Yori Dict's own authored content rather than dropped.
+
 Coverage differs by language and changes with every release. Exact per-language
-entry, meaning, gloss, and example counts live in each release manifest.
+entry, sense, gloss, and example counts live in each release manifest, and
+`/v1/meta` reports the languages that actually have content behind them.
 
 ## API quick start
 
@@ -54,7 +61,7 @@ query, in the submitted order and length, without repeating the queries. `null`
 means no acceptable content exists; database and provider failures stay errors.
 
 Both dictionaries share one base entry shape — `id`, `dictionary`, `lang`,
-`headword`, `headwords`, `meanings`, `sources` — while Japanese keeps its
+`headword`, `headwords`, `senses`, `sources` — while Japanese keeps its
 readings and inflection path and English keeps its pronunciations. Deinflection
 helps match individual Japanese words; it is not sentence parsing.
 
@@ -86,7 +93,7 @@ The release manifest records the artifact names, checksums, source versions,
 licenses, and exact per-language coverage. Its `schemaVersion` names the table
 shape: `ja-2` and `en-2` are the current Japanese and English shapes.
 
-Japanese written forms live in `ja_forms`, and meanings in `ja_senses`, which
+Japanese written forms live in `ja_forms`, and senses in `ja_senses`, which
 names the explanation language:
 
 ```sh
@@ -103,7 +110,7 @@ English releases use the matching `en_*` tables.
 ## Data and licensing
 
 Yori Dict keeps source identities and provenance alongside its own stable entry
-and meaning ids. Japanese data is based on JMdict with sourced examples,
+and sense ids. Japanese data is based on JMdict with sourced examples,
 estimated learner levels, and reviewed generated additions. English data comes
 from independently licensed open dictionary sources under an explicit source
 policy.

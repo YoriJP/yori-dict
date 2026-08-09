@@ -50,7 +50,7 @@ test("accepted Japanese enrichment becomes canonical production data", async () 
   const reopened = openEnrichmentRepository(path, reopenedLookup);
   expect(reopened.find("未知語", "ja", "en")?.senses[0].examples).toEqual([example]);
   expect(reopened.find("学校", "ja", "en")?.senses[0].examples).toEqual([example]);
-  // Each explanation language keeps its own meaning list for the same entry.
+  // Each explanation language keeps its own sense list for the same entry.
   expect(reopened.find("未知語", "ja", "zh-tw")?.senses.map((sense) => sense.glosses[0].text))
     .toEqual(["未知詞"]);
   expect(reopened.find("未知語", "ja", "ko")).toBeNull();
@@ -144,7 +144,7 @@ test("a Japanese source refresh preserves accepted generated content", async () 
   refreshedLookup.close();
 });
 
-test("a generated example is appended after the imported examples of its meaning", async () => {
+test("a generated example is appended after the imported examples of its sense", async () => {
   const path = await productionDatabase({ examples: true });
   const lookup = openLookupDb(path);
   const repository = openEnrichmentRepository(path, lookup);
@@ -276,7 +276,7 @@ test("a Japanese release that starts carrying an authored headword takes over it
 
   const db = new Database(path, { readonly: true });
   // One entry for the word, owned by the release. A surviving authored row
-  // would keep answering lookups with its own stale meanings.
+  // would keep answering lookups with its own stale senses.
   expect(db.query<{ id: string; source: string }, []>(`
     select distinct entry.id, entry.source from ja_entries entry
       join ja_lookup_terms term on term.entry_id = entry.id
@@ -303,7 +303,7 @@ const generation = {
   createdAt: "2026-08-08T00:00:00.000Z"
 };
 
-/** One entry-language group: only this language's meanings and glosses. */
+/** One entry-language group: only this language's senses and glosses. */
 function languageGroup(entry: PublicLookupItem, lang: "en" | "zh-tw"): PublicLookupItem {
   return {
     ...entry,

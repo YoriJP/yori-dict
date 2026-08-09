@@ -13,7 +13,7 @@ export type LookupDictionary = "ja" | "en";
 /**
  * Every lookup names one headword dictionary and one explanation language.
  * There is no default for either, and no fallback between languages: a lookup
- * returns the requested language's own ordered meaning list or nothing.
+ * returns the requested language's own ordered sense list or nothing.
  */
 export const lookupLanguages: Record<LookupDictionary, ApiLang[]> = {
   ja: ["en", "de", "zh-tw", "zh-cn", "ko"],
@@ -31,7 +31,7 @@ export function parseLookupLang(dictionary: LookupDictionary, value: unknown): A
 }
 
 /**
- * One base entry shape for both dictionaries: identity, headwords, meanings,
+ * One base entry shape for both dictionaries: identity, headwords, senses,
  * glosses, examples, and concise sources. Japanese keeps its readings and
  * inflection details; English keeps its pronunciations.
  */
@@ -41,7 +41,7 @@ export type LookupEntry = {
   lang: ApiLang;
   headword: string;
   headwords: LookupHeadword[];
-  meanings: LookupMeaning[];
+  senses: LookupSense[];
   sources: string[];
   reading?: string | null;
   common?: boolean;
@@ -63,7 +63,7 @@ export type LookupPronunciation = {
   region?: string;
 };
 
-export type LookupMeaning = {
+export type LookupSense = {
   id: string;
   position: number;
   partOfSpeech: string[];
@@ -106,11 +106,11 @@ export type LookupExample = {
 
 /**
  * Projects a stored Japanese entry into the requested explanation language.
- * Returns null when the entry carries no meaning in that language, because the
+ * Returns null when the entry carries no sense in that language, because the
  * contract never substitutes another language's glosses.
  */
 export function japaneseLookupEntry(item: PublicLookupItem, lang: ApiLang): LookupEntry | null {
-  const meanings = item.senses.flatMap<LookupMeaning>((sense) => {
+  const senses = item.senses.flatMap<LookupSense>((sense) => {
     const glosses = sense.glosses
       .filter((gloss) => !gloss.lang || gloss.lang === lang)
       .map(({ lang: _lang, ...gloss }) => gloss);
@@ -124,14 +124,14 @@ export function japaneseLookupEntry(item: PublicLookupItem, lang: ApiLang): Look
       provenance: provenance ?? (item.source === "generated" ? "generated" : "source")
     }];
   });
-  if (meanings.length === 0) return null;
+  if (senses.length === 0) return null;
   return {
     id: item.id,
     dictionary: "ja",
     lang,
     headword: item.word,
     headwords: item.headwords,
-    meanings,
+    senses,
     sources: [item.source === "generated" ? "generated" : `${item.source}:${item.sourceId}`],
     reading: item.reading,
     common: item.common,
@@ -142,13 +142,13 @@ export function japaneseLookupEntry(item: PublicLookupItem, lang: ApiLang): Look
 
 /**
  * Projects a stored English entry into the requested explanation language.
- * Meanings carry their own explanation language, so a request for a language
+ * Senses carry their own explanation language, so a request for a language
  * the entry does not explain returns nothing rather than a substitute.
  */
 export function englishLookupEntry(entry: EnglishEntry, lang: ApiLang): LookupEntry | null {
-  const meanings = entry.senses
+  const senses = entry.senses
     .filter((sense) => sense.lang === lang)
-    .map<LookupMeaning>((sense) => {
+    .map<LookupSense>((sense) => {
       const {
         lang: _lang,
         glosses,
@@ -176,14 +176,14 @@ export function englishLookupEntry(entry: EnglishEntry, lang: ApiLang): LookupEn
         provenance
       };
     });
-  if (meanings.length === 0) return null;
+  if (senses.length === 0) return null;
   return {
     id: entry.id,
     dictionary: "en",
     lang,
     headword: entry.headword,
     headwords: [{ text: entry.headword }],
-    meanings,
+    senses,
     sources: entry.sources.map((source) => `${source.source}:${source.sourceEntryId}`),
     pronunciations: entry.pronunciations.map((pronunciation) => ({
       ipa: pronunciation.ipa,

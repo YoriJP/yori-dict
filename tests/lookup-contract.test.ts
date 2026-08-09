@@ -66,8 +66,8 @@ beforeAll(async () => {
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --examples fixtures/jmdict-examples-sample.json --out ${dbPath}`.quiet();
   migrateProductionDatabase(dbPath);
 
-  // Legacy accepted Taiwanese content maps onto an exact imported meaning and
-  // becomes that language's own independent meaning.
+  // Legacy accepted Taiwanese content maps onto an exact imported sense and
+  // becomes that language's own independent sense.
   const writable = new Database(dbPath);
   const imported = writable
     .query<Record<string, unknown>, [string]>("select * from ja_senses where id = ?")
@@ -108,6 +108,7 @@ beforeAll(async () => {
   app = createApp(lookupDb, {
     enrichmentToken: "owner-token",
     englishLookup: (query, lang) => englishRepository.find(query, lang),
+    englishMeta: () => englishRepository.meta(),
     onDemand: createOnDemandDictionary({
       japanese: createJapaneseOnDemandDictionary({ repository: japaneseRepository, modelGateway: gateway }),
       english: createEnglishOnDemandDictionary({
@@ -156,6 +157,77 @@ test("every lookup requires a supported dictionary and explanation language", as
   expect(gateway.calls).toEqual([]);
 });
 
+test("metadata advertises only explanation languages with senses behind them", async () => {
+  gateway.reset();
+  const meta = await (await app.request("/v1/meta")).json();
+
+  // Each dictionary reports its own languages, derived from its own rows.
+  // This database holds English and legacy Taiwanese Japanese senses and an
+  // English-explained English dictionary, and nothing else.
+  expect(meta.dictionaries).toEqual({
+    ja: { languages: ["en", "zh-tw"] },
+    en: { languages: ["en"] }
+  });
+
+  // A supported language with no rows behind it is not advertised, so a
+  // consumer generating one artifact per pair skips it instead of emitting an
+  // empty file. It is still a valid request that Enrich-on-Lookup can fill.
+  for (const dictionary of ["ja", "en"] as const) {
+    for (const lang of meta.dictionaries[dictionary].languages) {
+      const response = await app.request(
+        `/v1/lookup?q=${dictionary === "ja" ? "%E9%A3%9F%E3%81%B9%E3%82%8B" : "bank"}&dictionary=${dictionary}&lang=${lang}`
+      );
+      expect(await response.json()).not.toBeNull();
+    }
+  }
+  expect(meta.dictionaries.ja.languages).not.toContain("de");
+
+  // Every source the served data draws on is credited once, with a license and
+  // a URL a reader can follow to satisfy the obligation they inherit.
+  const sources = meta.sources as Array<{ name: string; license: string; url: string }>;
+  expect(sources.map(({ name }) => name)).toContain("JMdict");
+  expect(sources.map(({ name }) => name)).toContain("Open English WordNet");
+  expect(new Set(sources.map(({ name }) => name)).size).toBe(sources.length);
+  for (const source of sources) {
+    expect(source.license).not.toBe("");
+    expect(source.url).toMatch(/^https:\/\//);
+  }
+  expect(gateway.calls).toEqual([]);
+});
+
+test("an inflected English surface returns the lemma's entry, not a stub", async () => {
+  gateway.reset();
+  const lemma = await (await app.request("/v1/lookup?q=bank&dictionary=en&lang=en")).json();
+  const inflected = await (await app.request("/v1/lookup?q=banks&dictionary=en&lang=en")).json();
+
+  // A client sends the word as it appeared in the text. It gets the lexeme's
+  // entry, titled with the lemma, with the lemma's complete sense list.
+  expect(inflected).not.toBeNull();
+  expect(inflected.headword).toBe("bank");
+  expect(inflected.id).toBe(lemma.id);
+  expect(inflected.senses).toEqual(lemma.senses);
+  // No field carries the surface back: the caller already holds the occurrence
+  // it sent, and `query != headword` is what says resolution happened.
+  expect(Object.keys(inflected)).toEqual(Object.keys(lemma));
+  // Resolution is silent. English gains no inflection path; the concept stays
+  // Japanese-only, where the derivation is what the learner needs to see.
+  expect(inflected).not.toHaveProperty("inflectionPath");
+  // Resolving never happens for a word that is itself an entry.
+  expect(lemma.headword).toBe("bank");
+  expect(gateway.calls).toEqual([]);
+});
+
+test("a supported language with no content is answered, not refused", async () => {
+  gateway.reset();
+  // German's JMdict component is unlicensed and is not imported, but `de` is
+  // still an explanation language the Japanese dictionary answers in. An
+  // unauthenticated miss is null; the language itself is not a request error.
+  const german = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=de");
+  expect(german.status).toBe(200);
+  expect(await german.json()).toBeNull();
+  expect(gateway.calls).toEqual([]);
+});
+
 test("Japanese and English lookup share one base entry shape with their own extras", async () => {
   gateway.reset();
   const japanese = await (await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=en")).json();
@@ -163,9 +235,9 @@ test("Japanese and English lookup share one base entry shape with their own extr
 
   for (const entry of [japanese, english]) {
     expect(Object.keys(entry)).toEqual(expect.arrayContaining([
-      "id", "dictionary", "lang", "headword", "headwords", "meanings", "sources"
+      "id", "dictionary", "lang", "headword", "headwords", "senses", "sources"
     ]));
-    expect(structuredClone(entry.meanings[0])).toMatchObject({
+    expect(structuredClone(entry.senses[0])).toMatchObject({
       id: expect.any(String),
       position: 1,
       partOfSpeech: expect.any(Array),
@@ -177,7 +249,7 @@ test("Japanese and English lookup share one base entry shape with their own extr
   expect(japanese.reading).toBe("たべる");
   expect(japanese).not.toHaveProperty("pronunciations");
   expect(english.pronunciations).toEqual([{ ipa: "/bæŋk/" }]);
-  expect(english.meanings[0].glosses[0].text).toBe("a financial institution");
+  expect(english.senses[0].glosses[0].text).toBe("a financial institution");
   expect(english.sources).toEqual(["open-english-wordnet:bank:n"]);
   expect(gateway.calls).toEqual([]);
 });
@@ -185,8 +257,8 @@ test("Japanese and English lookup share one base entry shape with their own extr
 test("lookup returns only the requested language and never falls back", async () => {
   gateway.reset();
   const taiwanese = await (await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=zh-tw")).json();
-  expect(taiwanese.meanings.flatMap((meaning: { glosses: Array<{ text: string }> }) =>
-    meaning.glosses.map(({ text }) => text)
+  expect(taiwanese.senses.flatMap((sense: { glosses: Array<{ text: string }> }) =>
+    sense.glosses.map(({ text }) => text)
   )).toEqual(["吃"]);
 
   const korean = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=ko");

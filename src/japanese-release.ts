@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { Database } from "bun:sqlite";
-import { createLanguageBanks, writeYomitanPacks } from "./yomitan-pack";
+import { createLanguageBanks, writeYomitanPacks, yomitanRules, yomitanScore } from "./yomitan-pack";
 import {
   fileSha256,
   readCoverageFrom,
@@ -17,7 +17,7 @@ import {
   readCoverage,
   type LanguageCoverage
 } from "./japanese-schema";
-import type { ApiLang, PublicSense } from "./types";
+import type { ApiLang, PublicHeadword, PublicSense } from "./types";
 
 export type JapaneseReleaseArtifacts = {
   sqlite: string;
@@ -28,6 +28,20 @@ export type JapaneseReleaseArtifacts = {
   /** One Yomitan pack per explanation language, keyed by that language. */
   yomitan: Record<string, string>;
 };
+
+/**
+ * EDRDG's own sanctioned acknowledgement wording, verbatim and with its URL.
+ *
+ * The licence requires this reach a user, and the dictionary details pane is
+ * the one place Yomitan renders `attribution`. Naming neither EDRDG nor a URL
+ * and pointing at a release manifest — which no Yomitan user will ever open —
+ * did not satisfy that.
+ */
+const japaneseAttribution =
+  "This dictionary uses the JMdict/EDICT dictionary files. These files are the property of the "
+  + "Electronic Dictionary Research and Development Group, and are used in conformance with the "
+  + "Group's licence. https://www.edrdg.org/ Additional content authored and reviewed by Yori Dict "
+  + "is distributed under CC BY-SA 4.0; see the release manifest.";
 
 const yomitanTitles: Record<string, string> = {
   en: "Yori Japanese–English",
@@ -76,17 +90,35 @@ export async function buildJapaneseRelease(
     writer.write(`${JSON.stringify(canonicalRecord(record))}\n`);
     entries += 1;
     for (const group of record.groups) {
-      banks.add(group.lang, (sequence) => [
-        record.entry.word,
-        record.entry.reading ?? "",
-        "",
-        "",
-        0,
-        // Meanings keep this language's own stored order.
-        group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text)),
-        sequence,
-        ""
-      ]);
+      // One row per written form, so a reader scanning a variant spelling
+      // finds the entry rather than only its preferred form. Each row carries
+      // that form's own common flag and its position in the entry's ordering,
+      // which is what `score` ranks on.
+      //
+      // A row carries only the senses that apply to its own form. JMdict
+      // restricts a sense to particular written forms, and a row built from
+      // the whole group would publish "to treat" under 配う when the source
+      // gives it to 遇う alone — and would hand that form the other senses'
+      // inflection behaviour with it. A form every sense excludes is not a
+      // row at all.
+      const rows = record.entry.headwords.flatMap((headword, index) => {
+        const senses = group.senses.filter((sense) => senseAppliesTo(sense, headword));
+        if (senses.length === 0) return [];
+        const rules = yomitanRules(senses.flatMap((sense) => sense.partOfSpeech));
+        const glossary = senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text));
+        return [(sequence: number) => [
+          headword.text,
+          headword.reading ?? "",
+          "",
+          rules,
+          yomitanScore(headword.common, index),
+          // Senses keep this language's own stored order.
+          glossary,
+          sequence,
+          ""
+        ]];
+      });
+      banks.add(group.lang, rows);
     }
   });
   await writer.end();
@@ -96,7 +128,7 @@ export async function buildJapaneseRelease(
     path: (lang) => artifacts.yomitan[lang]!,
     index: (lang) => ({
       title: yomitanTitles[lang] ?? `Yori Japanese (${lang})`,
-      attribution: "JMdict and Yori Dict contributors; see the release manifest.",
+      attribution: japaneseAttribution,
       // Named explanation language of this pack; it contains no other.
       description: `Japanese headwords explained in ${lang}.`
     })
@@ -131,19 +163,19 @@ export async function buildJapaneseRelease(
 /**
  * One canonical record per entry: shared identity and written forms, then one
  * sibling group per explanation language with that language's own ordered
- * meanings, glosses, examples, and concise source identifiers.
+ * senses, glosses, examples, and concise source identifiers.
  */
 function canonicalRecord(record: JapaneseEntryGroups) {
   return {
     ...record.entry,
     languages: Object.fromEntries(record.groups.map((group) => [
       group.lang,
-      { meanings: group.senses.map((sense) => releaseMeaning(sense, group.lang)) }
+      { senses: group.senses.map((sense) => releaseSense(sense, group.lang)) }
     ]))
   };
 }
 
-function releaseMeaning(sense: PublicSense, lang: ApiLang) {
+function releaseSense(sense: PublicSense, lang: ApiLang) {
   const { glosses, examples, evidenceIds, provenance, ...rest } = sense;
   return {
     ...rest,
@@ -178,6 +210,23 @@ function readMetadata(path: string) {
  * version the rebuild does not pin is omitted rather than described in prose,
  * so a reader never mistakes a placeholder for recorded provenance.
  */
+/**
+ * Whether one sense explains one written form. JMdict writes `*` for a sense
+ * that applies to every form, and names the forms explicitly otherwise.
+ *
+ * A kana form is judged by the kana restriction alone. A kanji form carries a
+ * concrete reading into its row, so it must satisfy both: a sense JMdict gives
+ * only to another reading of the same spelling does not belong to this row,
+ * and it stays reachable through that reading's own kana row.
+ */
+export function senseAppliesTo(sense: PublicSense, headword: PublicHeadword): boolean {
+  const allows = (restriction: string[], form: string) =>
+    restriction.includes("*") || restriction.includes(form);
+  if (headword.kind === "kana") return allows(sense.appliesTo.kana, headword.text);
+  return allows(sense.appliesTo.kanji, headword.text)
+    && (headword.reading === null || allows(sense.appliesTo.kana, headword.reading));
+}
+
 function japaneseSources(metadata: { jmdictSimplifiedVersion: string | null; dictionaryVersion: string | null }) {
   return [
     {
@@ -189,6 +238,12 @@ function japaneseSources(metadata: { jmdictSimplifiedVersion: string | null; dic
     },
     { name: "Tatoeba example sentences", license: "CC-BY-2.0-FR", url: "https://tatoeba.org/en/terms_of_use" },
     { name: "yomitan-jlpt-vocab", license: "CC-BY-SA-4.0", url: "https://github.com/stephenmk/yomitan-jlpt-vocab" },
-    { name: "Yori generated dictionary content", license: "CC-BY-SA-4.0" }
+    {
+      name: "Yori generated dictionary content",
+      license: "CC-BY-SA-4.0",
+      // Every credit resolves somewhere. An attribution a redistributor cannot
+      // follow is not one they can satisfy.
+      url: "https://github.com/YoriJP/yori-dict/blob/main/DATA_SOURCES.md"
+    }
   ];
 }
