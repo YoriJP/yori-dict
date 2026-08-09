@@ -58,6 +58,10 @@ _Avoid_: Key, query, index
 Word-level reduction of an inflected form back to a dictionary form. It is lookup help, not sentence parsing.
 _Avoid_: Parsing, tokenization, lemmatization
 
+**Inflection Stripping**:
+Deinflection's English counterpart: regular suffix substitutions that generate candidate lemmas, validated against the stored Lookup Terms. It is deliberately small because the lexicon rejects the wrong guesses, and it carries no irregular exception list. One module serves both callers — lookup resolution and the authoring guard — so they cannot disagree about what an inflected surface is. Import is not a caller: a source that declares which of its own senses are word forms is telling us, and stripping its headwords on top of that deletes lexemes the primary inventory merely lacks. Unlike Deinflection it is silent: English has no Inflection Path.
+_Avoid_: Lemmatization, stemming, English deinflection
+
 **Inflection Path**:
 The ordered steps deinflection took to reach a dictionary form, returned so a learner can see why 食べました resolves to 食べる.
 _Avoid_: Deinflection reason, debug output

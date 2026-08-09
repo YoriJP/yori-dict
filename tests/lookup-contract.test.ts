@@ -195,6 +195,28 @@ test("metadata advertises only explanation languages with senses behind them", a
   expect(gateway.calls).toEqual([]);
 });
 
+test("an inflected English surface returns the lemma's entry, not a stub", async () => {
+  gateway.reset();
+  const lemma = await (await app.request("/v1/lookup?q=bank&dictionary=en&lang=en")).json();
+  const inflected = await (await app.request("/v1/lookup?q=banks&dictionary=en&lang=en")).json();
+
+  // A client sends the word as it appeared in the text. It gets the lexeme's
+  // entry, titled with the lemma, with the lemma's complete sense list.
+  expect(inflected).not.toBeNull();
+  expect(inflected.headword).toBe("bank");
+  expect(inflected.id).toBe(lemma.id);
+  expect(inflected.senses).toEqual(lemma.senses);
+  // No field carries the surface back: the caller already holds the occurrence
+  // it sent, and `query != headword` is what says resolution happened.
+  expect(Object.keys(inflected)).toEqual(Object.keys(lemma));
+  // Resolution is silent. English gains no inflection path; the concept stays
+  // Japanese-only, where the derivation is what the learner needs to see.
+  expect(inflected).not.toHaveProperty("inflectionPath");
+  // Resolving never happens for a word that is itself an entry.
+  expect(lemma.headword).toBe("bank");
+  expect(gateway.calls).toEqual([]);
+});
+
 test("a supported language with no content is answered, not refused", async () => {
   gateway.reset();
   // German's JMdict component is unlicensed and is not imported, but `de` is

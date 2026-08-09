@@ -103,6 +103,52 @@ headwords, senses, sources — and English keeps its pronunciations. Public look
 canonical tables and makes zero model calls; it returns `null` only for absent or rejected
 content.
 
+A client sends the word as it appeared in the text. An inflected surface that is not itself
+an entry is retried against regular stripped candidates and answered with the lemma's entry,
+with the lemma as `headword` — `robots` returns `robot`'s complete sense list rather than a
+stub saying it is a plural. Resolution is silent: no field carries the queried surface back,
+because the caller already holds the occurrence it sent, and `query != headword` is what says
+resolution happened. English gains no inflection path; that concept stays Japanese-only, where
+the derivation is multi-step and is itself what the learner needs.
+
+Where two stripping rules both reach a word, order decides, and it favours the open class:
+`believes` is the verb before it is the plural of `belief`. The closed `-f` plurals lose
+nothing by going second, because a real lexicon records `leaves` and `knives` as forms of
+`leaf` and `knife` and answers them before any rule runs.
+
+The same module is the deterministic guard on an authored headword during enrichment. It is
+not used at import, and that is the whole of the rule: stripping is for a surface the lexicon
+has already failed to answer, never for deciding what belongs in the lexicon.
+
+Import refuses a word form on the source's own declaration, not on an exception list and not
+by guessing. Simple English Wiktionary keeps one page per orthographic string, so a form gets
+a definition of its own, and it categorises the sense — plurals, past tense forms, participles,
+third-person singulars, comparatives and superlatives. Those senses are dropped, which is what
+catches the irregulars a suffix rule cannot reach. The drop is per sense, so a page carrying
+both a form sense and a real one (`glasses` is the plural of `glass` and also a word for
+spectacles) keeps the lexeme. Resolution then depends on the lemma carrying the surface as an
+alternate form, which is why `children` reaches `child` and an unrecorded irregular surface
+returns `null` rather than a stub.
+
+A few thousand form pages were never categorised, so a second reading of the source's own
+words backs the categories up: a sense whose every clause only states an inflectional
+relationship — "plural of canvas", "The plural form of banner; more than one banner" — is a
+form. It reads what the sense says about itself rather than guessing from the headword, so it
+cannot mistake a lexeme for a form: `fyi` expands an abbreviation and `his` explains a
+determiner, and neither is a statement about inflection. Over the full source it drops 17
+senses and every one is a genuine stub.
+
+Getting this wrong is asymmetric, which is why the rule exists for 13 entries. A miss costs
+nothing: enrich-on-lookup authors a real entry, or the stripper reaches the lemma. A stub
+costs permanently — the entry exists, so enrichment never runs, and the reader keeps "the
+plural form of banner" for good.
+
+Stripping headwords as a second import gate was tried and removed. Over the full source it
+dropped 263 records to catch 10 genuine form pages; the other 253 were lexemes the primary
+inventory simply lacks, and deleting them made lookup answer them with an unrelated entry —
+`his` with `hi`, `us` with `u`, `per` with `pe`. A per-sense declaration from the source beats
+a per-page guess laid over it.
+
 The Yomitan adapter is format v3 and contains `index.json` plus `term_bank_1.json`. It reads
 canonical senses in their stored order; the adapter never drives the canonical schema and
 never flattens two explanation languages into one pack.

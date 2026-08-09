@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import {
+  englishLookupTermExists,
   lookupEnglishEntry,
   normalizeEnglishLookupTerm,
   readEnglishEntry,
@@ -98,6 +99,9 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
   return {
     find(query, lang) {
       return lookupEnglishEntry(db, query, lang);
+    },
+    hasLookupTerm(term) {
+      return englishLookupTermExists(db, normalizeEnglishLookupTerm(term));
     },
     /**
      * Concise canonical evidence for this headword: one record per contributing

@@ -137,7 +137,11 @@ paths:
         - name: q
           in: query
           required: true
-          description: Japanese word, reading, or inflected form.
+          description: >-
+            The word as it appeared in the text. Japanese resolves an inflected
+            form by deinflection; English resolves a regular inflected surface to
+            its lemma. Either way the response `headword` is the resolved entry's,
+            and the queried surface is not echoed back.
           schema:
             type: string
           example: 食べました

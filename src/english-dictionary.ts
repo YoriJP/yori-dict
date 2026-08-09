@@ -8,6 +8,10 @@ import type {
   EnglishSense,
   EnglishSourceReference
 } from "./english-types";
+import { resolveEnglishLemma } from "./english-strip";
+import { normalizeEnglishLookupTerm } from "./normalize";
+
+export { normalizeEnglishLookupTerm };
 import type { ApiLang, DictionaryMeta, PublicSource } from "./types";
 
 /** One entry with every explanation language it currently carries. */
@@ -58,9 +62,7 @@ export function readEnglishSourceCredits(db: Database): PublicSource[] {
   return [...credits.values()].sort((a, b) => a.name.localeCompare(b.name, "en"));
 }
 
-export function normalizeEnglishLookupTerm(value: string): string {
-  return value.trim().normalize("NFKC").replace(/\s+/g, " ").toLocaleLowerCase("en-US");
-}
+
 
 export function englishEntryId(lookupTerm: string): string {
   return `yori:en:e_${digest(normalizeEnglishLookupTerm(lookupTerm))}`;
@@ -94,17 +96,35 @@ export function openEnglishLookupDb(path: string): EnglishLookupDb {
   };
 }
 
+/**
+ * Resolves a query to an entry, retrying an inflected surface against its
+ * lemma. A client sends the word as it appeared in the text; making it
+ * lemmatise first would mean reimplementing this with no lexicon to validate
+ * against. The returned entry is the lemma's, with the lemma as `headword`, so
+ * the card titles the real entry rather than the surface — and no field
+ * carries the surface back, because the caller already holds the occurrence it
+ * sent.
+ */
 export function lookupEnglishEntry(db: Database, query: string, lang: ApiLang): EnglishEntry | null {
   const term = normalizeEnglishLookupTerm(query);
   if (!term) return null;
+  const exists = (candidate: string) => englishLookupTermExists(db, candidate);
+  const resolved = exists(term) ? term : resolveEnglishLemma(term, exists);
+  if (!resolved) return null;
   const row = db.query<{ entry_id: string }, [string]>(
     "select entry_id from en_lookup_terms where term = ? order by entry_id limit 1"
-  ).get(term);
+  ).get(resolved);
   if (!row) return null;
   const entry = readEnglishEntry(db, row.entry_id, lang);
   // An entry with no sense in the requested language is a miss for that
   // language, not an entry to answer with another language's senses.
   return entry && entry.senses.length > 0 ? entry : null;
+}
+
+/** Whether the lexicon carries this exact lookup term. The stripper's validator. */
+export function englishLookupTermExists(db: Database, term: string): boolean {
+  return db.query<{ term: string }, [string]>("select term from en_lookup_terms where term = ? limit 1")
+    .get(term) !== null;
 }
 
 export function readEnglishEntry(db: Database, entryId: string, lang: ApiLang): EnglishEntry | null {
