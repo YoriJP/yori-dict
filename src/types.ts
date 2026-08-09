@@ -94,6 +94,14 @@ export type JmdictFile = {
 
 export type LookupResponse = {
   item: PublicLookupItem | null;
+  /**
+   * The other entries the same query reached, in the same ranking order, after
+   * the one that answered it. One written form belongs to several unrelated
+   * words — こと is both 事 and 琴 — and the ranking decides which is likeliest,
+   * not which is right. Carrying the rest lets a reader see past a wrong guess
+   * instead of never learning there was one.
+   */
+  alternatives: PublicLookupItem[];
 };
 
 export type BatchLookupResponse = {

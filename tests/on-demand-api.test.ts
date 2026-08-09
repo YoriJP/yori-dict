@@ -185,9 +185,9 @@ test("English batch lookup uses the independent dictionary and authenticated res
   };
   const app = createApp(emptyDb(), {
     enrichmentToken: "secret",
-    englishLookup: (query) => {
+    englishLookupAll: (query: string) => {
       lookupQueries.push(query);
-      return ["bank", "news"].includes(query.toLowerCase()) ? entry : null;
+      return ["bank", "news"].includes(query.toLowerCase()) ? [entry] : [];
     },
     onDemand: englishResolver(englishOnDemand),
     logger: (event) => events.push(event)
@@ -281,7 +281,7 @@ function englishResolver(english: EnglishOnDemandDictionary): OnDemandDictionary
 function emptyDb(): LookupDb {
   return {
     lookup() {
-      return { item: null };
+      return { item: null, alternatives: [] };
     },
     meta() {
       return { apiVersion: "v1", dictionaryVersion: null, languages: [], tags: {}, sources: [] };

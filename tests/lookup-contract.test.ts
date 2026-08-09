@@ -107,7 +107,7 @@ beforeAll(async () => {
   };
   app = createApp(lookupDb, {
     enrichmentToken: "owner-token",
-    englishLookup: (query, lang) => englishRepository.find(query, lang),
+    englishLookupAll: (query, lang) => englishRepository.findAll(query, lang),
     englishMeta: () => englishRepository.meta(),
     onDemand: createOnDemandDictionary({
       japanese: createJapaneseOnDemandDictionary({ repository: japaneseRepository, modelGateway: gateway }),
@@ -218,6 +218,27 @@ test("an inflected English surface returns the lemma's entry, not a stub", async
   expect(inflected).not.toHaveProperty("inflectionPath");
   // Resolving never happens for a word that is itself an entry.
   expect(lemma.headword).toBe("bank");
+  expect(gateway.calls).toEqual([]);
+});
+
+test("a query that reaches several entries carries the ones it did not answer with", async () => {
+  gateway.reset();
+  // くらい is 暗い ("dark") and a separate kana-only entry ("about"). Ranking
+  // picks one, and that is a judgement rather than a fact, so the reader is
+  // given the other instead of never learning it existed.
+  const entry = await (await app.request("/v1/lookup?q=%E3%81%8F%E3%82%89%E3%81%84&dictionary=ja&lang=en")).json();
+  expect(entry).not.toBeNull();
+  expect(entry.alternatives).toHaveLength(1);
+  expect([entry.headword, entry.alternatives[0].headword].sort()).toEqual(["くらい", "暗い"]);
+  // An alternative is a whole entry, answered in the same language, and never
+  // nests further.
+  expect(entry.alternatives[0].senses.length).toBeGreaterThan(0);
+  expect(entry.alternatives[0].lang).toBe("en");
+  expect(entry.alternatives[0]).not.toHaveProperty("alternatives");
+
+  // The common case pays nothing: a query reaching one entry has no field.
+  const single = await (await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=en")).json();
+  expect(single).not.toHaveProperty("alternatives");
   expect(gateway.calls).toEqual([]);
 });
 

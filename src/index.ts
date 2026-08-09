@@ -44,7 +44,7 @@ const englishOnDemand = createEnglishOnDemandDictionary({
 const onDemand = createOnDemandDictionary({ japanese: japaneseOnDemand, english: englishOnDemand });
 const app = createApp(releasedDb, {
   onDemand,
-  englishLookup: (query, lang) => englishRepository.find(query, lang),
+  englishLookupAll: (query, lang) => englishRepository.findAll(query, lang),
   englishMeta: () => englishRepository.meta(),
   logger,
   enrichmentToken: process.env.YORI_ENRICHMENT_TOKEN

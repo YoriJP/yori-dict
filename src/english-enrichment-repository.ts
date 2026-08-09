@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import {
   englishLookupTermExists,
+  lookupEnglishEntries,
   lookupEnglishEntry,
   normalizeEnglishLookupTerm,
   readEnglishEntry,
@@ -99,6 +100,9 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
   return {
     find(query, lang) {
       return lookupEnglishEntry(db, query, lang);
+    },
+    findAll(query, lang) {
+      return lookupEnglishEntries(db, query, lang);
     },
     hasLookupTerm(term) {
       return englishLookupTermExists(db, normalizeEnglishLookupTerm(term));

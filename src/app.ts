@@ -17,8 +17,11 @@ import type { OnDemandDictionary, OnDemandEntry, ResolveRequest } from "./on-dem
 
 type AppOptions = {
   onDemand?: OnDemandDictionary;
-  /** Reads a published English entry in one explanation language. Never calls a model. */
-  englishLookup?: (query: string, lang: ApiLang) => EnglishEntry | null;
+  /**
+   * Reads the published English entries a query reaches, best first, in one
+   * explanation language. Never calls a model.
+   */
+  englishLookupAll?: (query: string, lang: ApiLang) => EnglishEntry[];
   /**
    * What the English dictionary can truthfully say about itself. Absent when
    * no English data is mounted, which is why `/v1/meta` reports the English
@@ -217,14 +220,32 @@ function readEntry(
   enriched: OnDemandEntry | null
 ): LookupEntry | null {
   if (dictionary === "en") {
-    const entry = asEnglishEntry(enriched)
-      ?? options.englishLookup?.(query, lang)
-      ?? (lemma && lemma !== query ? options.englishLookup?.(lemma, lang) : null)
-      ?? null;
-    return entry ? englishLookupEntry(entry, lang) : null;
+    // Authored content answers for the word it was authored for and has no
+    // siblings to offer, so enrichment yields one entry and no alternatives.
+    const authored = asEnglishEntry(enriched);
+    if (authored) return englishLookupEntry(authored, lang);
+    const entries = options.englishLookupAll?.(query, lang) ?? [];
+    const resolved = entries.length > 0 || !lemma || lemma === query
+      ? entries
+      : options.englishLookupAll?.(lemma, lang) ?? [];
+    return withAlternatives(resolved.map((entry) => englishLookupEntry(entry, lang)));
   }
-  const item = asJapaneseEntry(enriched) ?? db.lookup(query, lang).item;
-  return item ? japaneseLookupEntry(item, lang) : null;
+  const authored = asJapaneseEntry(enriched);
+  if (authored) return japaneseLookupEntry(authored, lang);
+  const { item, alternatives } = db.lookup(query, lang);
+  return withAlternatives([item, ...alternatives].map((match) => match && japaneseLookupEntry(match, lang)));
+}
+
+/**
+ * The first entry that projects into the requested language, carrying the rest
+ * behind it. A match that owns no sense in this language is dropped rather than
+ * offered as an empty alternative, and the field is left off entirely when
+ * nothing survives it, so the common single-entry query pays nothing.
+ */
+function withAlternatives(matches: Array<LookupEntry | null>): LookupEntry | null {
+  const [entry, ...rest] = matches.filter((match): match is LookupEntry => match !== null);
+  if (!entry) return null;
+  return rest.length > 0 ? { ...entry, alternatives: rest } : entry;
 }
 
 function asEnglishEntry(entry: OnDemandEntry | null): EnglishEntry | null {

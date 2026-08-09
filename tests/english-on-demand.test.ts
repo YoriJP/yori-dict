@@ -308,6 +308,10 @@ class MemoryEnglishRepository implements EnglishEnrichmentRepository {
     const senses = entry.senses.filter((sense) => sense.lang === lang);
     return senses.length > 0 ? { ...entry, senses } : null;
   }
+  findAll(query: string, lang: ApiLang) {
+    const entry = this.find(query, lang);
+    return entry ? [entry] : [];
+  }
   findSources(query: string) { return structuredClone(this.sources.get(query.toLowerCase()) ?? []); }
   saveEntry(entry: EnglishEntry, lang: ApiLang) {
     this.savedLangs.push(lang);

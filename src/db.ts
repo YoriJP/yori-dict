@@ -248,7 +248,8 @@ function lookup(db: Database, query: string, lang: ApiLang): LookupResponse {
     });
   }
 
-  return { item: readBestItem(db, candidates, lang) };
+  const [item, ...alternatives] = readMatchingItems(db, candidates, lang);
+  return { item: item ?? null, alternatives };
 }
 
 /**
@@ -264,9 +265,9 @@ function lookup(db: Database, query: string, lang: ApiLang): LookupResponse {
  * ordinary word". It is a proxy, and the honest reason it is used is that
  * JMdict's own frequency bands do not survive the import: jmdict-simplified
  * folds `ichi1`, `news1` and `nf01`–`nf48` into one boolean per form, so every
- * common form looks equally common here. Those bands would not beat this
- * anyway — they rank a written form in a newspaper corpus, and 琴 sits at nf05
- * against 事 at nf08, so importing them would pick the zither.
+ * common form looks equally common here. Importing those bands would beat this
+ * and is the upgrade path; until then the band a learner meets the word in is
+ * the only frequency-shaped signal available.
  *
  * `misc: uk` is deliberately not a key. It says a word is usually written in
  * kana, which sounds like exactly the question, but it is recorded per sense
@@ -316,24 +317,38 @@ function matchRank(candidate: DeinflectionCandidate): number {
     : 10;
 }
 
-function readBestItem(
+function readMatchingItems(
   db: Database,
   candidates: LookupCandidate[],
   lang: ApiLang
-): PublicLookupItem | null {
+): PublicLookupItem[] {
   // Several entries can share one written form. The requested language decides
-  // which of them can answer: the first candidate entry, in match order, that
-  // owns senses in that language. An entry with no sense in the requested
-  // language is a miss for that language, never an entry to answer with
-  // another language's senses, and never a reason to hide a sibling entry
-  // that does explain the word in the requested language.
+  // which of them can answer: every candidate entry, in match order, that owns
+  // senses in that language. An entry with no sense in the requested language
+  // is a miss for that language, never an entry to answer with another
+  // language's senses, and never a reason to hide a sibling entry that does
+  // explain the word in the requested language.
+  //
+  // All of them are returned rather than only the first. Ranking says which is
+  // likeliest, and for a bare kana query that is a judgement rather than a
+  // fact: こと reaches 事 and 琴, and whichever loses is still a word the
+  // reader may have meant. The caller shows the rest; nothing here has to be
+  // right about which one it was.
+  const items: PublicLookupItem[] = [];
+  const seen = new Set<string>();
   for (const candidate of [...candidates].sort((a, b) => a.rank - b.rank)) {
     for (const entryId of candidate.entryIds) {
+      // A surface that both matches directly and deinflects to the same entry
+      // reaches it twice. The earlier candidate is the better explanation of
+      // how it was reached, so the later one is dropped.
+      if (seen.has(entryId)) continue;
       const entry = readEntry(db, entryId, lang);
-      if (entry && entry.senses.length > 0) return toLookupItem(entry, candidate.inflectionPath);
+      if (!entry || entry.senses.length === 0) continue;
+      seen.add(entryId);
+      items.push(toLookupItem(entry, candidate.inflectionPath));
     }
   }
-  return null;
+  return items;
 }
 
 function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): PublicLookupItem {

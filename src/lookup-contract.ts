@@ -48,6 +48,18 @@ export type LookupEntry = {
   estimatedLevel?: EstimatedLevel;
   inflectionPath?: InflectionStep[];
   pronunciations?: LookupPronunciation[];
+  /**
+   * The other entries this query reached, in ranking order, after this one.
+   * Absent when there are none, which is most queries: 96% of lookup terms
+   * belong to exactly one entry.
+   *
+   * One written form can be several unrelated words — こと is both 事 and 琴,
+   * `best` is three lexemes — and the ranking picks the likeliest, not the
+   * right one. A consumer showing a popup can offer the rest; one that wants a
+   * single answer keeps reading the entry it already had. An alternative never
+   * carries its own alternatives.
+   */
+  alternatives?: LookupEntry[];
 };
 
 export type LookupHeadword = {
