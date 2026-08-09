@@ -88,7 +88,7 @@ beforeAll(async () => {
   repository = openEnglishEnrichmentRepository(dbPath);
   app = createApp(lookupDb, {
     enrichmentToken: "owner-token",
-    englishLookup: (query, lang) => repository.find(query, lang),
+    englishLookupAll: (query, lang) => repository.findAll(query, lang),
     onDemand: createOnDemandDictionary({
       japanese: { resolve: async () => null },
       english: createEnglishOnDemandDictionary({

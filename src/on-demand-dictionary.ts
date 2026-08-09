@@ -164,6 +164,12 @@ export type JapaneseOnDemandDictionary = DictionaryResolver<PublicLookupItem>;
 export type EnglishEnrichmentRepository = {
   find(query: string, lang: ApiLang): EnglishEntry | null;
   /**
+   * Every entry the query reaches, best first. `find` returns only the first;
+   * public lookup hands the rest to the reader, because one spelling can be
+   * several lexemes and the order is a ranking rather than a verdict.
+   */
+  findAll(query: string, lang: ApiLang): EnglishEntry[];
+  /**
    * Whether this exact lookup term is stored, with no inflection stripping and
    * no explanation language. `find` resolves an inflected surface to its lemma,
    * which is right for answering a reader but useless for asking whether a

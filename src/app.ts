@@ -7,17 +7,22 @@ import { dataReleaseUrl } from "./data-release";
 import {
   englishLookupEntry,
   japaneseLookupEntry,
+  lookupLanguages,
   parseLookupDictionary,
   parseLookupLang,
   type LookupDictionary,
   type LookupEntry
 } from "./lookup-contract";
+import { ModelGatewayError } from "./on-demand-dictionary";
 import type { OnDemandDictionary, OnDemandEntry, ResolveRequest } from "./on-demand-dictionary";
 
 type AppOptions = {
   onDemand?: OnDemandDictionary;
-  /** Reads a published English entry in one explanation language. Never calls a model. */
-  englishLookup?: (query: string, lang: ApiLang) => EnglishEntry | null;
+  /**
+   * Reads the published English entries a query reaches, best first, in one
+   * explanation language. Never calls a model.
+   */
+  englishLookupAll?: (query: string, lang: ApiLang) => EnglishEntry[];
   /**
    * What the English dictionary can truthfully say about itself. Absent when
    * no English data is mounted, which is why `/v1/meta` reports the English
@@ -74,6 +79,15 @@ export function createApp(
   // credits everything the served data draws on, both dictionaries together,
   // because the attribution obligations a consumer inherits are not per
   // dictionary. The version and tags describe the Japanese release.
+  //
+  // `languages` and `accepts` answer two different questions, and reporting
+  // only the first made the endpoint say less than the API does. `languages`
+  // is observed: what senses exist right now. It moves on its own, because an
+  // authorized enrichment writes a language the released data did not have —
+  // `en`+`ja` appeared this way. `accepts` is the contract, and it is fixed:
+  // what a lookup will take and enrichment can fill. A consumer deciding which
+  // locales to offer its readers wants `accepts`; one deciding what it can
+  // serve today without paying for a model wants `languages`.
   app.get("/v1/meta", (c) => {
     const japanese = db.meta();
     const english = options.englishMeta?.() ?? { languages: [], sources: [] };
@@ -81,8 +95,8 @@ export function createApp(
       ...japanese,
       sources: mergeSources(japanese.sources, english.sources),
       dictionaries: {
-        ja: { languages: japanese.languages },
-        en: { languages: english.languages }
+        ja: { languages: japanese.languages, accepts: lookupLanguages.ja },
+        en: { languages: english.languages, accepts: lookupLanguages.en }
       }
     });
   });
@@ -144,6 +158,12 @@ export function createApp(
       return c.json({ error: "Enrichment requires a valid bearer token" }, 401);
     }
     const traceId = c.req.header("x-yori-request-id") ?? crypto.randomUUID();
+    // A batch is answered query by query, and only a provider failure becomes
+    // a miss. Anything else — an unreadable database, a malformed row — is
+    // this server's own problem rather than a fact about the word, and
+    // reporting it as one would let a consumer record a gap that never
+    // existed. Those fail the request, as they do for a single lookup.
+    let unavailable = 0;
     const entries = await Promise.all(body.queries.map(async (candidate) => {
       const request = typeof candidate === "string"
         ? resolveRequest(candidate, dictionary, lang, {}, "bulk", traceId)
@@ -152,9 +172,26 @@ export function createApp(
             reading: candidate.reading,
             sentence: candidate.context
           }, "bulk", traceId);
-      const enriched = body.enrich && options.onDemand
-        ? await options.onDemand.resolve(request)
-        : null;
+      let enriched: OnDemandEntry | null = null;
+      if (body.enrich && options.onDemand) {
+        try {
+          enriched = await options.onDemand.resolve(request);
+        } catch (error) {
+          // Only a provider failure is isolated, and `ModelGatewayError` is
+          // what says so. `resolve` also writes attempt records and accepted
+          // entries, so a locked or failing database throws from inside it
+          // too; narrowing the call is not enough to tell the two apart, and
+          // reading the error type is. One word must not decide the fate of
+          // the other ninety-nine, but a broken database is not a fact about
+          // any word and must not be reported as one.
+          if (!(error instanceof ModelGatewayError)) throw error;
+          // The word is not lost: the failure is logged, and the next enriched
+          // lookup of it attempts again.
+          logLookupFailure(options, traceId, dictionary, lang, request.query, error);
+          unavailable += 1;
+          return null;
+        }
+      }
       const entry = readEntry(
         db,
         options,
@@ -167,6 +204,13 @@ export function createApp(
       logLookup(options, traceId, dictionary, lang, request.query, body.enrich === true, entry);
       return entry;
     }));
+    // A batch where *every* query failed is a different thing entirely — an
+    // expired token, a provider outage, a misconfigured key — and answering it
+    // with a full set of misses would let a consumer publish an empty
+    // dictionary and believe it. That one fails loudly.
+    if (unavailable > 0 && unavailable === body.queries.length) {
+      return c.json({ error: "Lookup is temporarily unavailable" }, 500);
+    }
     return c.json({ entries });
   });
 
@@ -189,14 +233,47 @@ function readEntry(
   enriched: OnDemandEntry | null
 ): LookupEntry | null {
   if (dictionary === "en") {
-    const entry = asEnglishEntry(enriched)
-      ?? options.englishLookup?.(query, lang)
-      ?? (lemma && lemma !== query ? options.englishLookup?.(lemma, lang) : null)
-      ?? null;
-    return entry ? englishLookupEntry(entry, lang) : null;
+    const entries = options.englishLookupAll?.(query, lang) ?? [];
+    const released = entries.length > 0 || !lemma || lemma === query
+      ? entries
+      : options.englishLookupAll?.(lemma, lang) ?? [];
+    return withAlternatives(
+      leadWithAuthored(asEnglishEntry(enriched), released).map((entry) => englishLookupEntry(entry, lang))
+    );
   }
-  const item = asJapaneseEntry(enriched) ?? db.lookup(query, lang).item;
-  return item ? japaneseLookupEntry(item, lang) : null;
+  const { item, alternatives } = db.lookup(query, lang);
+  const released = [item, ...alternatives].filter((match): match is PublicLookupItem => match !== null);
+  return withAlternatives(
+    leadWithAuthored(asJapaneseEntry(enriched), released).map((match) => japaneseLookupEntry(match, lang))
+  );
+}
+
+/**
+ * The entries to answer with, best first, when enrichment also ran.
+ *
+ * An authored entry leads, because it is the newer copy: enrichment either
+ * created it for a word the store missed, or completed the store's own entry
+ * with the examples it lacked. `resolve` returns a released entry unchanged
+ * when it is already complete, so an authored entry is not evidence that the
+ * query was a miss — and the siblings that query reached still belong to the
+ * reader. Matching by id is what keeps the completed copy from appearing twice,
+ * once as the answer and once as an alternative to itself.
+ */
+function leadWithAuthored<T extends { id: string }>(authored: T | null, released: T[]): T[] {
+  if (!authored) return released;
+  return [authored, ...released.filter((entry) => entry.id !== authored.id)];
+}
+
+/**
+ * The first entry that projects into the requested language, carrying the rest
+ * behind it. A match that owns no sense in this language is dropped rather than
+ * offered as an empty alternative, and the field is left off entirely when
+ * nothing survives it, so the common single-entry query pays nothing.
+ */
+function withAlternatives(matches: Array<LookupEntry | null>): LookupEntry | null {
+  const [entry, ...rest] = matches.filter((match): match is LookupEntry => match !== null);
+  if (!entry) return null;
+  return rest.length > 0 ? { ...entry, alternatives: rest } : entry;
 }
 
 function asEnglishEntry(entry: OnDemandEntry | null): EnglishEntry | null {
@@ -276,6 +353,30 @@ function unsupportedLanguage(dictionary: LookupDictionary): string {
 
 function isAuthorized(header: string | undefined, token: string | undefined): boolean {
   return Boolean(token && header === `Bearer ${token}`);
+}
+
+/**
+ * Records the one query that failed, so a miss caused by a provider is
+ * separable in the log from a word the dictionary genuinely cannot explain.
+ * The response cannot carry that distinction without a shape every consumer
+ * would have to learn, and the operator is who acts on it.
+ */
+function logLookupFailure(
+  options: AppOptions,
+  traceId: string | undefined,
+  dictionary: LookupDictionary,
+  lang: ApiLang,
+  query: string,
+  error: unknown
+): void {
+  options.logger?.({
+    event: "lookup_failed",
+    traceId,
+    dictionary,
+    lang,
+    query,
+    error: error instanceof Error ? error.message : String(error)
+  });
 }
 
 function logLookup(

@@ -40,6 +40,23 @@ The policy is explicit and deterministic, and no model takes part in it.
 Imported examples are kept where a source maps them exactly to a sense; accepted generated
 examples are appended after them and keep their own provenance.
 
+### Known limitation: function words answer as chemical elements
+
+Because Simple English Wiktionary supplies a whole entry only for a headword Open English
+WordNet does not carry, it cannot add a missing part of speech to one WordNet does. WordNet
+has no preposition sense for `in`, but it does have the element indium, so `in` answers with
+a metal. `was` strips to `be` and answers with beryllium. Both are genuine hits, so
+Enrich-on-Lookup never runs and no better sense arrives — the failure is silent and does not
+heal.
+
+This is accepted rather than fixed. The affected set is essentially the English function
+words, because element symbols are one or two letters: `in`, `as`, `at`, `be`, `no`, `he`,
+`am`. A reader of English text does not need `the` defined, and consumers already exclude
+grammar words from their own long-tail vocabulary. The two available fixes both cost more
+than the defect: letting Wiktionary merge parts of speech into a WordNet headword opens sense
+merging and duplicate detection across the whole dictionary, and reordering an entry's senses
+would break the rule that WordNet's recovered editorial order is canonical.
+
 ### Japanese and Taiwanese Chinese senses
 
 Each explanation language has its own direct-import source, configured under
@@ -132,8 +149,10 @@ returns `null` rather than a stub.
 
 A few thousand form pages were never categorised, so a second reading of the source's own
 words backs the categories up: a sense whose every clause only states an inflectional
-relationship — "plural of canvas", "The plural form of banner; more than one banner" — is a
-form. It reads what the sense says about itself rather than guessing from the headword, so it
+relationship — "plural of canvas", "The plural form of banner; more than one banner", "the
+past tense and past participle of rebuild" — is a form. Naming two relationships in one
+breath does not make the sentence any less a statement about inflection, and an uncategorised
+page of that shape is how `rebuilt` reached the released lexicon as its own headword. It reads what the sense says about itself rather than guessing from the headword, so it
 cannot mistake a lexeme for a form: `fyi` expands an abbreviation and `his` explains a
 determiner, and neither is a statement about inflection. Over the full source it drops 17
 senses and every one is a genuine stub.

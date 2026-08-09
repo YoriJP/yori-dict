@@ -248,15 +248,44 @@ function lookup(db: Database, query: string, lang: ApiLang): LookupResponse {
     });
   }
 
-  return { item: readBestItem(db, candidates, lang) };
+  const [item, ...alternatives] = readMatchingItems(db, candidates, lang);
+  return { item: item ?? null, alternatives };
 }
 
+/**
+ * The entries a lookup term reaches, best answer first.
+ *
+ * The ordering matters most for a bare kana query, where one reading reaches
+ * several unrelated entries and only one of them is the word a reader meant.
+ * こと reaches both 事 and 琴, and both carry a common こと form, so the first
+ * two keys tie and something has to break it.
+ *
+ * Estimated Level breaks it. An easier band means the word is met earlier,
+ * which is the closest thing this database holds to "which of these is the
+ * ordinary word". It is a proxy, and the honest reason it is used is that
+ * JMdict's own frequency bands do not survive the import: jmdict-simplified
+ * folds `ichi1`, `news1` and `nf01`–`nf48` into one boolean per form, so every
+ * common form looks equally common here. Importing those bands would beat this
+ * and is the upgrade path; until then the band a learner meets the word in is
+ * the only frequency-shaped signal available.
+ *
+ * `misc: uk` is deliberately not a key. It says a word is usually written in
+ * kana, which sounds like exactly the question, but it is recorded per sense
+ * and does not separate these entries: sorting by it puts 様 above 用 for よう
+ * while fixing nothing that Estimated Level does not already fix.
+ *
+ * An entry with no band sorts last rather than in the middle. That costs 家 the
+ * query うち to 内, because the JLPT list records 家 under いえ and leaves this
+ * entry unbanded. Ranking unbanded entries higher to recover it would hand こと
+ * to 古都, which is worse.
+ */
 function findEntryIds(db: Database, term: string): string[] {
   return db
     .query<{ entry_id: string }, [string]>(
       `select lt.entry_id
        from ja_lookup_terms lt
        join ja_forms f on f.entry_id = lt.entry_id and f.text = lt.term
+       join ja_entries e on e.id = lt.entry_id
        where lt.term = ?
        group by lt.entry_id
        order by
@@ -268,6 +297,14 @@ function findEntryIds(db: Database, term: string): string[] {
            order by best.common desc, case best.kind when 'kanji' then 0 else 1 end, best.text, best.reading
            limit 1
          ) = lt.term then 0 else 1 end,
+         case e.estimated_level
+           when 'N5' then 0
+           when 'N4' then 1
+           when 'N3' then 2
+           when 'N2' then 3
+           when 'N1' then 4
+           else 5
+         end,
          lt.entry_id`
     )
     .all(term)
@@ -280,24 +317,51 @@ function matchRank(candidate: DeinflectionCandidate): number {
     : 10;
 }
 
-function readBestItem(
+function readMatchingItems(
   db: Database,
   candidates: LookupCandidate[],
   lang: ApiLang
-): PublicLookupItem | null {
+): PublicLookupItem[] {
   // Several entries can share one written form. The requested language decides
-  // which of them can answer: the first candidate entry, in match order, that
-  // owns senses in that language. An entry with no sense in the requested
-  // language is a miss for that language, never an entry to answer with
-  // another language's senses, and never a reason to hide a sibling entry
-  // that does explain the word in the requested language.
-  for (const candidate of [...candidates].sort((a, b) => a.rank - b.rank)) {
-    for (const entryId of candidate.entryIds) {
-      const entry = readEntry(db, entryId, lang);
-      if (entry && entry.senses.length > 0) return toLookupItem(entry, candidate.inflectionPath);
-    }
+  // which of them can answer: every candidate entry, in match order, that owns
+  // senses in that language. An entry with no sense in the requested language
+  // is a miss for that language, never an entry to answer with another
+  // language's senses, and never a reason to hide a sibling entry that does
+  // explain the word in the requested language.
+  //
+  // Every entry of one tier is returned rather than only the first, and only
+  // that tier. Within a tier the ranking says which is likeliest, and for a
+  // bare kana query that is a judgement rather than a fact: こと reaches 事 and
+  // 琴, and whichever loses is still a word the reader may have meant.
+  //
+  // Across tiers it is not a judgement but a different reading of the input.
+  // した is a word, and it also deinflects to する, しる and す. Offering the
+  // entries of those as alternatives to the word the reader actually wrote
+  // would bury it under guesses about a verb they did not use. A lower tier is
+  // still consulted when the better one cannot answer in this language, which
+  // is the rule that was already here — this only stops the tiers mixing.
+  const tiers = new Map<number, LookupCandidate[]>();
+  for (const candidate of candidates) {
+    tiers.set(candidate.rank, [...(tiers.get(candidate.rank) ?? []), candidate]);
   }
-  return null;
+  for (const rank of [...tiers.keys()].sort((a, b) => a - b)) {
+    const items: PublicLookupItem[] = [];
+    const seen = new Set<string>();
+    for (const candidate of tiers.get(rank)!) {
+      for (const entryId of candidate.entryIds) {
+        // Two deinflections of one surface can reach the same entry. The first
+        // is the better explanation of how it was reached, so the later one is
+        // dropped rather than repeated with a second inflection path.
+        if (seen.has(entryId)) continue;
+        const entry = readEntry(db, entryId, lang);
+        if (!entry || entry.senses.length === 0) continue;
+        seen.add(entryId);
+        items.push(toLookupItem(entry, candidate.inflectionPath));
+      }
+    }
+    if (items.length > 0) return items;
+  }
+  return [];
 }
 
 function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): PublicLookupItem {

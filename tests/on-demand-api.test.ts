@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createApp } from "../src/app";
 import type { LookupDb } from "../src/db";
-import { createOnDemandDictionary } from "../src/on-demand-dictionary";
+import { createOnDemandDictionary, ModelGatewayError } from "../src/on-demand-dictionary";
 import type {
   EnglishOnDemandDictionary,
   JapaneseOnDemandDictionary,
@@ -111,14 +111,134 @@ test("batch enrichment accepts contextual candidates while preserving order", as
   expect(entries.map((entry: { headword: string }) => entry.headword)).toEqual(["未知語", "未知語"]);
 });
 
-test("a failed batch enrichment fails the request instead of reporting a miss", async () => {
+test("one failed word is a miss and the rest of the batch survives", async () => {
+  const events: Record<string, unknown>[] = [];
   const released = generatedEntry();
   released.source = "jmdict";
   const db = emptyDb();
-  db.lookup = () => ({ item: released });
+  db.lookup = () => ({ item: released, alternatives: [] });
   const app = createApp(db, {
     enrichmentToken: "secret",
-    onDemand: { async resolve() { throw new Error("provider unavailable"); } }
+    logger: (event) => events.push(event as Record<string, unknown>),
+    onDemand: {
+      async resolve(request) {
+        if (request.query === "壊れた語") throw new ModelGatewayError("permanent", "provider unavailable");
+        return null;
+      }
+    }
+  });
+
+  const response = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer secret" },
+    body: JSON.stringify({ dictionary: "ja", lang: "en", enrich: true, queries: ["学校", "壊れた語", "学校"] })
+  });
+
+  expect(response.status).toBe(200);
+  const { entries } = await response.json();
+  expect(entries).toHaveLength(3);
+  expect(entries[0]?.headword).toBe("未知語");
+  expect(entries[1]).toBeNull();
+  expect(entries[2]?.headword).toBe("未知語");
+  expect(events.filter((event) => event.event === "lookup_failed")).toEqual([
+    {
+      event: "lookup_failed",
+      traceId: expect.any(String),
+      dictionary: "ja",
+      lang: "en",
+      query: "壊れた語",
+      error: "provider unavailable"
+    }
+  ]);
+});
+
+test("an enriched hit on a released word keeps the siblings that word reached", async () => {
+  // `resolve` returns the released entry unchanged when it is already
+  // complete, so an authored entry is not evidence that the query was a miss.
+  // Treating it as one dropped alternatives for exactly the enriched path
+  // yori-news and yori-web use.
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const sibling = { ...generatedEntry(), id: "yori:e_sibling", word: "琴" };
+  const db = emptyDb();
+  db.lookup = () => ({ item: released, alternatives: [sibling] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    // The completed copy of the same entry, by id.
+    onDemand: { async resolve() { return released; } }
+  });
+
+  const response = await app.request("/v1/lookup?q=%E3%81%93%E3%81%A8&dictionary=ja&lang=en&enrich=true", {
+    headers: { authorization: "Bearer secret" }
+  });
+  const entry = await response.json();
+  expect(entry.id).toBe(released.id);
+  // The sibling survives, and the completed entry does not become an
+  // alternative to itself.
+  expect(entry.alternatives).toHaveLength(1);
+  expect(entry.alternatives[0].id).toBe("yori:e_sibling");
+});
+
+test("a storage failure inside resolve fails the batch, unlike a provider failure", async () => {
+  // `resolve` writes attempt records and accepted entries as it goes, so a
+  // locked database throws from inside it just as a dead provider does.
+  // Narrowing which call is wrapped cannot separate them; only the error type
+  // can. A word that reached no provider is not a word the dictionary lacks.
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const db = emptyDb();
+  db.lookup = () => ({ item: released, alternatives: [] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    onDemand: {
+      async resolve(request) {
+        if (request.query === "壊れた語") throw new Error("database is locked");
+        return null;
+      }
+    }
+  });
+
+  const response = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer secret" },
+    body: JSON.stringify({ dictionary: "ja", lang: "en", enrich: true, queries: ["学校", "壊れた語"] })
+  });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: "Lookup is temporarily unavailable" });
+});
+
+test("a storage failure fails the batch instead of reporting the word as missing", async () => {
+  // The same rule for a read: an unreadable row is this server's own problem,
+  // and reporting it as a gap would let a consumer record one that never
+  // existed.
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const db = emptyDb();
+  db.lookup = (query: string) => {
+    if (query === "壊れた行") throw new Error("malformed stored entry");
+    return { item: released, alternatives: [] };
+  };
+  const app = createApp(db, { enrichmentToken: "secret" });
+
+  const response = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dictionary: "ja", lang: "en", queries: ["学校", "壊れた行"] })
+  });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: "Lookup is temporarily unavailable" });
+});
+
+test("a batch where every word failed fails the request instead of reporting misses", async () => {
+  const released = generatedEntry();
+  released.source = "jmdict";
+  const db = emptyDb();
+  db.lookup = () => ({ item: released, alternatives: [] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    onDemand: { async resolve() { throw new ModelGatewayError("permanent", "provider unavailable"); } }
   });
 
   const response = await app.request("/v1/lookup/batch", {
@@ -144,9 +264,9 @@ test("English batch lookup uses the independent dictionary and authenticated res
   };
   const app = createApp(emptyDb(), {
     enrichmentToken: "secret",
-    englishLookup: (query) => {
+    englishLookupAll: (query: string) => {
       lookupQueries.push(query);
-      return ["bank", "news"].includes(query.toLowerCase()) ? entry : null;
+      return ["bank", "news"].includes(query.toLowerCase()) ? [entry] : [];
     },
     onDemand: englishResolver(englishOnDemand),
     logger: (event) => events.push(event)
@@ -240,7 +360,7 @@ function englishResolver(english: EnglishOnDemandDictionary): OnDemandDictionary
 function emptyDb(): LookupDb {
   return {
     lookup() {
-      return { item: null };
+      return { item: null, alternatives: [] };
     },
     meta() {
       return { apiVersion: "v1", dictionaryVersion: null, languages: [], tags: {}, sources: [] };

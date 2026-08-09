@@ -195,6 +195,19 @@ const inflectedFormCategories = new Set([
 const inflection = "(?:plural|past tense|past participle|present participle|third[- ]person singular|comparative|superlative)";
 
 /**
+ * One surface is often two forms at once, and the source says so in one breath:
+ * "the past tense and past participle of rebuild". Naming a second relationship
+ * does not make the sentence any less a statement about inflection, so the
+ * conjunction is part of the phrase rather than a reason to keep the sense.
+ * Every page stating this shape in the pinned Simple English Wiktionary extract
+ * is also categorised, so the rule drops nothing there. It is kept because it
+ * costs nothing to keep — no sense in the source matches it wrongly — and
+ * because an uncategorised page is exactly how `rebuilt` reached the released
+ * lexicon glossed as "the past tense and past participle of rebuild".
+ */
+const inflections = `${inflection}(?:\\s+(?:and|or)\\s+(?:the\\s+)?${inflection})*`;
+
+/**
  * A gloss that only states an inflectional relationship: "plural of bank",
  * "The plural form of banner", "Chihuahuas is the plural of chihuahua".
  *
@@ -204,12 +217,19 @@ const inflection = "(?:plural|past tense|past participle|present participle|thir
  * so it cannot mistake a lexeme for a form: `his` glosses "belonging to him"
  * and `fyi` glosses "a short way of saying for your information", and neither
  * is a statement about inflection.
+ *
+ * A clause of the bare shape "more numb" or "most few" is not matched, even
+ * though it is what a comparative page writes after naming its lemma. It was
+ * tried and removed: over the full source it dropped one sense, and that sense
+ * was "most important." — the real definition of `primary`. The comparative
+ * pages it was meant for are categorised, so it caught nothing the categories
+ * had left and cost a lexeme its meaning.
  */
 const inflectionStatement = new RegExp(
   "^(?:"
-  + `(?:the\\s+)?(?:alternative\\s+|present\\s+)?${inflection}(?:\\s+form)?\\s+of\\s+\\S`
+  + `(?:the\\s+)?(?:alternative\\s+|present\\s+)?${inflections}(?:\\s+form)?\\s+of\\s+\\S`
   + "|more than one\\s+\\S"
-  + `|\\S+\\s+is\\s+(?:an?\\s+|the\\s+)?(?:alternative\\s+|present\\s+)?${inflection}(?:\\s+form)?\\s+of\\s+\\S`
+  + `|\\S+\\s+is\\s+(?:an?\\s+|the\\s+)?(?:alternative\\s+|present\\s+)?${inflections}(?:\\s+form)?\\s+of\\s+\\S`
   + ")",
   "i"
 );

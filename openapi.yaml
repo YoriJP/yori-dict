@@ -98,8 +98,10 @@ paths:
                 dictionaries:
                   ja:
                     languages: [en, ko, zh-cn, zh-tw]
+                    accepts: [en, de, zh-tw, zh-cn, ko]
                   en:
-                    languages: [en, ja, zh-tw]
+                    languages: [en]
+                    accepts: [en, ja, zh-tw]
                 tags:
                   uk: word usually written using kana alone
                   vt: transitive verb
@@ -265,8 +267,10 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: >-
-            An operational failure for any item fails the whole batch instead of hiding
-            the failed item as a null entry.
+            A storage or projection failure, wherever it is raised, and a batch in
+            which every query's provider call failed. A provider failure for one
+            query while another survives is not one of these: that query is a null
+            entry and the batch returns 200.
           content:
             application/json:
               schema:
@@ -326,18 +330,30 @@ components:
         dictionaries:
           type: object
           description: >-
-            Every headword dictionary this API serves, with the explanation
-            languages it currently holds senses in, derived per dictionary from
-            its own rows. A language listed here has content behind it. A
-            language absent from it may still be requested: the pair is a gap
-            Enrich-on-Lookup fills, not a request error. The two dictionaries
-            are independent and no union of their lists is implied.
+            Every headword dictionary this API serves. The two dictionaries are
+            independent and no union of their lists is implied.
           additionalProperties:
             type: object
-            required: [languages]
+            required: [languages, accepts]
             properties:
               languages:
                 type: array
+                description: >-
+                  The explanation languages this dictionary currently holds
+                  senses in, derived from its own rows. Observed, not declared,
+                  so it grows when Enrich-on-Lookup authors a language the
+                  released data did not carry. Read it to know what can be
+                  served today without a model call.
+                items:
+                  $ref: "#/components/schemas/ApiLang"
+              accepts:
+                type: array
+                description: >-
+                  The explanation languages a lookup will accept for this
+                  dictionary. Fixed by the contract and unaffected by coverage.
+                  A language here but not in `languages` is a gap
+                  Enrich-on-Lookup fills, never a request error. Read this to
+                  decide which locales to offer.
                 items:
                   $ref: "#/components/schemas/ApiLang"
         tags:
@@ -364,6 +380,20 @@ components:
       anyOf:
         - $ref: "#/components/schemas/LookupEntry"
         - type: "null"
+    LookupAlternatives:
+      type: array
+      description: >-
+        The other entries this query reached, in ranking order, after the one
+        that answered it, from that match tier only. Absent when there are
+        none, which is most queries. A surface that is itself a word does not
+        carry the entries of what it deinflects to.
+        One written form can be several unrelated words — こと is both 事 and 琴,
+        `best` is three lexemes — and the order is a ranking, not a verdict, so
+        a client showing a popup can offer the rest instead of trusting the
+        first. A client that wants one answer reads the entry as before and
+        ignores this. An alternative never carries its own alternatives.
+      items:
+        $ref: "#/components/schemas/LookupEntry"
     BatchLookupRequest:
       type: object
       required: [dictionary, lang, queries]
@@ -407,6 +437,13 @@ components:
           description: >-
             Same length and order as the submitted queries. Duplicate queries keep
             separate positions and the submitted query strings are not repeated.
+            A query whose enrichment failed is null, the same as a miss, so one
+            unavailable word never discards the entries beside it; the failure is
+            recorded in the server log. A batch in which every query failed
+            returns 500 instead, so a total outage cannot be mistaken for a
+            dictionary with nothing in it. Only a provider failure is isolated
+            this way; a storage or projection error still fails the request,
+            wherever it is raised.
           items:
             $ref: "#/components/schemas/LookupResult"
     LookupEntry:
@@ -431,6 +468,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Headword"
+        alternatives:
+          $ref: "#/components/schemas/LookupAlternatives"
         senses:
           type: array
           minItems: 1

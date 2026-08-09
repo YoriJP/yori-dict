@@ -106,19 +106,32 @@ export function openEnglishLookupDb(path: string): EnglishLookupDb {
  * sent.
  */
 export function lookupEnglishEntry(db: Database, query: string, lang: ApiLang): EnglishEntry | null {
+  return lookupEnglishEntries(db, query, lang)[0] ?? null;
+}
+
+/**
+ * Every entry the query reaches, in stable order, best first. One spelling can
+ * be several lexemes — `best` and `better` are each three — and the order is a
+ * ranking rather than a verdict, so the caller receives the rest instead of
+ * being told the first one was the answer.
+ */
+export function lookupEnglishEntries(db: Database, query: string, lang: ApiLang): EnglishEntry[] {
   const term = normalizeEnglishLookupTerm(query);
-  if (!term) return null;
+  if (!term) return [];
   const exists = (candidate: string) => englishLookupTermExists(db, candidate);
   const resolved = exists(term) ? term : resolveEnglishLemma(term, exists);
-  if (!resolved) return null;
-  const row = db.query<{ entry_id: string }, [string]>(
-    "select entry_id from en_lookup_terms where term = ? order by entry_id limit 1"
-  ).get(resolved);
-  if (!row) return null;
-  const entry = readEnglishEntry(db, row.entry_id, lang);
-  // An entry with no sense in the requested language is a miss for that
-  // language, not an entry to answer with another language's senses.
-  return entry && entry.senses.length > 0 ? entry : null;
+  if (!resolved) return [];
+  return db
+    .query<{ entry_id: string }, [string]>(
+      "select distinct entry_id from en_lookup_terms where term = ? order by entry_id"
+    )
+    .all(resolved)
+    .flatMap((row) => {
+      const entry = readEnglishEntry(db, row.entry_id, lang);
+      // An entry with no sense in the requested language is a miss for that
+      // language, not an entry to answer with another language's senses.
+      return entry && entry.senses.length > 0 ? [entry] : [];
+    });
 }
 
 /** Whether the lexicon carries this exact lookup term. The stripper's validator. */

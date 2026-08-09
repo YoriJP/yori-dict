@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rename } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { englishEntryId, englishSenseId, normalizeEnglishLookupTerm } from "./english-dictionary";
+import { resolveEnglishLemma } from "./english-strip";
 import {
   importOpenEnglishWordNetEntry,
   importWiktionaryEntry,
@@ -992,6 +993,30 @@ function readRetained(path: string): Retained {
   }
 }
 
+/**
+ * Whether the rebuilt sources explain this retained headword as part of another
+ * lexeme. Asked only after the caller has established that no rebuilt entry
+ * claims this surface as its own headword, which is what makes both halves
+ * safe.
+ *
+ * A source that records the surface among a lemma's forms has said so outright,
+ * and that is the common case: `rebuilt`, `had` and `banking` are all indexed
+ * under their lemma. Inflection Stripping cannot answer for them, because it
+ * refuses a surface that is itself a lookup term — the rule that keeps `bus`
+ * from becoming `bu`. Reading the index first is what covers them.
+ *
+ * Stripping covers the rest, where the source lists no form: `crumbling` is not
+ * indexed under `crumble` and reaches it only through the rules. It is the same
+ * module the authoring guard uses, so a rebuild and an enrichment cannot
+ * disagree about what a word form is.
+ */
+function explainedByAnotherLexeme(db: Database, lookupTerm: string): boolean {
+  const indexed = (term: string) => db.query<{ id: string }, [string]>(
+    "select entry_id as id from en_lookup_terms where term = ? limit 1"
+  ).get(term) !== null;
+  return indexed(lookupTerm) || resolveEnglishLemma(lookupTerm, indexed) !== null;
+}
+
 function restoreRetained(
   db: Database,
   retained: Retained
@@ -1014,6 +1039,15 @@ function restoreRetained(
         groups += reattachGroups(db, record, existing.id);
         continue;
       }
+      // Retention must not reintroduce what the current rules would refuse.
+      // The authoring guard reads the lexicon as it stood at the time, so a
+      // word form that was an entry then could be minted as a headword —
+      // `crumbling` was, glossed as the present participle of `crumble`.
+      // Carrying it whole would make one leak permanent, surviving every later
+      // rebuild that fixed the reason for it. No rebuilt entry claims this
+      // surface, or the branch above would have taken it, so a lexeme the
+      // sources explain it as part of settles it.
+      if (explainedByAnotherLexeme(db, String(record.entry.lookup_term))) continue;
       insertRow(db, "en_entries", record.entry, false);
       for (const generation of record.generations) insertRow(db, "en_generations", generation, true);
       for (const source of record.sources) insertRow(db, "en_entry_sources", source, true);

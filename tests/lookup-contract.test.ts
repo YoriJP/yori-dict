@@ -107,7 +107,7 @@ beforeAll(async () => {
   };
   app = createApp(lookupDb, {
     enrichmentToken: "owner-token",
-    englishLookup: (query, lang) => englishRepository.find(query, lang),
+    englishLookupAll: (query, lang) => englishRepository.findAll(query, lang),
     englishMeta: () => englishRepository.meta(),
     onDemand: createOnDemandDictionary({
       japanese: createJapaneseOnDemandDictionary({ repository: japaneseRepository, modelGateway: gateway }),
@@ -164,9 +164,13 @@ test("metadata advertises only explanation languages with senses behind them", a
   // Each dictionary reports its own languages, derived from its own rows.
   // This database holds English and legacy Taiwanese Japanese senses and an
   // English-explained English dictionary, and nothing else.
+  // `accepts` is the contract and does not move; `languages` is observed and
+  // does. A consumer choosing which locales to offer reads `accepts`, because
+  // a language absent from `languages` is a coverage gap Enrich-on-Lookup can
+  // fill, not a language the API will refuse.
   expect(meta.dictionaries).toEqual({
-    ja: { languages: ["en", "zh-tw"] },
-    en: { languages: ["en"] }
+    ja: { languages: ["en", "zh-tw"], accepts: ["en", "de", "zh-tw", "zh-cn", "ko"] },
+    en: { languages: ["en"], accepts: ["en", "ja", "zh-tw"] }
   });
 
   // A supported language with no rows behind it is not advertised, so a
@@ -214,6 +218,27 @@ test("an inflected English surface returns the lemma's entry, not a stub", async
   expect(inflected).not.toHaveProperty("inflectionPath");
   // Resolving never happens for a word that is itself an entry.
   expect(lemma.headword).toBe("bank");
+  expect(gateway.calls).toEqual([]);
+});
+
+test("a query that reaches several entries carries the ones it did not answer with", async () => {
+  gateway.reset();
+  // くらい is 暗い ("dark") and a separate kana-only entry ("about"). Ranking
+  // picks one, and that is a judgement rather than a fact, so the reader is
+  // given the other instead of never learning it existed.
+  const entry = await (await app.request("/v1/lookup?q=%E3%81%8F%E3%82%89%E3%81%84&dictionary=ja&lang=en")).json();
+  expect(entry).not.toBeNull();
+  expect(entry.alternatives).toHaveLength(1);
+  expect([entry.headword, entry.alternatives[0].headword].sort()).toEqual(["くらい", "暗い"]);
+  // An alternative is a whole entry, answered in the same language, and never
+  // nests further.
+  expect(entry.alternatives[0].senses.length).toBeGreaterThan(0);
+  expect(entry.alternatives[0].lang).toBe("en");
+  expect(entry.alternatives[0]).not.toHaveProperty("alternatives");
+
+  // The common case pays nothing: a query reaching one entry has no field.
+  const single = await (await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=en")).json();
+  expect(single).not.toHaveProperty("alternatives");
   expect(gateway.calls).toEqual([]);
 });
 
@@ -349,12 +374,28 @@ test("a provider failure is an operational error rather than a dictionary miss",
   expect(single.status).toBe(500);
   expect(await single.json()).toEqual({ error: "Lookup is temporarily unavailable" });
 
+  // A batch is answered word by word. One provider failure is reported as a
+  // miss for its own query and does not discard the entries beside it, because
+  // a consumer sending a page of text should not lose the page to one word.
   const batch = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
     body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["bank", "blorp"] })
   });
-  expect(batch.status).toBe(500);
+  expect(batch.status).toBe(200);
+  const { entries } = await batch.json();
+  expect(entries[0]?.headword).toBe("bank");
+  expect(entries[1]).toBeNull();
+
+  // A batch where nothing at all came back is the other thing: a bad key, a
+  // dead provider. Answering it with a full set of misses would let a consumer
+  // publish an empty dictionary and believe it, so that one still fails.
+  const allFailed = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
+    body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["blorp", "blorpier"] })
+  });
+  expect(allFailed.status).toBe(500);
   gateway.reset();
 });
 
