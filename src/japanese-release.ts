@@ -17,7 +17,7 @@ import {
   readCoverage,
   type LanguageCoverage
 } from "./japanese-schema";
-import type { ApiLang, PublicSense } from "./types";
+import type { ApiLang, PublicHeadword, PublicSense } from "./types";
 
 export type JapaneseReleaseArtifacts = {
   sqlite: string;
@@ -94,19 +94,31 @@ export async function buildJapaneseRelease(
       // finds the entry rather than only its preferred form. Each row carries
       // that form's own common flag and its position in the entry's ordering,
       // which is what `score` ranks on.
-      const rules = yomitanRules(group.senses.flatMap((sense) => sense.partOfSpeech));
-      const glossary = group.senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text));
-      banks.add(group.lang, record.entry.headwords.map((headword, index) => (sequence: number) => [
-        headword.text,
-        headword.reading ?? "",
-        "",
-        rules,
-        yomitanScore(headword.common, index),
-        // Senses keep this language's own stored order.
-        glossary,
-        sequence,
-        ""
-      ]));
+      //
+      // A row carries only the senses that apply to its own form. JMdict
+      // restricts a sense to particular written forms, and a row built from
+      // the whole group would publish "to treat" under 配う when the source
+      // gives it to 遇う alone — and would hand that form the other senses'
+      // inflection behaviour with it. A form every sense excludes is not a
+      // row at all.
+      const rows = record.entry.headwords.flatMap((headword, index) => {
+        const senses = group.senses.filter((sense) => senseAppliesTo(sense, headword));
+        if (senses.length === 0) return [];
+        const rules = yomitanRules(senses.flatMap((sense) => sense.partOfSpeech));
+        const glossary = senses.flatMap((sense) => sense.glosses.map((gloss) => gloss.text));
+        return [(sequence: number) => [
+          headword.text,
+          headword.reading ?? "",
+          "",
+          rules,
+          yomitanScore(headword.common, index),
+          // Senses keep this language's own stored order.
+          glossary,
+          sequence,
+          ""
+        ]];
+      });
+      banks.add(group.lang, rows);
     }
   });
   await writer.end();
@@ -198,6 +210,17 @@ function readMetadata(path: string) {
  * version the rebuild does not pin is omitted rather than described in prose,
  * so a reader never mistakes a placeholder for recorded provenance.
  */
+/**
+ * Whether one sense explains one written form. JMdict writes `*` for a sense
+ * that applies to every form, and names the forms explicitly otherwise. A
+ * kanji form is judged by the kanji restriction alone, and a kana form by the
+ * kana restriction alone; neither list constrains the other's forms.
+ */
+function senseAppliesTo(sense: PublicSense, headword: PublicHeadword): boolean {
+  const restriction = headword.kind === "kanji" ? sense.appliesTo.kanji : sense.appliesTo.kana;
+  return restriction.includes("*") || restriction.includes(headword.text);
+}
+
 function japaneseSources(metadata: { jmdictSimplifiedVersion: string | null; dictionaryVersion: string | null }) {
   return [
     {

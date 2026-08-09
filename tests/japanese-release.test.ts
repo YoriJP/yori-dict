@@ -169,6 +169,21 @@ test("a pack row ranks common written forms above the rest", async () => {
   for (const score of scores.values()) expect(Number.isInteger(score)).toBe(true);
 });
 
+test("a pack row carries only the senses its own written form is given", async () => {
+  const { artifacts } = await release();
+  const terms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
+  const glossary = (word: string) => terms.find((term) => term[0] === word)?.[5] as string[];
+
+  // JMdict restricts the "to treat" sense to the kanji form 遇う. A row built
+  // from the whole group would publish that sense under 配う too, and hand
+  // that form the sense's inflection behaviour with it.
+  expect(glossary("遇う")).toEqual(["to treat", "to handle", "to arrange"]);
+  expect(glossary("配う")).toEqual(["to arrange"]);
+  // The restriction names kanji, so it does not constrain the kana form: the
+  // sense's own `appliesToKana` is `*` and あしらう keeps it.
+  expect(glossary("あしらう")).toEqual(["to treat", "to handle", "to arrange"]);
+});
+
 test("one entry's written forms share one sequence rather than becoming separate entries", async () => {
   const { artifacts } = await release();
   const terms = JSON.parse(await packEntry(artifacts.yomitan.en, "term_bank_1.json")) as unknown[][];
