@@ -65,7 +65,11 @@ function inflectionClass(partOfSpeech: string): string | null {
   if (partOfSpeech.startsWith("v5")) return "v5";
   if (partOfSpeech.startsWith("v1")) return "v1";
   if (partOfSpeech.startsWith("vs-")) return "vs";
-  return ["adj-i", "vk", "vz"].includes(partOfSpeech) ? partOfSpeech : null;
+  // `adj-ix` is the yoi/ii class, and Yomitan has no separate condition for
+  // it: its own rules name いい and よい with `adj-i`, so that is what those
+  // entries must carry. No other JMdict adjective tag starts with `adj-i`.
+  if (partOfSpeech.startsWith("adj-i")) return "adj-i";
+  return ["vk", "vz"].includes(partOfSpeech) ? partOfSpeech : null;
 }
 
 /**

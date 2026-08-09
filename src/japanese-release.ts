@@ -212,13 +212,19 @@ function readMetadata(path: string) {
  */
 /**
  * Whether one sense explains one written form. JMdict writes `*` for a sense
- * that applies to every form, and names the forms explicitly otherwise. A
- * kanji form is judged by the kanji restriction alone, and a kana form by the
- * kana restriction alone; neither list constrains the other's forms.
+ * that applies to every form, and names the forms explicitly otherwise.
+ *
+ * A kana form is judged by the kana restriction alone. A kanji form carries a
+ * concrete reading into its row, so it must satisfy both: a sense JMdict gives
+ * only to another reading of the same spelling does not belong to this row,
+ * and it stays reachable through that reading's own kana row.
  */
-function senseAppliesTo(sense: PublicSense, headword: PublicHeadword): boolean {
-  const restriction = headword.kind === "kanji" ? sense.appliesTo.kanji : sense.appliesTo.kana;
-  return restriction.includes("*") || restriction.includes(headword.text);
+export function senseAppliesTo(sense: PublicSense, headword: PublicHeadword): boolean {
+  const allows = (restriction: string[], form: string) =>
+    restriction.includes("*") || restriction.includes(form);
+  if (headword.kind === "kana") return allows(sense.appliesTo.kana, headword.text);
+  return allows(sense.appliesTo.kanji, headword.text)
+    && (headword.reading === null || allows(sense.appliesTo.kana, headword.reading));
 }
 
 function japaneseSources(metadata: { jmdictSimplifiedVersion: string | null; dictionaryVersion: string | null }) {

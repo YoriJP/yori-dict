@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openLookupDb } from "../src/db";
 import { openEnrichmentRepository } from "../src/enrichment-repository";
-import { buildJapaneseRelease, type JapaneseReleaseArtifacts } from "../src/japanese-release";
+import { buildJapaneseRelease, senseAppliesTo, type JapaneseReleaseArtifacts } from "../src/japanese-release";
 import { migrateProductionDatabase } from "../src/production-database";
-import type { ApiLang, PublicLookupItem } from "../src/types";
+import { yomitanRules } from "../src/yomitan-pack";
+import type { ApiLang, PublicHeadword, PublicLookupItem, PublicSense } from "../src/types";
 import { openZipFile } from "../src/stored-zip";
 
 const kana = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
@@ -167,6 +168,42 @@ test("a pack row ranks common written forms above the rest", async () => {
   expect(scores.get("遇う")!).toBeGreaterThan(scores.get("配う")!);
   expect(scores.get("配う")!).toBeLessThan(scores.get("食べる")!);
   for (const score of scores.values()) expect(Number.isInteger(score)).toBe(true);
+});
+
+test("a kanji row is judged by its own reading as well as its spelling", () => {
+  // 生物 is せいぶつ (a living thing) and なまもの (raw food). The row carries
+  // one concrete reading, so a sense JMdict gives to the other one does not
+  // belong on it — it stays reachable through that reading's own kana row.
+  const rawFood: PublicSense = {
+    id: "s1", position: 1, appliesTo: { kanji: ["*"], kana: ["なまもの"] },
+    partOfSpeech: ["n"], glosses: [{ lang: "en", text: "raw food", source: "jmdict", reviewStatus: "source" }]
+  };
+  const form = (text: string, reading: string | null, kind: "kanji" | "kana"): PublicHeadword =>
+    ({ text, reading, kind, common: true, tags: [] });
+
+  expect(senseAppliesTo(rawFood, form("生物", "なまもの", "kanji"))).toBe(true);
+  expect(senseAppliesTo(rawFood, form("生物", "せいぶつ", "kanji"))).toBe(false);
+  expect(senseAppliesTo(rawFood, form("なまもの", null, "kana"))).toBe(true);
+  expect(senseAppliesTo(rawFood, form("せいぶつ", null, "kana"))).toBe(false);
+
+  // A kanji restriction does not constrain the kana forms, and a form with no
+  // stored reading is judged by its spelling alone.
+  const kanjiOnly: PublicSense = { ...rawFood, appliesTo: { kanji: ["遇う"], kana: ["*"] } };
+  expect(senseAppliesTo(kanjiOnly, form("配う", "あしらう", "kanji"))).toBe(false);
+  expect(senseAppliesTo(kanjiOnly, form("あしらう", null, "kana"))).toBe(true);
+  expect(senseAppliesTo(kanjiOnly, form("遇う", null, "kanji"))).toBe(true);
+});
+
+test("the yoi/ii adjective class carries Yomitan's i-adjective rule", () => {
+  // Yomitan has no `adj-ix` condition: its own rules name いい and よい with
+  // `adj-i`, so that is what those entries must carry or よかった is rejected.
+  expect(yomitanRules(["adj-ix"])).toBe("adj-i");
+  expect(yomitanRules(["adj-i"])).toBe("adj-i");
+  expect(yomitanRules(["adj-ix", "adj-i"])).toBe("adj-i");
+  // No other JMdict adjective class inflects the i-adjective way.
+  for (const tag of ["adj-na", "adj-no", "adj-pn", "adj-t", "adj-f"]) {
+    expect(yomitanRules([tag])).toBe("");
+  }
 });
 
 test("a pack row carries only the senses its own written form is given", async () => {
