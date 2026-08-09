@@ -234,6 +234,41 @@ test("a rebuild retains accepted generated content and does not reorder imported
   lookup.close();
 });
 
+test("a retained headword the sources explain as an inflection is dropped, not carried", async () => {
+  // The authoring guard reads the lexicon as it stood at the time, so a word
+  // form that was an entry then could be minted as a headword — `crumbling`
+  // was. Retaining it whole would make one leak permanent, outliving every
+  // rebuild that fixed the reason for it.
+  const root = mkdtempSync(join(tmpdir(), "yori-en-retain-form-"));
+  const out = join(root, "english.sqlite");
+  const sources = [await fixtureWordNet(root)];
+  await rebuildEnglishDictionary({ sources, out, version: "test", retainFrom: null });
+  migrateProductionDatabase(out);
+
+  const repository = openEnglishEnrichmentRepository(out);
+  const form = generatedEntry();
+  repository.saveEntry({
+    ...form,
+    id: "yori:en:e_generated_form",
+    headword: "banking",
+    senses: form.senses.map((sense) => ({ ...sense, id: "yori:en:s_generated_form" }))
+  }, "en", generation);
+  // A genuinely new lexeme reaches no lemma and is retained as before, so the
+  // rule separates the two rather than distrusting generated entries.
+  repository.saveEntry(generatedEntry(), "en", generation);
+  repository.close();
+
+  const result = await rebuildEnglishDictionary({ sources, out, version: "test" });
+  expect(result.retained.entries).toBe(1);
+
+  const lookup = openEnglishLookupDb(out);
+  expect(lookup.lookup("florp", "en")).not.toBeNull();
+  // `banking` is gone as a headword, and the surface now strips to the lexeme
+  // the sources do explain.
+  expect(lookup.lookup("banking", "en")?.headword).toBe("bank");
+  lookup.close();
+});
+
 test("a headword the sources start providing keeps the groups it was enriched with", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-en-promote-"));
   const out = join(root, "english.sqlite");

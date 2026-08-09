@@ -132,8 +132,10 @@ returns `null` rather than a stub.
 
 A few thousand form pages were never categorised, so a second reading of the source's own
 words backs the categories up: a sense whose every clause only states an inflectional
-relationship — "plural of canvas", "The plural form of banner; more than one banner" — is a
-form. It reads what the sense says about itself rather than guessing from the headword, so it
+relationship — "plural of canvas", "The plural form of banner; more than one banner", "the
+past tense and past participle of rebuild" — is a form. Naming two relationships in one
+breath does not make the sentence any less a statement about inflection, and an uncategorised
+page of that shape is how `rebuilt` reached the released lexicon as its own headword. It reads what the sense says about itself rather than guessing from the headword, so it
 cannot mistake a lexeme for a form: `fyi` expands an abbreviation and `his` explains a
 determiner, and neither is a statement about inflection. Over the full source it drops 17
 senses and every one is a genuine stub.

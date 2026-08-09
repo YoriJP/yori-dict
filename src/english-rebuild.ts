@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rename } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { englishEntryId, englishSenseId, normalizeEnglishLookupTerm } from "./english-dictionary";
+import { resolveEnglishLemma } from "./english-strip";
 import {
   importOpenEnglishWordNetEntry,
   importWiktionaryEntry,
@@ -992,6 +993,20 @@ function readRetained(path: string): Retained {
   }
 }
 
+/**
+ * Whether a retained headword is an inflection of a lexeme the rebuilt sources
+ * carry. This is Inflection Stripping asked of the new lexicon, the same
+ * question and the same module the authoring guard uses, so a rebuild and an
+ * enrichment cannot disagree about what a word form is.
+ */
+function inflectsFromRebuiltLexeme(db: Database, lookupTerm: string): boolean {
+  return resolveEnglishLemma(lookupTerm, (candidate) => (
+    db.query<{ id: string }, [string]>(
+      "select entry_id as id from en_lookup_terms where term = ? limit 1"
+    ).get(candidate) !== null
+  )) !== null;
+}
+
 function restoreRetained(
   db: Database,
   retained: Retained
@@ -1014,6 +1029,15 @@ function restoreRetained(
         groups += reattachGroups(db, record, existing.id);
         continue;
       }
+      // Retention must not reintroduce what the current rules would refuse.
+      // The authoring guard reads the lexicon as it stood at the time, so a
+      // word form that was an entry then could be minted as a headword —
+      // `crumbling` was, glossed as the present participle of `crumble`.
+      // Carrying it whole would make one leak permanent, surviving every later
+      // rebuild that fixed the reason for it. Asked again against the lexicon
+      // this rebuild just produced, the same stripper that guards authoring
+      // now reaches `crumble` and the entry is dropped instead of restored.
+      if (inflectsFromRebuiltLexeme(db, String(record.entry.lookup_term))) continue;
       insertRow(db, "en_entries", record.entry, false);
       for (const generation of record.generations) insertRow(db, "en_generations", generation, true);
       for (const source of record.sources) insertRow(db, "en_entry_sources", source, true);

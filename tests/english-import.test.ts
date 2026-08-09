@@ -181,7 +181,12 @@ test("an uncategorised form page is caught by what the sense says about itself",
     "More than one pentagon; plural of pentagon",
     "The third-person singular form of prank.",
     "Chihuahuas is the plural of chihuahua.",
-    "Bullshat is an alternative past tense of the word bullshit."
+    "Bullshat is an alternative past tense of the word bullshit.",
+    // One surface is often two forms at once. Naming the second relationship
+    // does not make the sentence any less a statement about inflection.
+    "The past tense and past participle of rebuild.",
+    "The past tense and past participle of have.",
+    "The plural or third-person singular of shoe."
   ]) {
     expect(importWiktionaryEntry({
       word: "banners", lang_code: "en", pos: "noun", senses: [{ glosses: [gloss] }]
@@ -199,7 +204,14 @@ test("defining a word by pointing at another word is not the same as being a for
     ["his", "If you say something is his thing, you mean it belongs to a man."],
     ["entrigue", "Alternative form of intrigue."],
     ["of", "From."],
-    ["condition", "(usually plural) a statement of what is required as part of an agreement"]
+    ["condition", "(usually plural) a statement of what is required as part of an agreement"],
+    // A superlative is how plenty of adjectives are defined. Reading "most X"
+    // as a comparative page's paraphrase cost `primary` its real meaning, so
+    // the rule that did it was removed.
+    ["primary", "most important."],
+    ["extra", "More than needed."],
+    ["why", "(plural: whys) The reason to something."],
+    ["himself", "Third person masculine singular reflexive pronoun."]
   ] as const) {
     expect(importWiktionaryEntry({
       word, lang_code: "en", pos: "noun", senses: [{ glosses: [gloss] }]
