@@ -350,6 +350,36 @@ function releasedEntry(): EnglishEntry {
   };
 }
 
+test("a new word first seen in an inflected form is still authored", async () => {
+  // Relatedness reduces the query with the same stripper lookup uses. A
+  // hand-rolled `+s`/`+es`/`+ed`/`+ing` set looks equivalent and is not: it
+  // rejected `run` for `running`, so a word the dictionary has never seen,
+  // first encountered in a doubled or y-changing form, could never be authored.
+  const repository = new MemoryEnglishRepository();
+  const gateway = new ScriptedGateway([
+    "blog",
+    JSON.stringify({
+      headword: "blog",
+      pronunciations: [],
+      senses: [{
+        partOfSpeech: "verb",
+        definition: "to write an entry on a personal website",
+        registers: [], regions: [], domains: [], dated: false, usage: [],
+        provenance: "generated", evidenceIds: []
+      }]
+    }),
+    reviewAccepted,
+    JSON.stringify({ sentence: "She blogs about food every week." }),
+    reviewAccepted
+  ]);
+
+  const resolved = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "blogging", targetDictionary: "en", lang: "en" });
+
+  expect(resolved?.headword).toBe("blog");
+  expect(repository.savedLangs).toEqual(["en"]);
+});
+
 test("an inflected English proposal becomes the lemma's entry, not a refusal", async () => {
   // `robot` is a published entry, so `robots` is one of its forms rather than
   // a second lexeme. Answering nothing would waste an entry we hold, and no

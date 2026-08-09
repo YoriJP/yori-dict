@@ -1986,10 +1986,20 @@ function inflectedEnglishProposal(
   return resolveEnglishLemma(headword, (candidate) => repository.hasLookupTerm(candidate));
 }
 
+/**
+ * Whether the proposal is the query, or the lemma the query inflects from.
+ *
+ * The reduction is Inflection Stripping's, asked one question: does this
+ * surface strip to this word? A hand-rolled set of `+s`, `+es`, `+ed`, `+ing`
+ * looks equivalent and is not — it rejected `running` from `run`, `studied`
+ * from `study`, `bigger` from `big` and `pointier` from `pointy`, so a genuinely
+ * new word first seen in one of those forms could never be authored.
+ */
 function relatedEnglishHeadword(request: ResolveRequest, headword: string): boolean {
   const inputs = [request.query, request.context?.lemma].filter(nonemptyString).map(normalizeEnglishHeadword);
   const canonical = normalizeEnglishHeadword(headword);
-  return inputs.some((input) => input === canonical || englishInflections(canonical).has(input));
+  return inputs.some((input) =>
+    input === canonical || resolveEnglishLemma(input, (candidate) => candidate === canonical) !== null);
 }
 
 function englishInflections(headword: string): Set<string> {
