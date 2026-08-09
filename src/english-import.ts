@@ -172,6 +172,58 @@ export function importWiktionaryEntry(
   }];
 }
 
+/**
+ * Sense categories by which Simple English Wiktionary declares a page to be an
+ * inflected form rather than a lexeme. Only inflection is listed: comparatives
+ * and plurals are forms of a word, while "Countable nouns" or "Slang" describe
+ * a real sense and must not be dropped.
+ *
+ * A page carrying both a form sense and a genuine one — `glasses` is the
+ * plural of `glass` and also a word for spectacles — keeps the genuine sense,
+ * because the drop is per sense rather than per page.
+ */
+const inflectedFormCategories = new Set([
+  "Plurals",
+  "Past tense forms",
+  "Past participles",
+  "Present participles",
+  "Third-person singular forms",
+  "Comparative forms",
+  "Superlative forms"
+]);
+
+const inflection = "(?:plural|past tense|past participle|present participle|third[- ]person singular|comparative|superlative)";
+
+/**
+ * A gloss that only states an inflectional relationship: "plural of bank",
+ * "The plural form of banner", "Chihuahuas is the plural of chihuahua".
+ *
+ * This is the backstop for a form page whose sense the editors never
+ * categorised, which is the only way one still reaches import. It reads the
+ * source's own sentence about itself rather than guessing from the headword,
+ * so it cannot mistake a lexeme for a form: `his` glosses "belonging to him"
+ * and `fyi` glosses "a short way of saying for your information", and neither
+ * is a statement about inflection.
+ */
+const inflectionStatement = new RegExp(
+  "^(?:"
+  + `(?:the\\s+)?(?:alternative\\s+|present\\s+)?${inflection}(?:\\s+form)?\\s+of\\s+\\S`
+  + "|more than one\\s+\\S"
+  + `|\\S+\\s+is\\s+(?:an?\\s+|the\\s+)?(?:alternative\\s+|present\\s+)?${inflection}(?:\\s+form)?\\s+of\\s+\\S`
+  + ")",
+  "i"
+);
+
+/**
+ * Whether a gloss says nothing but which form of another word this is. Every
+ * clause must, so "The plural form of glass; more than one glass" is a form
+ * while a sense that merely mentions a plural in passing is not.
+ */
+function statesOnlyInflection(gloss: string): boolean {
+  const clauses = gloss.replace(/\.+$/, "").split(";").map((clause) => clause.trim()).filter(Boolean);
+  return clauses.length > 0 && clauses.every((clause) => inflectionStatement.test(clause));
+}
+
 function wiktionarySense(
   raw: unknown,
   partOfSpeech: string,
@@ -182,6 +234,20 @@ function wiktionarySense(
   const value = raw as Record<string, unknown>;
   const glosses = stringList(value.glosses);
   if (glosses.length === 0 || stringList(value.tags).includes("form-of")) return [];
+  // The wiki has one page per orthographic string, so a word form gets a page
+  // and a definition of its own: "The plural form of child; more than one
+  // (kind of) child." That is a form, not a lexeme, and publishing it dead-ends
+  // the reader who looked it up. The source says so itself by categorising the
+  // sense, which is how the irregular forms the stripper cannot reach —
+  // `children`, `geese`, `mice`, `went` — are caught by the same rule as the
+  // regular ones rather than by an exception list.
+  if (stringList(value.categories).some((category) => inflectedFormCategories.has(category))) return [];
+  // Categorisation is the source's reliable signal, but a few thousand form
+  // pages were never categorised, and one that reaches lookup is worse than a
+  // miss: an entry exists, so enrich-on-lookup never runs and the reader is
+  // left with "the plural form of banner" for good. Dropped, the surface
+  // strips to `banner` and answers with the real senses.
+  if (glosses.every(statesOnlyInflection)) return [];
   const tags = unique([...stringList(value.tags), ...stringList(value.raw_tags).map((tag) => tag.toLowerCase())]);
   return [{
     evidenceId: `wiktionary:${sourceEntryId}:${index + 1}`,

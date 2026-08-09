@@ -631,6 +631,12 @@ async function importFallback(
       const term = normalizeEnglishLookupTerm(unique.headword);
       byTerm.set(term, [...(byTerm.get(term) ?? []), unique]);
       unique.senses.forEach((sense, index) => byEvidenceId.set(sense.evidenceId, { record: unique, index }));
+      // Word forms are refused upstream, per sense, on the source's own
+      // categorisation. Stripping the surface here as a second gate would be
+      // guessing where the source has already told us, and the guess is wrong
+      // far more often than it is right: `his` strips to the covered `hi`, and
+      // `us` to `u`, so a lexeme the primary inventory simply lacks would be
+      // deleted and its lookup answered with an unrelated entry.
       if (covered.has(term)) {
         referenceOnly += 1;
         continue;

@@ -23,8 +23,8 @@ test("Open English WordNet is the primary inventory and keeps its lexical-entry 
     retainFrom: null
   });
 
-  expect(result.coverage.en.entries).toBe(2);
-  expect(result.primary.senses).toBe(5);
+  expect(result.coverage.en.entries).toBe(3);
+  expect(result.primary.senses).toBe(6);
   expect(result.fallback).toEqual({ entries: 0, senses: 0, referenceOnly: 0 });
 
   const db = new Database(out, { readonly: true });
@@ -92,7 +92,7 @@ test("Simple English Wiktionary is fallback and reference, never a semantic merg
     retainFrom: null
   });
 
-  expect(result.fallback).toMatchObject({ entries: 1, senses: 1, referenceOnly: 2 });
+  expect(result.fallback).toMatchObject({ entries: 2, senses: 2, referenceOnly: 2 });
 
   const db = new Database(out, { readonly: true });
   // A headword the primary source covers keeps only primary senses: the
@@ -106,9 +106,29 @@ test("Simple English Wiktionary is fallback and reference, never a semantic merg
   expect(db.query<{ source: string }, []>(
     "select source from en_entries where lookup_term = 'selfie'"
   ).get()?.source).toBe("wiktionary");
+  // A word form is refused as an entry, on the source's own categorisation of
+  // the sense. A dictionary contains lexemes, not word forms.
+  expect(db.query<{ count: number }, []>(
+    "select count(*) as count from en_entries where lookup_term = 'banks'"
+  ).get()?.count).toBe(0);
+  // Nothing declares `his` a form, so nothing may delete it. Stripping the
+  // headword as a second gate would, because `hi` is a covered lemma — and a
+  // reader looking `his` up would then be answered with a greeting.
+  expect(db.query<{ source: string }, []>(
+    "select source from en_entries where lookup_term = 'his'"
+  ).get()?.source).toBe("wiktionary");
   db.close();
 
   const lookup = openEnglishLookupDb(out);
+  // Looking the surface up reaches the lemma's entry instead of dead-ending on
+  // a stub that only says it is a plural. The headword is the lemma.
+  const banks = lookup.lookup("banks", "en")!;
+  expect(banks.headword).toBe("bank");
+  expect(banks.senses.map((sense) => sense.glosses[0].text))
+    .toEqual(lookup.lookup("bank", "en")!.senses.map((sense) => sense.glosses[0].text));
+  // And the lexeme answers for itself rather than resolving away.
+  expect(lookup.lookup("his", "en")?.headword).toBe("his");
+
   const selfie = lookup.lookup("selfie", "en")!;
   expect(selfie.senses[0].glosses[0]).toEqual({
     text: "a photograph you take of yourself",
@@ -331,7 +351,10 @@ async function fixtureWordNet(root: string): Promise<EnglishSourceInput> {
           v: { form: ["banked"], sense: [{ id: "bank%2:40:00::", synset: "s-deposit" }] }
         },
         Bank: { n: { sense: [{ id: "bank%1:14:01::", synset: "s-row" }] } },
-        CPU: { n: { sense: [{ id: "cpu%1:06:00::", synset: "s-cpu" }] } }
+        CPU: { n: { sense: [{ id: "cpu%1:06:00::", synset: "s-cpu" }] } },
+        // The lemma `his` strips to. Its presence is what makes the fallback
+        // fixture able to prove `his` survives.
+        hi: { n: { sense: [{ id: "hi%1:10:00::", synset: "s-hi" }] } }
       })
     },
     {
@@ -351,7 +374,8 @@ async function fixtureWordNet(root: string): Promise<EnglishSourceInput> {
         },
         "s-domain-finance": { definition: ["the business of banking"], members: ["finance"], partOfSpeech: "n" },
         "s-row": { definition: ["an arrangement of similar objects in a row"], members: ["bank"], partOfSpeech: "n" },
-        "s-cpu": { definition: ["central processing unit"], members: ["CPU"], partOfSpeech: "n" }
+        "s-cpu": { definition: ["central processing unit"], members: ["CPU"], partOfSpeech: "n" },
+        "s-hi": { definition: ["an expression of greeting"], members: ["hi"], partOfSpeech: "n" }
       })
     },
     {
@@ -394,6 +418,21 @@ async function fixtureWiktionary(root: string): Promise<EnglishSourceInput> {
       word: "CPU", lang_code: "en", pos: "noun",
       senses: [{ glosses: ["the processor of a computer"] }],
       sounds: [{ ipa: "/siːpiːjuː/", tags: ["US"] }]
+    }),
+    // Wiktionary has one page per orthographic string, so an inflected surface
+    // arrives with its own definition. It is a word form, not a lexeme, and
+    // the source says so by categorising the sense, as every real form page
+    // does.
+    JSON.stringify({
+      word: "banks", lang_code: "en", pos: "noun",
+      senses: [{ glosses: ["plural of bank; more than one bank"], categories: ["Plurals"] }]
+    }),
+    // A lexeme the primary inventory lacks, whose surface happens to strip to
+    // one it carries. Nothing declares it a form, so it is a word: `his` must
+    // not be deleted merely because `hi` exists.
+    JSON.stringify({
+      word: "his", lang_code: "en", pos: "det",
+      senses: [{ glosses: ["belonging to him"], categories: ["Determiners"] }]
     }),
     JSON.stringify({
       word: "selfie", lang_code: "en", pos: "noun",

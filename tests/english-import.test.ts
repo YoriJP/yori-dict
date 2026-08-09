@@ -143,3 +143,84 @@ test("Wiktionary import drops non-English and non-lexical records", () => {
   expect(importWiktionaryEntry({ word: "chat", lang_code: "fr", pos: "noun", senses: [{ glosses: ["cat"] }] }, "v")).toEqual([]);
   expect(importWiktionaryEntry({ word: "https://example.com", lang_code: "en", pos: "noun", senses: [{ glosses: ["url"] }] }, "v")).toEqual([]);
 });
+
+test("a Wiktionary page for a word form is not a lexeme", () => {
+  // The wiki has one page per orthographic string, so an inflected form gets a
+  // page and a definition of its own. The source categorises the sense, which
+  // is how irregular forms the stripper cannot reach are refused by the same
+  // rule as the regular ones rather than by an exception list.
+  const plural = importWiktionaryEntry({
+    word: "children",
+    lang_code: "en",
+    pos: "noun",
+    senses: [{
+      glosses: ["The plural form of child; more than one (kind of) child."],
+      categories: ["Plurals"]
+    }]
+  }, "2026-07-06");
+  expect(plural).toEqual([]);
+
+  for (const category of [
+    "Past tense forms", "Past participles", "Present participles",
+    "Third-person singular forms", "Comparative forms", "Superlative forms"
+  ]) {
+    expect(importWiktionaryEntry({
+      word: "went", lang_code: "en", pos: "verb",
+      senses: [{ glosses: ["The past tense of go."], categories: [category] }]
+    }, "v")).toEqual([]);
+  }
+});
+
+test("an uncategorised form page is caught by what the sense says about itself", () => {
+  // Categorisation is the reliable signal, but a few thousand form pages were
+  // never categorised. One that reaches lookup is worse than a miss: the entry
+  // exists, so enrich-on-lookup never runs and the reader keeps the stub.
+  for (const gloss of [
+    "plural of canvas",
+    "The plural form of banner; more than one banner.",
+    "More than one pentagon; plural of pentagon",
+    "The third-person singular form of prank.",
+    "Chihuahuas is the plural of chihuahua.",
+    "Bullshat is an alternative past tense of the word bullshit."
+  ]) {
+    expect(importWiktionaryEntry({
+      word: "banners", lang_code: "en", pos: "noun", senses: [{ glosses: [gloss] }]
+    }, "v")).toEqual([]);
+  }
+});
+
+test("defining a word by pointing at another word is not the same as being a form", () => {
+  // The rule reads the source's own sentence, so it must not fire on a lexeme
+  // that happens to explain itself by reference. Expanding an abbreviation is
+  // exactly the answer a reader wants, and a terse gloss is still a gloss.
+  for (const [word, gloss] of [
+    ["fyi", "A short way of saying \"for your information\"."],
+    ["vs", "A short way of saying versus."],
+    ["his", "If you say something is his thing, you mean it belongs to a man."],
+    ["entrigue", "Alternative form of intrigue."],
+    ["of", "From."],
+    ["condition", "(usually plural) a statement of what is required as part of an agreement"]
+  ] as const) {
+    expect(importWiktionaryEntry({
+      word, lang_code: "en", pos: "noun", senses: [{ glosses: [gloss] }]
+    }, "v")).toHaveLength(1);
+  }
+});
+
+test("a page carrying both a form sense and a real one keeps the real one", () => {
+  // `glasses` is the plural of `glass` and also a word for spectacles. The
+  // drop is per sense, so the lexeme survives.
+  const records = importWiktionaryEntry({
+    word: "glasses",
+    lang_code: "en",
+    pos: "noun",
+    senses: [
+      { glosses: ["The plural form of glass; more than one glass."], categories: ["Plurals"] },
+      { glosses: ["Two lenses in a frame, worn to help you see."], categories: ["Countable nouns"] }
+    ]
+  }, "2026-07-06");
+
+  expect(records).toHaveLength(1);
+  expect(records[0].senses.map(({ glosses }) => glosses[0]))
+    .toEqual(["Two lenses in a frame, worn to help you see."]);
+});
