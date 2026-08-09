@@ -267,8 +267,10 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: >-
-            An operational failure for any item fails the whole batch instead of hiding
-            the failed item as a null entry.
+            A storage or projection failure, wherever it is raised, and a batch in
+            which every query's provider call failed. A provider failure for one
+            query while another survives is not one of these: that query is a null
+            entry and the batch returns 200.
           content:
             application/json:
               schema:

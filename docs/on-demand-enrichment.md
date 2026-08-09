@@ -26,7 +26,7 @@ type OnDemandDictionary = {
 
 `lang` is the requested explanation language. It scopes the canonical entry key, the example key, and the in-flight deduplication key, so work for one language never blocks or answers for another. Japanese authors en, de, zh-tw, zh-cn, and ko; English authors en, ja, and zh-tw. Each is an independent group written directly in that language; no language is produced by translating or character-converting another. Any other requested language resolves to `null` without a model call.
 
-The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call, and the HTTP layer answers with an error. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted senses and the example stays missing and retryable.
+The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call as a `ModelGatewayError`, and never returns `null`. What the HTTP layer does with that is the lookup contract's business — a single lookup answers with an error, and a batch isolates the one query while every other error still fails the request. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted senses and the example stays missing and retryable.
 
 Build-time consumers may send `X-Yori-Request-Id`. Structured lookup logs and
 private model attempt records retain that trace id, so a Yori News vocabulary
