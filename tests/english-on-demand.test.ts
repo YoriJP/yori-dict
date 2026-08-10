@@ -52,11 +52,35 @@ test("English resolve completes missing examples on released senses", async () =
   expect(repository.savedExamples).toEqual([["yori:en:s_bank", {
     text: "She deposited her salary at the bank.", source: "generated", reviewStatus: "checked"
   }]]);
-  expect(gateway.calls[0]).toMatchObject({ promptVersion: "english-example-author-v2" });
+  expect(gateway.calls[0]).toMatchObject({ promptVersion: "english-example-author-v3" });
   expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword exactly as a complete lexical item");
-  expect(gateway.calls[1]).toMatchObject({ promptVersion: "english-example-review-v3" });
+  expect(gateway.calls[1]).toMatchObject({ promptVersion: "english-example-review-v6" });
   expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
   expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
+});
+
+test("English examples require unanimous review when configured", async () => {
+  const entry = releasedEntry();
+  entry.senses[0].examples = [];
+  const gateway = new ScriptedGateway([
+    JSON.stringify({ sentence: "She deposited her salary at the bank." }),
+    "ACCEPT",
+    "REJECT"
+  ]);
+  const dictionary = createEnglishOnDemandDictionary({
+    repository: new MemoryEnglishRepository({ released: [["bank", entry]] }),
+    modelGateway: gateway,
+    models: englishModels,
+    reviewPasses: 2
+  });
+
+  const result = await dictionary.resolve({ query: "bank", targetDictionary: "en", lang: "en" });
+
+  expect(result?.senses[0].examples).toEqual([]);
+  expect(gateway.calls.map(({ role }) => role)).toEqual([
+    "example-author", "example-review", "example-review", "example-author"
+  ]);
+  expect(gateway.calls[2]).toMatchObject({ promptVersion: "english-example-review-v6-verification-v2" });
 });
 
 test("English translated groups require a matching example translation", async () => {

@@ -18,13 +18,44 @@ if (!Bun.argv.includes("--run")) {
 const corpusPath = flag("--corpus") ?? "fixtures/on-demand-regression-corpus.json";
 const corpus = await Bun.file(resolve(corpusPath)).json() as Corpus;
 const selectedCase = flag("--case");
+const selectedReviewCase = flag("--review-case");
+const repeatValue = flag("--repeat");
 if (Bun.argv.includes("--case") && !selectedCase?.trim()) {
   console.error("--case requires a non-empty candidate");
   process.exit(2);
 }
-const eligibility = corpus.eligibility.filter((candidate) => !selectedCase || candidate.candidate === selectedCase);
+if (Bun.argv.includes("--review-case") && !selectedReviewCase?.trim()) {
+  console.error("--review-case requires a non-empty id");
+  process.exit(2);
+}
+if (selectedCase && selectedReviewCase) {
+  console.error("--case and --review-case cannot be combined");
+  process.exit(2);
+}
+const repetitions = Bun.argv.includes("--repeat") ? Number(repeatValue) : 1;
+if (!Number.isSafeInteger(repetitions) || repetitions < 1) {
+  console.error("--repeat requires a positive integer");
+  process.exit(2);
+}
+if (repetitions > 1 && !selectedReviewCase) {
+  console.error("--repeat requires --review-case");
+  process.exit(2);
+}
+const eligibility = corpus.eligibility.filter((candidate) =>
+  !selectedReviewCase && (!selectedCase || candidate.candidate === selectedCase)
+);
 if (selectedCase && eligibility.length !== 1) {
   console.error(`Eval case not found: ${selectedCase}`);
+  process.exit(2);
+}
+const acceptedExamples = selectedCase ? [] : corpus.acceptedExamples.filter((test) =>
+  !selectedReviewCase || test.id === selectedReviewCase
+);
+const rejectedExamples = selectedCase ? [] : corpus.rejectedExamples.filter((test) =>
+  !selectedReviewCase || test.id === selectedReviewCase
+);
+if (selectedReviewCase && acceptedExamples.length + rejectedExamples.length !== 1) {
+  console.error(`Review eval case not found: ${selectedReviewCase}`);
   process.exit(2);
 }
 if (!process.env.OPENROUTER_API_KEY) {
@@ -33,6 +64,8 @@ if (!process.env.OPENROUTER_API_KEY) {
 }
 const gateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY });
 let failed = 0;
+let falseAccepts = 0;
+let falseRejects = 0;
 
 for (const test of eligibility) {
   const response = await gateway.call(request({
@@ -51,7 +84,7 @@ for (const test of eligibility) {
   if (!production.passed) console.log(JSON.stringify(production.diagnostics));
 }
 
-for (const test of selectedCase ? [] : corpus.reviewDefects) {
+for (const test of selectedCase || selectedReviewCase ? [] : corpus.reviewDefects) {
   const candidateId = `eval:${test.id}`;
   const response = await gateway.call(request({
     role: "entry-review",
@@ -61,12 +94,53 @@ for (const test of selectedCase ? [] : corpus.reviewDefects) {
   }));
   const verdict = parseReview(response.text);
   const passed = verdict === "rejected";
-  if (!passed) failed += 1;
+  if (!passed) {
+    failed += 1;
+    falseAccepts += 1;
+  }
   console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}: ${verdict}`);
 }
 
-const total = eligibility.length * 2 + (selectedCase ? 0 : corpus.reviewDefects.length);
+for (const { test, repetition } of repeated(acceptedExamples, repetitions)) {
+  const candidateId = `eval:${test.id}`;
+  const response = await gateway.call(request({
+    role: "example-review",
+    model: onDemandEvaluationContracts.exampleReview.model,
+    promptVersion: onDemandEvaluationContracts.exampleReview.promptVersion,
+    prompt: onDemandEvaluationContracts.exampleReview.prompt(candidateId, test.candidate)
+  }));
+  const verdict = parseReview(response.text);
+  const passed = verdict === "accepted";
+  if (!passed) {
+    failed += 1;
+    falseRejects += 1;
+  }
+  console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}${repeatLabel(repetition, repetitions)}: ${verdict}`);
+}
+
+for (const { test, repetition } of repeated(rejectedExamples, repetitions)) {
+  const candidateId = `eval:${test.id}`;
+  const response = await gateway.call(request({
+    role: "example-review",
+    model: onDemandEvaluationContracts.exampleReview.model,
+    promptVersion: onDemandEvaluationContracts.exampleReview.promptVersion,
+    prompt: onDemandEvaluationContracts.exampleReview.prompt(candidateId, test.candidate)
+  }));
+  const verdict = parseReview(response.text);
+  const passed = verdict === "rejected";
+  if (!passed) {
+    failed += 1;
+    falseAccepts += 1;
+  }
+  console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}${repeatLabel(repetition, repetitions)}: ${verdict}`);
+}
+
+const total = eligibility.length * 2
+  + (selectedCase || selectedReviewCase ? 0 : corpus.reviewDefects.length)
+  + acceptedExamples.length * repetitions
+  + rejectedExamples.length * repetitions;
 console.log(`${total - failed}/${total} passed`);
+console.log(`review calibration: ${falseAccepts} false accept(s), ${falseRejects} false reject(s)`);
 if (failed > 0) process.exitCode = 1;
 
 function request(input: Omit<ModelRequest, "provider" | "reasoningEffort" | "requestedServiceTier" | "signal">): ModelRequest {
@@ -106,6 +180,7 @@ async function evaluateProductionPath(
   const dictionary = createJapaneseOnDemandDictionary({
     repository,
     modelGateway: gateway,
+    reviewPasses: 2,
     timeoutMs: 60_000,
     logger: (event) => { if (event.event === "enrichment_refused") refusals.push(event); }
   });
@@ -163,9 +238,21 @@ function flag(name: string): string | null {
   return index === -1 ? null : Bun.argv[index + 1] ?? null;
 }
 
+function repeated<T>(items: T[], repetitions: number): Array<{ test: T; repetition: number }> {
+  return Array.from({ length: repetitions }, (_, repetition) =>
+    items.map((test) => ({ test, repetition: repetition + 1 }))
+  ).flat();
+}
+
+function repeatLabel(repetition: number, repetitions: number): string {
+  return repetitions === 1 ? "" : `#${repetition}`;
+}
+
 type Corpus = {
   eligibility: EligibilityCase[];
   reviewDefects: Array<{ id: string; candidate: unknown }>;
+  acceptedExamples: Array<{ id: string; candidate: unknown }>;
+  rejectedExamples: Array<{ id: string; candidate: unknown }>;
 };
 
 type EligibilityCase = {

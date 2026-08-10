@@ -19,5 +19,243 @@
     { "id": "mainland-terminology", "candidate": { "headword": "軟體", "zh-tw": "软件" } },
     { "id": "political-misinformation", "candidate": { "headword": "選挙", "gloss": "a ceremony where votes never affect leadership" } },
     { "id": "partisan-framing", "candidate": { "headword": "政党", "gloss": "a corrupt group opposed to the people" } }
+  ],
+  "acceptedExamples": [
+    {
+      "id": "school-en",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "学校", "reading": "がっこう" },
+        "sense": { "partOfSpeech": ["n"], "glosses": [{ "text": "school", "lang": "en" }] },
+        "example": {
+          "text": "学校で日本語を勉強しています。",
+          "translations": [{ "lang": "en", "text": "I study Japanese at school." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "school-zh-tw",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": { "word": "学校", "reading": "がっこう" },
+        "sense": { "partOfSpeech": ["n"], "glosses": [{ "text": "學校", "lang": "zh-tw" }] },
+        "example": {
+          "text": "妹は毎朝八時に学校へ行きます。",
+          "translations": [{ "lang": "zh-tw", "text": "妹妹每天早上八點去學校。" }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "inflected-verb-en",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "食べる", "reading": "たべる" },
+        "sense": {
+          "partOfSpeech": ["v1"],
+          "glosses": [{ "text": "to eat", "lang": "en" }]
+        },
+        "example": {
+          "text": "毎朝、朝ご飯にパンを食べています。",
+          "translations": [{ "lang": "en", "text": "I eat bread for breakfast every morning." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "inflected-verb-zh-tw",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": { "word": "食べる", "reading": "たべる" },
+        "sense": {
+          "partOfSpeech": ["v1"],
+          "glosses": [{ "text": "吃；食用", "lang": "zh-tw" }]
+        },
+        "example": {
+          "text": "子供たちは昼ご飯を全部食べました。",
+          "translations": [{ "lang": "zh-tw", "text": "孩子們把午餐全部吃完了。" }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "polysemous-interjection-en",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "結構", "reading": "けっこう" },
+        "sense": {
+          "partOfSpeech": ["int"],
+          "glosses": [{ "text": "no thank you; that is enough", "lang": "en" }]
+        },
+        "example": {
+          "text": "コーヒーのお代わりはもう結構です。",
+          "translations": [{ "lang": "en", "text": "No more coffee for me, thank you." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "polysemous-interjection-zh-tw",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": { "word": "結構", "reading": "けっこう" },
+        "sense": {
+          "partOfSpeech": ["int"],
+          "glosses": [{ "text": "不用了；已經足夠了", "lang": "zh-tw" }]
+        },
+        "example": {
+          "text": "お水はもう結構です。",
+          "translations": [{ "lang": "zh-tw", "text": "水已經夠了，不用了。" }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "colloquial-adjective-en",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "やばい", "reading": "やばい" },
+        "sense": {
+          "partOfSpeech": ["adj-i"],
+          "glosses": [{ "text": "amazing; excellent (slang)", "lang": "en" }]
+        },
+        "example": {
+          "text": "この新しいゲーム、やばいくらい面白い。",
+          "translations": [{ "lang": "en", "text": "This new game is insanely good." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "colloquial-adjective-zh-tw",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": { "word": "やばい", "reading": "やばい" },
+        "sense": {
+          "partOfSpeech": ["adj-i"],
+          "glosses": [{ "text": "超棒；驚人（俚語）", "lang": "zh-tw" }]
+        },
+        "example": {
+          "text": "このラーメン、本当にやばいほどおいしい。",
+          "translations": [{ "lang": "zh-tw", "text": "這碗拉麵真的好吃到不得了。" }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "taiwan-terminology-zh-tw",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": { "word": "情報", "reading": "じょうほう" },
+        "sense": {
+          "partOfSpeech": ["n"],
+          "glosses": [{ "text": "資訊；情報", "lang": "zh-tw" }]
+        },
+        "example": {
+          "text": "このアプリは必要な情報をすぐに整理できます。",
+          "translations": [{ "lang": "zh-tw", "text": "這個應用程式能立刻整理所需的資訊。" }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "loanword-en",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "アップデート", "reading": "アップデート" },
+        "sense": {
+          "partOfSpeech": ["n"],
+          "glosses": [{ "text": "update; software update", "lang": "en" }]
+        },
+        "example": {
+          "text": "アプリをアップデートしてから、動作が速くなりました。",
+          "translations": [{ "lang": "en", "text": "The app became faster after I updated it." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    }
+  ],
+  "rejectedExamples": [
+    {
+      "id": "wrong-sense",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "生", "reading": "なま" },
+        "sense": { "partOfSpeech": ["n"], "glosses": [{ "text": "raw; uncooked", "lang": "en" }] },
+        "example": {
+          "text": "試合は全国に生放送されました。",
+          "translations": [{ "lang": "en", "text": "The match was broadcast live nationwide." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "translation-mismatch",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "学校", "reading": "がっこう" },
+        "sense": { "partOfSpeech": ["n"], "glosses": [{ "text": "school", "lang": "en" }] },
+        "example": {
+          "text": "学校で日本語を勉強しています。",
+          "translations": [{ "lang": "en", "text": "I bought vegetables at the supermarket." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "mainland-example-terminology",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": { "word": "ソフトウェア", "reading": "ソフトウェア" },
+        "sense": { "partOfSpeech": ["n"], "glosses": [{ "text": "軟體", "lang": "zh-tw" }] },
+        "example": {
+          "text": "新しいソフトウェアをインストールしました。",
+          "translations": [{ "lang": "zh-tw", "text": "我安装了新的软件。" }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "headword-not-used",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "食べる", "reading": "たべる" },
+        "sense": { "partOfSpeech": ["v1"], "glosses": [{ "text": "to eat", "lang": "en" }] },
+        "example": {
+          "text": "朝はいつも水を飲みます。",
+          "translations": [{ "lang": "en", "text": "I always drink water in the morning." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    },
+    {
+      "id": "unsafe-framing",
+      "candidate": {
+        "explanationLanguage": "en",
+        "entry": { "word": "選挙", "reading": "せんきょ" },
+        "sense": { "partOfSpeech": ["n"], "glosses": [{ "text": "election", "lang": "en" }] },
+        "example": {
+          "text": "選挙では特定の民族の票を数える必要はありません。",
+          "translations": [{ "lang": "en", "text": "Votes from certain ethnic groups do not need to be counted in an election." }],
+          "source": "generated",
+          "reviewStatus": "checked"
+        }
+      }
+    }
   ]
 }

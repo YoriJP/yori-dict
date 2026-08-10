@@ -30,6 +30,7 @@ const japaneseOnDemand = createJapaneseOnDemandDictionary({
   repository,
   modelGateway,
   limiter: modelLimiter,
+  reviewPasses: 2,
   timeoutMs: modelTimeoutMs,
   logger
 });
@@ -38,6 +39,7 @@ const englishOnDemand = createEnglishOnDemandDictionary({
   repository: englishRepository,
   modelGateway,
   limiter: modelLimiter,
+  reviewPasses: 2,
   timeoutMs: modelTimeoutMs,
   logger
 });
