@@ -502,8 +502,8 @@ const englishModels: EnglishModelSelection = { author: lunaModel, reviewer: gemi
 const entryAuthorConfigFor = (vocabulary: LabelVocabulary, hasEvidence: boolean) =>
   modelConfig("entry-author", lunaModel, "entry-author-v2", entrySchemaFor(vocabulary, hasEvidence));
 const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v2");
-const exampleAuthorConfig = modelConfig("example-author", lunaModel, "example-author-v1", exampleSchema);
-const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v2");
+const exampleAuthorConfig = modelConfig("example-author", lunaModel, "example-author-v2", exampleSchema);
+const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v3");
 
 type ModelConfig = Omit<ModelRequest, "prompt" | "signal">;
 
@@ -803,7 +803,12 @@ async function completeExampleWork(
     const reviewed = await callAndRecord(
       options,
       exampleReviewConfig,
-      reviewPrompt(candidateId, { entry: { word: entry.word, reading: entry.reading }, sense, example }),
+      reviewPrompt(candidateId, {
+        explanationLanguage: request.lang,
+        entry: { word: entry.word, reading: entry.reading },
+        sense,
+        example
+      }, exampleReviewCriteria),
       mode,
       candidateId
     );
@@ -1104,18 +1109,19 @@ const inflectionBoundaries = new Set(["は", "が", "を", "に", "へ", "と", 
  * language, so it can only ever be shown under the sense that owns it.
  */
 function parseExample(text: string, headword: string, lang: ApiLang): PublicExample {
-  const value = parseObject(text);
-  assertExactKeys(value, ["sentence", "translation"]);
+  let value: Record<string, any>;
+  try {
+    value = parseObject(text);
+    assertExactKeys(value, ["sentence", "translation"]);
+  } catch {
+    throw new Error("invalid_schema");
+  }
   if (typeof value.sentence !== "string" || typeof value.translation !== "string") {
-    throw new Error("Invalid example");
+    throw new Error("invalid_schema");
   }
+  if (!sentenceContainsHeadword(value.sentence, headword)) throw new Error("headword_not_used");
   const translation = value.translation.trim();
-  if (
-    !sentenceContainsHeadword(value.sentence, headword)
-    || invalidExplanationText(lang, translation)
-  ) {
-    throw new Error("Invalid example");
-  }
+  if (invalidExplanationText(lang, translation)) throw new Error("wrong_translation_language");
   return {
     text: value.sentence,
     translations: [{ lang, text: translation }],
@@ -1285,8 +1291,12 @@ function exampleAuthorPrompt(
   lang: ApiLang
 ): string {
   return [
-    "Write one natural, safe Japanese learner example for exactly this sense.",
-    `Return JSON with the Japanese sentence and one translation written in ${japaneseLanguageNames[lang]}.`,
+    "Write one bilingual Japanese learner example for the supplied dictionary sense.",
+    "Treat the supplied headword and sense as authoritative. Demonstrate that sense clearly, not another homograph or meaning.",
+    "Write a natural, safe, concise Japanese sentence. Use the supplied headword spelling as a standalone lexical item, or a grammatically valid inflected form of it; do not substitute another spelling, synonym, or related word.",
+    "For a particle, auxiliary, or other function word, make its supplied grammatical function unambiguous in the sentence.",
+    `Write a natural, faithful ${japaneseLanguageNames[lang]} translation of the complete sentence.`,
+    "Return only JSON matching the provided schema.",
     `candidateId: ${candidateId}`,
     `explanation_language: ${lang}`,
     `headword: ${entry.word}`,
@@ -1316,6 +1326,14 @@ const languageGroupReviewCriteria = [
   "Check that each definition is natural dictionary wording in explanationLanguage, that the sense",
   "division suits that language rather than mirroring the reference, that labels are right, that a",
   "zh-tw group uses Taiwan terminology, and that the content is accurate and safe."
+].join(" ");
+
+const exampleReviewCriteria = [
+  "The candidate is one learner example for exactly one supplied dictionary sense.",
+  "Accept only if the sentence is natural and safe, uses the entry headword as a complete lexical item or valid inflection,",
+  "and clearly demonstrates the supplied sense rather than another homograph or meaning.",
+  "When a translation is present, it must be natural, faithful, complete, and written in explanationLanguage.",
+  "Do not judge entry coverage, pronunciation inventories, labels, or source provenance; those are outside example review."
 ].join(" ");
 
 function reviewPrompt(candidateId: string, candidate: unknown, criteria: string = entryReviewCriteria): string {
@@ -1421,11 +1439,11 @@ function englishModelConfigs(selection: EnglishModelSelection) {
     author: selection.author,
     eligibility: modelConfig("eligibility", selection.author, "english-eligibility-v1"),
     entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v3"),
-    exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v1", englishExampleSchema),
+    exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v2", englishExampleSchema),
     bilingualExampleAuthor: modelConfig(
-      "example-author", selection.author, "english-bilingual-example-author-v1", englishBilingualExampleSchema
+      "example-author", selection.author, "english-bilingual-example-author-v2", englishBilingualExampleSchema
     ),
-    exampleReview: modelConfig("example-review", selection.reviewer, "english-example-review-v2")
+    exampleReview: modelConfig("example-review", selection.reviewer, "english-example-review-v3")
   };
 }
 
@@ -1725,7 +1743,7 @@ async function completeEnglishExample(
         entry: { headword: entry.headword },
         sense,
         example
-      }),
+      }, exampleReviewCriteria),
       mode,
       candidateId
     );
@@ -1862,18 +1880,22 @@ function parseEnglishLanguageGroup(
  * pair, the English sentence kept together with its target-language sentence.
  */
 function parseEnglishExample(text: string, entry: EnglishEntry, lang: ApiLang): EnglishExample {
-  const value = parseObject(text);
-  assertExactKeys(value, lang === "en" ? ["sentence"] : ["sentence", "translation"]);
-  if (!nonemptyString(value.sentence) || !englishSentenceContains(value.sentence, entry.headword)) {
-    throw new Error("Invalid example");
+  let value: Record<string, any>;
+  try {
+    value = parseObject(text);
+    assertExactKeys(value, lang === "en" ? ["sentence"] : ["sentence", "translation"]);
+  } catch {
+    throw new Error("invalid_schema");
   }
+  if (!nonemptyString(value.sentence)) throw new Error("invalid_schema");
+  if (!englishSentenceContains(value.sentence, entry.headword)) throw new Error("headword_not_used");
   const sentence = value.sentence.trim();
-  if (invalidExplanationText("en", sentence)) throw new Error("The example sentence is not English");
+  if (invalidExplanationText("en", sentence)) throw new Error("wrong_sentence_language");
   if (lang === "en") return { text: sentence, source: "generated", reviewStatus: "checked" };
 
-  if (!nonemptyString(value.translation)) throw new Error("Invalid example translation");
+  if (!nonemptyString(value.translation)) throw new Error("invalid_schema");
   const translation = value.translation.trim();
-  if (invalidExplanationText(lang, translation)) throw new Error(`The paired sentence is not written in ${lang}`);
+  if (invalidExplanationText(lang, translation)) throw new Error("wrong_translation_language");
   return {
     text: sentence,
     translations: [{ lang, text: translation }],
@@ -2076,8 +2098,11 @@ function englishExamplePrompt(
   if (lang !== "en") {
     const language = englishExplanationLanguageNames[lang] ?? lang;
     return [
-      "Write one natural, safe English learner sentence that demonstrates exactly this sense.",
-      `Return JSON with that English sentence and its ${language} translation as a matching pair.`,
+      "Write one bilingual English learner example for the supplied dictionary sense.",
+      "Treat the supplied headword and sense as authoritative. Demonstrate that sense clearly, not another homograph or meaning.",
+      "Write a natural, safe, concise English sentence. Use the supplied headword as a complete lexical item, or a grammatically valid inflected form of it; do not substitute a synonym or related word.",
+      `Write a natural, faithful ${language} translation of the complete sentence.`,
+      "Return only JSON matching the provided schema.",
       `candidateId: ${candidateId}`,
       `explanation_language: ${lang}`,
       `headword: ${entry.headword}`,
@@ -2085,7 +2110,10 @@ function englishExamplePrompt(
     ].join("\n");
   }
   return [
-    "Write one natural English sentence that demonstrates exactly this sense. Return JSON with sentence only.",
+    "Write one English learner example for the supplied dictionary sense.",
+    "Treat the supplied headword and sense as authoritative. Demonstrate that sense clearly, not another homograph or meaning.",
+    "Write a natural, safe, concise sentence. Use the supplied headword as a complete lexical item, or a grammatically valid inflected form of it; do not substitute a synonym or related word.",
+    "Return only JSON matching the provided schema.",
     `candidateId: ${candidateId}`,
     `headword: ${entry.headword}`,
     `sense: ${JSON.stringify(sense)}`
