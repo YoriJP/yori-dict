@@ -65,6 +65,10 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
   try {
     production.prepare("attach database ? as english_release").run(resolve(releasePath));
     try {
+      // Reserve the writer before retention reads establish a WAL snapshot.
+      // Enrichment writes continuously in production; a deferred transaction
+      // can otherwise read, lose the race to a writer, and fail to upgrade its
+      // stale snapshot while the multi-statement graft appears to have run.
       production.transaction(() => {
         production.exec(`
           -- A headword first accepted as a generated entry, and now supplied by
@@ -151,7 +155,15 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
           drop table retained_en_glosses;
           drop table retained_en_examples;
         `);
-      })();
+      }).immediate();
+      const installedVersion = production.query<{ value: string }, []>(
+        "select value from en_metadata where key = 'dictionaryVersion'"
+      ).get()?.value;
+      if (installedVersion !== incomingVersion) {
+        throw new Error(
+          `English release graft did not install ${incomingVersion}: found ${installedVersion ?? "no version"}`
+        );
+      }
     } finally {
       production.exec("detach database english_release");
     }
@@ -188,6 +200,9 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
   try {
     production.prepare("attach database ? as japanese_release").run(resolve(releasePath));
     try {
+      // Match the English graft's write-first transaction. Both dictionaries
+      // share the same production file and the same concurrent enrichment
+      // writer, so either source refresh can race a deferred WAL snapshot.
       production.transaction(() => {
         production.exec(`
           -- A headword first accepted as a generated entry, and now supplied by
@@ -284,7 +299,15 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           drop table retained_ja_glosses;
           drop table retained_ja_examples;
         `);
-      })();
+      }).immediate();
+      const installedVersion = production.query<{ value: string }, []>(
+        "select value from ja_metadata where key = 'dictDate'"
+      ).get()?.value;
+      if (installedVersion !== incomingVersion) {
+        throw new Error(
+          `Japanese release graft did not install ${incomingVersion}: found ${installedVersion ?? "no version"}`
+        );
+      }
     } finally {
       production.exec("detach database japanese_release");
     }
