@@ -94,6 +94,9 @@ function classifyError(error: unknown): ModelGatewayError["kind"] {
   const message = errorMessage(error);
   if (status === 408 || status === 409 || status === 429 || (status !== undefined && status >= 500)) return "transient";
   if (status === 401 || status === 403) return "authentication";
+  // The key's spend limit is spent. Every later call fails the same way, so
+  // this must not be mistaken for a word the dictionary could not produce.
+  if (status === 402) return "budget";
   if (status === 400 && /unsupported|unknown parameter|service.?tier/i.test(message)) return "unsupported-parameter";
   if (error instanceof Error && /ConnectionError|RequestTimeoutError|RequestAbortedError/.test(error.name)) return "transient";
   return "permanent";

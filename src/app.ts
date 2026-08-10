@@ -177,14 +177,21 @@ export function createApp(
         try {
           enriched = await resolveOnDemand(options.onDemand, request);
         } catch (error) {
-          // Only a provider failure is isolated, and `ModelGatewayError` is
-          // what says so. `resolve` also writes attempt records and accepted
-          // entries, so a locked or failing database throws from inside it
-          // too; narrowing the call is not enough to tell the two apart, and
-          // reading the error type is. One word must not decide the fate of
-          // the other ninety-nine, but a broken database is not a fact about
-          // any word and must not be reported as one.
-          if (!(error instanceof ModelGatewayError)) throw error;
+          // Only a failure about this one call is isolated. `resolve` also
+          // writes attempt records and accepted entries, so a locked or failing
+          // database throws from inside it too; narrowing the call is not
+          // enough to tell the two apart, and reading the error type is. One
+          // word must not decide the fate of the other ninety-nine, but a
+          // broken database is not a fact about any word and must not be
+          // reported as one.
+          //
+          // An exhausted budget, an expired key, or a request shape the
+          // provider rejects are the same: they refuse every later query too,
+          // so isolating them would hand back a page of misses that are really
+          // one account-level fault, and the consumer would publish the gaps as
+          // though the words did not exist. Those fail the batch at the first
+          // one rather than after all of them.
+          if (!isIsolatedModelFailure(error)) throw error;
           // The word is not lost: the failure is logged, and the next enriched
           // lookup of it attempts again.
           logLookupFailure(options, traceId, dictionary, lang, request.query, error);
@@ -215,6 +222,16 @@ export function createApp(
   });
 
   return app;
+}
+
+/**
+ * Whether a failure is about the one query that raised it. A dead provider and
+ * a word the model could not produce are; a spent budget, an expired key, and a
+ * rejected request shape are not, because the next query meets them again.
+ */
+function isIsolatedModelFailure(error: unknown): error is ModelGatewayError {
+  return error instanceof ModelGatewayError
+    && (error.kind === "transient" || error.kind === "permanent");
 }
 
 async function resolveOnDemand(
