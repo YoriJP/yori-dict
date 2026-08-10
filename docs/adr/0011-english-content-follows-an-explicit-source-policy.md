@@ -14,6 +14,6 @@ Rebuilding twice from the same pinned archives produces byte-identical canonical
 
 Simple English Wiktionary can no longer quietly inject a competing meaning into a headword the primary source already explains. Adding one is a deliberate, reviewable mapping row.
 
-Enrichment authors one entry-language group per request and one reviewer accepts or rejects it, exactly as Japanese does. Owner-authorized lookup fills only a missing entry, a missing explanation-language group, or a missing generated example; correct imported meanings are never rewritten.
+Enrichment authors one entry-language group per request and production persists it only after two unanimous review passes, exactly as Japanese does. Owner-authorized lookup fills only a missing entry, a missing explanation-language group, or a missing generated example; correct imported meanings are never rewritten.
 
 A release publishes one canonical SQLite and JSONL plus one Yomitan pack per explanation language, named `yori-en-<lang>.zip`, with a manifest reporting exact per-language coverage, source versions, checksums, licenses and artifact names. Source maintenance is a deliberate full rebuild into a fresh file; a failed rebuild leaves the previous database usable, and accepted generated content is carried across.

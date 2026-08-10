@@ -60,11 +60,35 @@ test("resolve completes missing examples once across concurrent requests", async
   expect(first?.senses[0].examples).toHaveLength(1);
   expect(second).toEqual(first);
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-review"]);
-  expect(gateway.calls[0]).toMatchObject({ promptVersion: "example-author-v2" });
+  expect(gateway.calls[0]).toMatchObject({ promptVersion: "example-author-v3" });
   expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword spelling as a standalone lexical item");
-  expect(gateway.calls[1]).toMatchObject({ promptVersion: "example-review-v3" });
+  expect(gateway.calls[1]).toMatchObject({ promptVersion: "example-review-v6" });
   expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
   expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
+});
+
+test("one accepting review cannot persist an example when unanimous review is required", async () => {
+  const released = existingEntry();
+  released.senses[0].examples = undefined;
+  const gateway = new ScriptedGateway([
+    exampleFor("学校"),
+    "ACCEPT",
+    "REJECT"
+  ]);
+  const dictionary = createJapaneseOnDemandDictionary({
+    repository: new MemoryRepository({ released: [["学校", released]] }),
+    modelGateway: gateway,
+    reviewPasses: 2
+  });
+
+  const result = await dictionary.resolve(request("学校"));
+
+  expect(result?.senses[0].examples).toBeUndefined();
+  expect(gateway.calls.map(({ role }) => role)).toEqual([
+    "example-author", "example-review", "example-review", "example-author"
+  ]);
+  expect(gateway.calls[2]).toMatchObject({ promptVersion: "example-review-v6-verification-v2" });
+  expect(gateway.calls[2]!.prompt).toStartWith("# Verification Context");
 });
 
 test("completing one sense does not truncate existing examples on another sense", async () => {
@@ -128,6 +152,8 @@ test("example enrichment retries one malformed candidate", async () => {
 
   expect(completed?.senses[0].examples).toHaveLength(1);
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-author", "example-review"]);
+  expect(gateway.calls[1]!.prompt).toContain("Previous candidate was refused: invalid_schema");
+  expect(gateway.calls[1]!.prompt).toContain("Return a different candidate that corrects that failure");
 });
 
 test("resolveAll enriches every ranked alternative without changing the primary", async () => {
@@ -249,7 +275,9 @@ test("resolve authors a source-grounded entry before completing its examples", a
     "flex", "flex", "flex", "flex"
   ]);
   expect(gateway.calls[1].prompt).toContain("licensed-test-dictionary:source-42:1");
-  expect(gateway.calls[1].prompt).toContain("Return exactly ACCEPT or REJECT");
+  expect(gateway.calls[1].prompt).toContain(
+    "Return exactly one token: ACCEPT or REJECT."
+  );
   expect(gateway.calls[1].responseSchema).toBeUndefined();
   expect(gateway.calls[3].prompt).toContain(`\"sense\"`);
   expect(entry.word).toBe("未知語");

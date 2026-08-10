@@ -10,7 +10,7 @@ Imported senses keep JMdict's editorial order inside each language, and position
 
 One entry may have different sense counts, identifiers, wording, order, and examples in different languages, and lookup returns exactly the requested language's group or nothing.
 
-Enrichment authors one entry-language group per request, and one reviewer accepts or rejects that group. A rejection or retry in one language cannot disturb another language's accepted content for the same entry.
+Enrichment authors one entry-language group per request, and production persists it only after two unanimous review passes. A rejection or retry in one language cannot disturb another language's accepted content for the same entry.
 
 A release publishes one canonical SQLite and JSONL plus one Yomitan pack per explanation language, named `yori-ja-<lang>.zip`. Language separation is structural rather than a filter applied while writing, so a pack cannot silently mix languages.
 
