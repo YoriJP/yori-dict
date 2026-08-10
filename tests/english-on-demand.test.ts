@@ -78,6 +78,26 @@ test("English translated groups require a matching example translation", async (
   ]);
 });
 
+test("English resolve returns released data when optional enrichment context is invalid", async () => {
+  const entry = releasedEntry();
+  entry.senses[0].lang = "ja";
+  const repository = new MemoryEnglishRepository({ released: [["bank", entry]] });
+  const dictionary = createEnglishOnDemandDictionary({
+    repository,
+    modelGateway: new ScriptedGateway([]),
+    models: englishModels
+  });
+
+  const resolved = await dictionary.resolve({
+    query: "bank",
+    targetDictionary: "en",
+    lang: "ja",
+    context: { sentence: "https://invalid.example" }
+  });
+
+  expect(resolved).toEqual(entry);
+});
+
 test("English example enrichment retries one rejected candidate", async () => {
   const entry = releasedEntry();
   entry.senses[0].examples = [];

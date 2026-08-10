@@ -304,7 +304,7 @@ async function resolveRanked<TEntry>(
       throw error;
     }
   }));
-  if (outcomes.every(({ error }) => error !== null)) throw outcomes[0]!.error;
+  if (outcomes[0]!.error) throw outcomes[0]!.error;
   const resolved = outcomes.map(({ entry }) => entry);
   return {
     item: resolved[0] ?? null,
@@ -1478,7 +1478,7 @@ export function createEnglishOnDemandDictionary(options: {
           ? options.repository.find(lemma, request.lang)
           : null);
     if (existing && existing.senses.every((sense) => hasEnglishExamplePair(sense, request.lang))) return existing;
-    if (invalidEnglishRequest(request)) return null;
+    if (invalidEnglishRequest(request)) return existing;
     const key = englishRequestKey(request);
     const running = inFlight.get(key);
     if (running) return running;

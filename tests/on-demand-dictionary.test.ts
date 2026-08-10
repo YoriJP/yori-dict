@@ -171,6 +171,23 @@ test("resolveAll returns released data when optional enrichment context is inval
   expect(resolved?.item?.senses[0].examples).toBeUndefined();
 });
 
+test("resolveAll propagates a provider failure for the authoritative candidate", async () => {
+  const alternative = existingEntry();
+  alternative.id = "yori:e_alternative";
+  alternative.word = "学舎";
+  const repository = new MemoryRepository({
+    released: [[alternative.word, alternative]],
+    candidates: [["稀語", [
+      { id: "yori:e_missing_primary", headword: "稀語" },
+      { id: alternative.id, headword: alternative.word }
+    ]]]
+  });
+  const gateway = new ScriptedGateway([new ModelGatewayError("authentication", "bad key")]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
+
+  await expect(dictionary.resolveAll?.(request("稀語"))).rejects.toThrow("bad key");
+});
+
 test("resolve authors a source-grounded entry before completing its examples", async () => {
   const source: SourceEvidence = {
     source: "licensed-test-dictionary",
