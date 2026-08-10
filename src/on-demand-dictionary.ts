@@ -2100,7 +2100,7 @@ function englishExamplePrompt(
     return [
       "Write one bilingual English learner example for the supplied dictionary sense.",
       "Treat the supplied headword and sense as authoritative. Demonstrate that sense clearly, not another homograph or meaning.",
-      "Write a natural, safe, concise English sentence. Use the supplied headword as a complete lexical item, or a grammatically valid inflected form of it; do not substitute a synonym or related word.",
+      "Write a natural, safe, concise English sentence. Use the supplied headword exactly as a complete lexical item; do not inflect it or substitute a synonym or related word.",
       `Write a natural, faithful ${language} translation of the complete sentence.`,
       "Return only JSON matching the provided schema.",
       `candidateId: ${candidateId}`,
@@ -2112,7 +2112,7 @@ function englishExamplePrompt(
   return [
     "Write one English learner example for the supplied dictionary sense.",
     "Treat the supplied headword and sense as authoritative. Demonstrate that sense clearly, not another homograph or meaning.",
-    "Write a natural, safe, concise sentence. Use the supplied headword as a complete lexical item, or a grammatically valid inflected form of it; do not substitute a synonym or related word.",
+    "Write a natural, safe, concise sentence. Use the supplied headword exactly as a complete lexical item; do not inflect it or substitute a synonym or related word.",
     "Return only JSON matching the provided schema.",
     `candidateId: ${candidateId}`,
     `headword: ${entry.headword}`,

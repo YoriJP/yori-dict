@@ -15,18 +15,22 @@ if (!Bun.argv.includes("--run")) {
   console.error("Paid evaluation is disabled. Re-run with --run to call OpenRouter.");
   process.exit(2);
 }
+const corpusPath = flag("--corpus") ?? "fixtures/on-demand-regression-corpus.json";
+const corpus = await Bun.file(resolve(corpusPath)).json() as Corpus;
+const selectedCase = flag("--case");
+const eligibility = corpus.eligibility.filter((candidate) => !selectedCase || candidate.candidate === selectedCase);
+if (selectedCase && eligibility.length !== 1) {
+  console.error(`Eval case not found: ${selectedCase}`);
+  process.exit(2);
+}
 if (!process.env.OPENROUTER_API_KEY) {
   console.error("OPENROUTER_API_KEY is required.");
   process.exit(2);
 }
-
-const corpusPath = flag("--corpus") ?? "fixtures/on-demand-regression-corpus.json";
-const corpus = await Bun.file(resolve(corpusPath)).json() as Corpus;
-const selectedCase = flag("--case");
 const gateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY });
 let failed = 0;
 
-for (const test of corpus.eligibility.filter((candidate) => !selectedCase || candidate.candidate === selectedCase)) {
+for (const test of eligibility) {
   const response = await gateway.call(request({
     role: "eligibility",
     model: onDemandEvaluationContracts.eligibility.model,
@@ -57,8 +61,7 @@ for (const test of selectedCase ? [] : corpus.reviewDefects) {
   console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}: ${verdict}`);
 }
 
-const eligibilityCases = corpus.eligibility.filter((candidate) => !selectedCase || candidate.candidate === selectedCase).length;
-const total = eligibilityCases * 2 + (selectedCase ? 0 : corpus.reviewDefects.length);
+const total = eligibility.length * 2 + (selectedCase ? 0 : corpus.reviewDefects.length);
 console.log(`${total - failed}/${total} passed`);
 if (failed > 0) process.exitCode = 1;
 
