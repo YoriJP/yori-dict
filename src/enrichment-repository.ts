@@ -116,8 +116,8 @@ export function openEnrichmentRepository(
     find(query, targetDictionary, lang) {
       return targetDictionary === "ja" ? lookupDb.lookup(query, lang).item : null;
     },
-    findById(id, lang) {
-      return readJapaneseLookupItem(db, id, lang);
+    findById(id, lang, inflectionPath) {
+      return readJapaneseLookupItem(db, id, lang, inflectionPath);
     },
     candidates(query) {
       return lookupDb.candidates?.(query) ?? [];

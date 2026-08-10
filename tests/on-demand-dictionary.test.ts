@@ -3,6 +3,7 @@ import {
   createJapaneseOnDemandDictionary,
   createModelCallLimiter,
   type EnrichmentRepository,
+  type CanonicalCandidate,
   type LabelVocabulary,
   type ModelGateway,
   ModelGatewayError,
@@ -153,6 +154,21 @@ test("resolveAll enriches every ranked alternative without changing the primary"
   expect(resolved?.item?.senses[0].examples).toHaveLength(1);
   expect(resolved?.alternatives[0]?.id).toBe(alternative.id);
   expect(resolved?.alternatives[0]?.senses[0].examples).toHaveLength(1);
+});
+
+test("resolveAll returns released data when optional enrichment context is invalid", async () => {
+  const released = existingEntry();
+  released.senses[0].examples = undefined;
+  const repository = new MemoryRepository({
+    released: [["学校", released]],
+    candidates: [["学校", [{ id: released.id, headword: released.word }]]]
+  });
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: new ScriptedGateway([]) });
+
+  const resolved = await dictionary.resolveAll?.(request("学校", { sentence: "https://invalid.example" }));
+
+  expect(resolved?.item?.id).toBe(released.id);
+  expect(resolved?.item?.senses[0].examples).toBeUndefined();
 });
 
 test("resolve authors a source-grounded entry before completing its examples", async () => {
@@ -1016,12 +1032,12 @@ class MemoryRepository implements EnrichmentRepository {
   readonly examples = new Map<string, PublicLookupItem["senses"][number]["examples"]>();
   private readonly released: Map<string, PublicLookupItem>;
   private readonly sources: Map<string, SourceEvidence[]>;
-  private readonly rankedCandidates: Map<string, Array<{ id: string; headword: string }>>;
+  private readonly rankedCandidates: Map<string, CanonicalCandidate[]>;
 
   constructor(options: {
     released?: Array<[string, PublicLookupItem]>;
     sources?: Array<[string, SourceEvidence[]]>;
-    candidates?: Array<[string, Array<{ id: string; headword: string }>]>;
+    candidates?: Array<[string, CanonicalCandidate[]]>;
   } = {}) {
     this.released = new Map(options.released ?? []);
     this.sources = new Map(options.sources ?? []);
@@ -1040,11 +1056,12 @@ class MemoryRepository implements EnrichmentRepository {
     };
   }
 
-  findById(id: string) {
+  findById(id: string, _lang?: unknown, inflectionPath = []) {
     const entry = [...this.entries.values(), ...this.released.values()].find((candidate) => candidate.id === id);
     if (!entry) return null;
     return {
       ...entry,
+      ...(inflectionPath.length > 0 ? { inflectionPath } : {}),
       senses: entry.senses.map((sense) => this.examples.has(sense.id)
         ? { ...sense, examples: this.examples.get(sense.id) }
         : sense)

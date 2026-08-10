@@ -82,7 +82,7 @@ export type LookupDb = {
   /** Returns only senses owned by `lang`; it never falls back to another language. */
   lookup(query: string, lang: ApiLang): LookupResponse;
   /** Canonical entries in the best relevance tier, independent of explanation language. */
-  candidates?(query: string): Array<{ id: string; headword: string }>;
+  candidates?(query: string): Array<{ id: string; headword: string; inflectionPath?: InflectionStep[] }>;
   meta(): {
     apiVersion: "v1";
     dictionaryVersion: string | null;
@@ -263,18 +263,25 @@ function lookupCandidates(db: Database, query: string): LookupCandidate[] {
 }
 
 /** The best relevance tier before explanation-language availability filters it. */
-export function lookupJapaneseCandidates(db: Database, query: string): Array<{ id: string; headword: string }> {
+export function lookupJapaneseCandidates(
+  db: Database,
+  query: string
+): Array<{ id: string; headword: string; inflectionPath?: InflectionStep[] }> {
   const tiers = groupCandidateTiers(lookupCandidates(db, query));
   const first = [...tiers.keys()].sort((a, b) => a - b)[0];
   if (first === undefined) return [];
   const seen = new Set<string>();
-  const entries: Array<{ id: string; headword: string }> = [];
+  const entries: Array<{ id: string; headword: string; inflectionPath?: InflectionStep[] }> = [];
   for (const candidate of tiers.get(first)!) {
     for (const entryId of candidate.entryIds) {
       if (seen.has(entryId)) continue;
       seen.add(entryId);
       const headword = readHeadwords(db, entryId)[0]?.text;
-      if (headword) entries.push({ id: entryId, headword });
+      if (headword) entries.push({
+        id: entryId,
+        headword,
+        ...(candidate.inflectionPath.length > 0 ? { inflectionPath: candidate.inflectionPath } : {})
+      });
     }
   }
   return entries;
@@ -414,9 +421,14 @@ function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): Pub
   };
 }
 
-export function readJapaneseLookupItem(db: Database, entryId: string, lang: ApiLang): PublicLookupItem | null {
+export function readJapaneseLookupItem(
+  db: Database,
+  entryId: string,
+  lang: ApiLang,
+  inflectionPath: InflectionStep[] = []
+): PublicLookupItem | null {
   const entry = readEntry(db, entryId, lang);
-  return entry && entry.senses.length > 0 ? toLookupItem(entry, []) : null;
+  return entry && entry.senses.length > 0 ? toLookupItem(entry, inflectionPath) : null;
 }
 
 function readEntry(db: Database, entryId: string, lang: ApiLang): PublicEntry | null {

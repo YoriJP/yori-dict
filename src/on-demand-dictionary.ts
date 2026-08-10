@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { findPrcTerms } from "../scripts/taiwan-terminology";
 import { deinflect } from "./deinflect";
 import { resolveEnglishLemma } from "./english-strip";
-import type { ApiLang, PublicExample, PublicLookupItem, PublicSense } from "./types";
+import type { ApiLang, InflectionStep, PublicExample, PublicLookupItem, PublicSense } from "./types";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./english-types";
 import type { LookupDictionary } from "./lookup-contract";
 
@@ -33,7 +33,13 @@ export type ResolveRequest = {
     reading?: string;
   };
   /** Internal exact-match target used when enriching ranked alternatives. */
-  candidate?: { id: string; headword: string };
+  candidate?: CanonicalCandidate;
+};
+
+export type CanonicalCandidate = {
+  id: string;
+  headword: string;
+  inflectionPath?: InflectionStep[];
 };
 
 export type SourceEvidence = {
@@ -134,8 +140,8 @@ export type GenerationProvenance = {
  */
 export type EnrichmentRepository = {
   find(query: string, targetDictionary: TargetDictionary, lang: ApiLang): PublicLookupItem | null;
-  findById?(id: string, lang: ApiLang): PublicLookupItem | null;
-  candidates?(query: string): Array<{ id: string; headword: string }>;
+  findById?(id: string, lang: ApiLang, inflectionPath?: InflectionStep[]): PublicLookupItem | null;
+  candidates?(query: string): CanonicalCandidate[];
   findSources(query: string, targetDictionary: TargetDictionary): SourceEvidence[];
   saveEntry(entry: PublicLookupItem, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
@@ -176,7 +182,7 @@ export type JapaneseOnDemandDictionary = DictionaryResolver<PublicLookupItem>;
 export type EnglishEnrichmentRepository = {
   find(query: string, lang: ApiLang): EnglishEntry | null;
   findById?(id: string, lang: ApiLang): EnglishEntry | null;
-  candidates?(query: string): Array<{ id: string; headword: string }>;
+  candidates?(query: string): CanonicalCandidate[];
   /**
    * Every entry the query reaches, best first. `find` returns only the first;
    * public lookup hands the rest to the reader, because one spelling can be
@@ -284,7 +290,7 @@ export function createOnDemandDictionary(options: {
 
 async function resolveRanked<TEntry>(
   request: ResolveRequest,
-  candidates: Array<{ id: string; headword: string }>,
+  candidates: CanonicalCandidate[],
   resolve: (request: ResolveRequest) => Promise<TEntry | null>
 ): Promise<ResolvedMatches<TEntry>> {
   if (candidates.length === 0) {
@@ -379,10 +385,16 @@ export function createJapaneseOnDemandDictionary(options: {
 
   const resolveCore = async (request: ResolveRequest): Promise<PublicLookupItem | null> => {
     if (request.targetDictionary !== "ja" || !japaneseAuthoredLanguages.has(request.lang)) return null;
-    if (invalidRequest(request)) return null;
     const existing = request.candidate
-      ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
-      : options.repository.find(request.query, request.targetDictionary, request.lang);
+      ? options.repository.findById?.(
+          request.candidate.id,
+          request.lang,
+          request.candidate.inflectionPath
+        ) ?? null
+      : invalidRequest(request)
+        ? null
+        : options.repository.find(request.query, request.targetDictionary, request.lang);
+    if (invalidRequest(request)) return existing;
     if (existing && existing.senses.every((sense) => hasJapaneseExamplePair(sense, request.lang))) return existing;
 
     const key = `${effectiveMode(request.mode)}:${requestOutcomeKey(request)}`;
@@ -608,7 +620,7 @@ function authorForHeadword(
 ): Promise<PublicLookupItem | null> {
   return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, headword), async () => {
     const existing = request.candidate
-      ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
+      ? options.repository.findById?.(request.candidate.id, request.lang, request.candidate.inflectionPath) ?? null
       : options.repository.find(headword, request.targetDictionary, request.lang);
     if (existing) return completeEntryExamples(options, existing, request);
     return authorEntry(request, options, headword, evidence);
@@ -675,7 +687,7 @@ async function authorEntry(
   // answers with that entry's own identity, written forms, and source facts
   // rather than the candidate's placeholder ones.
   const stored = request.candidate
-    ? options.repository.findById?.(request.candidate.id, request.lang) ?? entry
+    ? options.repository.findById?.(request.candidate.id, request.lang, request.candidate.inflectionPath) ?? entry
     : options.repository.find(headword, request.targetDictionary, request.lang) ?? entry;
   return completeEntryExamples(options, stored, request);
 }
@@ -748,7 +760,7 @@ async function completeExample(
 ): Promise<PublicExample | null> {
   return shareByKey(options.exampleInFlight, exampleOutcomeKey(request, sense.id), async () => {
     const canonicalEntry = request.candidate
-      ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
+      ? options.repository.findById?.(request.candidate.id, request.lang, request.candidate.inflectionPath) ?? null
       : options.repository.find(entry.word, "ja", request.lang);
     const canonical = canonicalEntry
       ?.senses.find((candidate) => candidate.id === sense.id)
