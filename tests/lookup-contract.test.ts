@@ -374,9 +374,31 @@ test("a provider failure is an operational error rather than a dictionary miss",
   expect(single.status).toBe(500);
   expect(await single.json()).toEqual({ error: "Lookup is temporarily unavailable" });
 
-  // A batch is answered word by word. One provider failure is reported as a
-  // miss for its own query and does not discard the entries beside it, because
-  // a consumer sending a page of text should not lose the page to one word.
+  // A bad key refuses every query, so a batch carrying one does not get to
+  // report the word it happened to be holding as absent. It fails whole, at the
+  // first failure rather than after all of them.
+  const badKeyBatch = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
+    body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["bank", "blorp"] })
+  });
+  expect(badKeyBatch.status).toBe(500);
+
+  // A spent budget is the same shape of fault: the money is gone for every
+  // later query too, and a consumer told "no such word" would publish the gap.
+  gateway.failure = new ModelGatewayError("budget", "credit limit reached");
+  const spentBatch = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
+    body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["bank", "blorp"] })
+  });
+  expect(spentBatch.status).toBe(500);
+
+  // A dead provider is about the call, not the account. A batch is answered
+  // word by word, so that one is a miss for its own query and does not discard
+  // the entries beside it: a consumer sending a page of text should not lose
+  // the page to one word.
+  gateway.failure = new ModelGatewayError("permanent", "provider unavailable");
   const batch = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
@@ -387,9 +409,9 @@ test("a provider failure is an operational error rather than a dictionary miss",
   expect(entries[0]?.headword).toBe("bank");
   expect(entries[1]).toBeNull();
 
-  // A batch where nothing at all came back is the other thing: a bad key, a
-  // dead provider. Answering it with a full set of misses would let a consumer
-  // publish an empty dictionary and believe it, so that one still fails.
+  // A batch where nothing at all came back is the other thing: a dead provider
+  // rather than a dictionary. Answering it with a full set of misses would let
+  // a consumer publish an empty dictionary and believe it, so that one fails.
   const allFailed = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
