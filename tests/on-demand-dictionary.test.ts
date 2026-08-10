@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   createJapaneseOnDemandDictionary,
   createModelCallLimiter,
+  sameTierBackoffMs,
   type EnrichmentRepository,
   type CanonicalCandidate,
   type LabelVocabulary,
@@ -813,11 +814,16 @@ test("a transient Flex failure falls back once to standard while permanent failu
     new ModelGatewayError("transient", "provider overloaded"),
     "SKIP"
   ]);
-  await createJapaneseOnDemandDictionary({ repository: bulkRepository, modelGateway: bulkGateway }).resolve({
-    ...request("稀語"),
-    mode: "bulk"
-  });
+  const waits: number[] = [];
+  await createJapaneseOnDemandDictionary({
+    repository: bulkRepository,
+    modelGateway: bulkGateway,
+    sleep: async (ms) => { waits.push(ms); }
+  }).resolve({ ...request("稀語"), mode: "bulk" });
   expect(bulkGateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "flex", "flex"]);
+  // Flex refuses on capacity, not on the request, so asking again immediately
+  // meets the same shortage. Each repeat of a tier waits longer than the last.
+  expect(waits).toEqual(sameTierBackoffMs);
 });
 
 test("bulk and on-demand calls do not share an in-flight retry policy", async () => {

@@ -86,11 +86,18 @@ export type ModelGateway = {
   call(input: ModelRequest): Promise<ModelResponse>;
 };
 
+/**
+ * `transient` and `permanent` are facts about one call. The rest are facts
+ * about the account or the request shape: they will refuse the next call for
+ * the same reason, so nothing downstream may treat one as a fact about the
+ * word that happened to be in flight when it arrived.
+ */
 export type ModelGatewayErrorKind =
   | "transient"
   | "authentication"
   | "configuration"
   | "unsupported-parameter"
+  | "budget"
   | "permanent";
 
 export class ModelGatewayError extends Error {
@@ -213,9 +220,35 @@ export type ModelCallLimiter = <T>(work: () => Promise<T>) => Promise<T>;
  * variables that nothing ever set, so the deployed values were always these.
  * Changing them is a code change, which is how the deployed value stays
  * visible to a reader.
+ *
+ * One limiter gates every model call in the process, so this is the ceiling on
+ * total enrichment throughput no matter how many requests arrive or how many
+ * clients send them. A batch fans its queries out in parallel, a tier fans its
+ * candidates out, and an entry fans its senses out; all of it queues here. At
+ * four, a Yori News backfill ran at about sixteen seconds of queue time per
+ * entry and every shard measured the same number, because they were measuring
+ * the queue rather than themselves.
  */
-export const enrichmentConcurrency = 4;
-export const modelTimeoutMs = 15_000;
+export const enrichmentConcurrency = 24;
+
+/**
+ * A guard against a call that will never answer, not a latency budget.
+ * Abandoning a call does not stop the work: the tokens are generated and
+ * billed either way, so a ceiling short enough to cut off calls that would
+ * have succeeded pays for them and stores nothing — and bulk's three Flex
+ * attempts pay three times over before giving up on the entry. Fifteen seconds
+ * sat inside the normal range of Flex, a queued tier where waiting is the price
+ * of the discount rather than a fault. Three minutes is past anything that is
+ * still going to answer.
+ */
+export const modelTimeoutMs = 180_000;
+
+/** How long to wait before asking the same service tier again. */
+export const sameTierBackoffMs = [2_000, 8_000];
+
+/** Overridable so a test can exercise the retry policy without waiting it out. */
+export type Sleep = (ms: number) => Promise<void>;
+const defaultSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export type ModelRunSummary = {
   event: "model_run_summary";
@@ -362,6 +395,7 @@ export function createJapaneseOnDemandDictionary(options: {
   modelGateway: ModelGateway;
   concurrency?: number;
   timeoutMs?: number;
+  sleep?: Sleep;
   limiter?: ModelCallLimiter;
   logger?: EnrichmentLogger;
 }): JapaneseOnDemandDictionary {
@@ -373,6 +407,7 @@ export function createJapaneseOnDemandDictionary(options: {
   const exampleInFlight = new Map<string, Promise<unknown>>();
   const runtime: RuntimeOptions = {
     repository: options.repository,
+    sleep: options.sleep ?? defaultSleep,
     modelGateway: {
       call(input) {
         return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs));
@@ -854,7 +889,15 @@ async function callAndRecord(
     ? mode === "bulk" ? ["flex", "flex", "flex"] : ["flex", "standard"]
     : ["standard"];
   let failure = new ModelGatewayError("permanent", "Model gateway made no attempt");
-  for (const requestedServiceTier of tiers) {
+  for (const [index, requestedServiceTier] of tiers.entries()) {
+    // Flex answers a shortage of spare capacity with 429, which it does not
+    // charge for. Asking again in the same millisecond meets the same shortage,
+    // so bulk's three Flex attempts were three ways of losing the entry at
+    // once; waiting is what the tier is built to be given. A retry that
+    // escalates to another tier has nothing to wait for and does not pause.
+    if (index > 0 && tiers[index - 1] === requestedServiceTier) {
+      await options.sleep(sameTierBackoffMs[Math.min(index - 1, sameTierBackoffMs.length - 1)]!);
+    }
     const started = performance.now();
     try {
       const response = await options.modelGateway.call({
@@ -904,11 +947,13 @@ async function callAndRecord(
 type ModelCallRuntime = {
   repository: { recordAttempt(attempt: AttemptRecord): void };
   modelGateway: ModelGateway;
+  sleep: Sleep;
 };
 
 type RuntimeOptions = {
   repository: EnrichmentRepository;
   modelGateway: ModelGateway;
+  sleep: Sleep;
   canonicalInFlight: Map<string, Promise<unknown>>;
   exampleInFlight: Map<string, Promise<unknown>>;
   logger?: EnrichmentLogger;
@@ -1467,6 +1512,7 @@ export function createEnglishOnDemandDictionary(options: {
   models?: EnglishModelSelection;
   concurrency?: number;
   timeoutMs?: number;
+  sleep?: Sleep;
   limiter?: ModelCallLimiter;
   logger?: EnrichmentLogger;
 }): EnglishOnDemandDictionary {
@@ -1477,6 +1523,7 @@ export function createEnglishOnDemandDictionary(options: {
   const canonicalInFlight = new Map<string, Promise<unknown>>();
   const runtime: EnglishRuntimeOptions = {
     repository: options.repository,
+    sleep: options.sleep ?? defaultSleep,
     modelGateway: {
       call(input) { return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs)); }
     },
@@ -2034,6 +2081,7 @@ function parseEnglishCanonicalGroup(
 type EnglishRuntimeOptions = {
   repository: EnglishEnrichmentRepository;
   modelGateway: ModelGateway;
+  sleep: Sleep;
   modelConfigs: ReturnType<typeof englishModelConfigs>;
   canonicalInFlight: Map<string, Promise<unknown>>;
   exampleInFlight: Map<string, Promise<unknown>>;
