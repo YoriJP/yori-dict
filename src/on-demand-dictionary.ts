@@ -397,6 +397,7 @@ export function createJapaneseOnDemandDictionary(options: {
   timeoutMs?: number;
   sleep?: Sleep;
   limiter?: ModelCallLimiter;
+  reviewPasses?: 1 | 2;
   logger?: EnrichmentLogger;
 }): JapaneseOnDemandDictionary {
   const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
@@ -415,6 +416,7 @@ export function createJapaneseOnDemandDictionary(options: {
     },
     canonicalInFlight,
     exampleInFlight,
+    reviewPasses: options.reviewPasses ?? 1,
     ...(options.logger ? { logger: options.logger } : {})
   };
 
@@ -536,9 +538,9 @@ const geminiReviewModel = "google/gemini-3-flash-preview";
 const englishModels: EnglishModelSelection = { author: lunaModel, reviewer: geminiReviewModel };
 const entryAuthorConfigFor = (vocabulary: LabelVocabulary, hasEvidence: boolean) =>
   modelConfig("entry-author", lunaModel, "entry-author-v2", entrySchemaFor(vocabulary, hasEvidence));
-const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v2");
-const exampleAuthorConfig = modelConfig("example-author", lunaModel, "example-author-v2", exampleSchema);
-const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v3");
+const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v5");
+const exampleAuthorConfig = modelConfig("example-author", lunaModel, "example-author-v3", exampleSchema);
+const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v6");
 
 type ModelConfig = Omit<ModelRequest, "prompt" | "signal">;
 
@@ -700,22 +702,22 @@ async function authorEntry(
   }
   recordOutcome(options.repository, authored.attempt, "candidate");
 
-  const reviewed = await callAndRecord(
+  const review = await requireUnanimousReview(
     options,
     entryReviewConfig,
     reviewPrompt(entryId, { entry, sourceEvidence: evidence }),
     request.mode,
-    entryId
+    entryId,
+    options.reviewPasses,
+    (attempt, outcome) => recordOutcome(options.repository, attempt, outcome)
   );
-  const review = reviewOutcome(reviewed.text);
-  recordOutcome(options.repository, reviewed.attempt, review);
   if (review !== "accepted") {
     logRefusal(options, request, "entry", headword, `reviewer returned ${review}`);
     return null;
   }
 
-  // One author request produced one complete entry-language group and one
-  // reviewer accepted it, so the group is persisted atomically for this
+  // One author request produced one complete entry-language group and every
+  // configured review pass accepted it, so the group is persisted atomically for this
   // language alone.
   options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
   // Read the group back so an authored language group on an existing entry
@@ -818,11 +820,12 @@ async function completeExampleWork(
 ): Promise<PublicExample | null> {
   const mode = request.mode;
   const candidateId = `${sense.id}:example`;
+  let previousRefusal: string | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const authored = await callAndRecord(
       options,
       exampleAuthorConfig,
-      exampleAuthorPrompt(candidateId, entry, sense, request.lang),
+      exampleAuthorPrompt(candidateId, entry, sense, request.lang, previousRefusal),
       mode,
       candidateId
     );
@@ -831,11 +834,12 @@ async function completeExampleWork(
       example = parseExample(authored.text, entry.word, request.lang);
     } catch (error) {
       recordOutcome(options.repository, authored.attempt, "malformed");
-      logRefusal(options, request, "example", entry.word, refusalReason(error));
+      previousRefusal = refusalReason(error);
+      logRefusal(options, request, "example", entry.word, previousRefusal);
       continue;
     }
     recordOutcome(options.repository, authored.attempt, "candidate");
-    const reviewed = await callAndRecord(
+    const review = await requireUnanimousReview(
       options,
       exampleReviewConfig,
       reviewPrompt(candidateId, {
@@ -845,12 +849,13 @@ async function completeExampleWork(
         example
       }, exampleReviewCriteria),
       mode,
-      candidateId
+      candidateId,
+      options.reviewPasses,
+      (reviewAttempt, outcome) => recordOutcome(options.repository, reviewAttempt, outcome)
     );
-    const review = reviewOutcome(reviewed.text);
-    recordOutcome(options.repository, reviewed.attempt, review);
     if (review !== "accepted") {
-      logRefusal(options, request, "example", entry.word, `reviewer returned ${review}`);
+      previousRefusal = `reviewer returned ${review}`;
+      logRefusal(options, request, "example", entry.word, previousRefusal);
       continue;
     }
     options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
@@ -859,7 +864,7 @@ async function completeExampleWork(
   return null;
 }
 
-/** Full provenance for content a reviewer accepted. */
+/** Full provenance for content every configured review pass accepted. */
 function acceptedGeneration(attempt: AttemptRecord): GenerationProvenance {
   return {
     model: attempt.model,
@@ -870,6 +875,46 @@ function acceptedGeneration(attempt: AttemptRecord): GenerationProvenance {
     reviewOutcome: "accepted",
     createdAt: new Date().toISOString()
   };
+}
+
+/**
+ * Content is accepted only when every configured pass independently returns
+ * the exact ACCEPT token. The first non-accept short-circuits, so failures do
+ * not spend a redundant call and disagreements always fail closed.
+ */
+async function requireUnanimousReview(
+  options: ModelCallRuntime,
+  config: ModelConfig,
+  prompt: string,
+  mode: ResolveRequest["mode"],
+  candidateId: string,
+  passes: 1 | 2,
+  record: (attempt: AttemptRecord, outcome: "accepted" | "rejected" | "malformed") => void
+): Promise<"accepted" | "rejected" | "malformed"> {
+  for (let pass = 1; pass <= passes; pass += 1) {
+    const verification = pass === 1
+      ? { config, prompt }
+      : {
+          config: { ...config, promptVersion: `${config.promptVersion}-verification-v2` },
+          prompt: [
+            "# Verification Context",
+            "This is a separate verification pass. Re-evaluate from scratch; do not assume an earlier verdict was correct.",
+            "",
+            prompt
+          ].join("\n")
+        };
+    const reviewed = await callAndRecord(
+      options,
+      verification.config,
+      verification.prompt,
+      mode,
+      candidateId
+    );
+    const outcome = reviewOutcome(reviewed.text);
+    record(reviewed.attempt, outcome);
+    if (outcome !== "accepted") return outcome;
+  }
+  return "accepted";
 }
 
 /**
@@ -962,6 +1007,7 @@ type RuntimeOptions = {
   sleep: Sleep;
   canonicalInFlight: Map<string, Promise<unknown>>;
   exampleInFlight: Map<string, Promise<unknown>>;
+  reviewPasses: 1 | 2;
   logger?: EnrichmentLogger;
 };
 
@@ -1339,7 +1385,8 @@ function exampleAuthorPrompt(
   candidateId: string,
   entry: PublicLookupItem,
   sense: PublicSense,
-  lang: ApiLang
+  lang: ApiLang,
+  previousRefusal?: string
 ): string {
   return [
     "Write one bilingual Japanese learner example for the supplied dictionary sense.",
@@ -1351,7 +1398,11 @@ function exampleAuthorPrompt(
     `candidateId: ${candidateId}`,
     `explanation_language: ${lang}`,
     `headword: ${entry.word}`,
-    `sense: ${JSON.stringify(sense)}`
+    `sense: ${JSON.stringify(sense)}`,
+    ...(previousRefusal ? [
+      `Previous candidate was refused: ${previousRefusal}`,
+      "Return a different candidate that corrects that failure."
+    ] : [])
   ].join("\n");
 }
 
@@ -1389,9 +1440,15 @@ const exampleReviewCriteria = [
 
 function reviewPrompt(candidateId: string, candidate: unknown, criteria: string = entryReviewCriteria): string {
   return [
-    "Reject only. Return exactly ACCEPT or REJECT and nothing else. Never rewrite or explain.",
+    "Return exactly one token: ACCEPT or REJECT.",
+    "ACCEPT only if every criterion is satisfied; otherwise REJECT.",
+    "Missing evidence or uncertainty means REJECT. Do not explain or add punctuation.",
+    "",
+    "# Criteria",
     criteria,
-    `candidateId: ${candidateId}`,
+    "",
+    "# Candidate",
+    `candidateId: ${JSON.stringify(candidateId)}`,
     `candidate: ${JSON.stringify(candidate)}`
   ].join("\n");
 }
@@ -1406,8 +1463,15 @@ export const onDemandEvaluationContracts = {
   },
   entryReview: {
     model: geminiReviewModel,
-    promptVersion: "entry-review-v2",
+    promptVersion: "entry-review-v5",
     prompt: reviewPrompt
+  },
+  exampleReview: {
+    model: geminiReviewModel,
+    promptVersion: "example-review-v6",
+    prompt(candidateId: string, candidate: unknown) {
+      return reviewPrompt(candidateId, candidate, exampleReviewCriteria);
+    }
   }
 } as const;
 
@@ -1489,12 +1553,12 @@ function englishModelConfigs(selection: EnglishModelSelection) {
   return {
     author: selection.author,
     eligibility: modelConfig("eligibility", selection.author, "english-eligibility-v1"),
-    entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v3"),
-    exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v2", englishExampleSchema),
+    entryReview: modelConfig("entry-review", selection.reviewer, "english-entry-review-v6"),
+    exampleAuthor: modelConfig("example-author", selection.author, "english-example-author-v3", englishExampleSchema),
     bilingualExampleAuthor: modelConfig(
-      "example-author", selection.author, "english-bilingual-example-author-v2", englishBilingualExampleSchema
+      "example-author", selection.author, "english-bilingual-example-author-v3", englishBilingualExampleSchema
     ),
-    exampleReview: modelConfig("example-review", selection.reviewer, "english-example-review-v3")
+    exampleReview: modelConfig("example-review", selection.reviewer, "english-example-review-v6")
   };
 }
 
@@ -1520,6 +1584,7 @@ export function createEnglishOnDemandDictionary(options: {
   timeoutMs?: number;
   sleep?: Sleep;
   limiter?: ModelCallLimiter;
+  reviewPasses?: 1 | 2;
   logger?: EnrichmentLogger;
 }): EnglishOnDemandDictionary {
   const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
@@ -1536,6 +1601,7 @@ export function createEnglishOnDemandDictionary(options: {
     modelConfigs: englishModelConfigs(options.models ?? englishModels),
     canonicalInFlight,
     exampleInFlight: new Map(),
+    reviewPasses: options.reviewPasses ?? 1,
     ...(options.logger ? { logger: options.logger } : {})
   };
   const resolveCore = async (request: ResolveRequest): Promise<EnglishEntry | null> => {
@@ -1687,7 +1753,7 @@ async function authorEnglishEntry(
     return null;
   }
   englishRecordOutcome(options.repository, authored.attempt, "candidate");
-  const reviewed = await callAndRecord(
+  const outcome = await requireUnanimousReview(
     options,
     options.modelConfigs.entryReview,
     reviewPrompt(candidateId, {
@@ -1698,16 +1764,16 @@ async function authorEnglishEntry(
       [request.lang === "en" ? "sourceEvidence" : "englishReferenceFacts"]: sources
     }, request.lang === "en" ? entryReviewCriteria : languageGroupReviewCriteria),
     request.mode,
-    candidateId
+    candidateId,
+    options.reviewPasses,
+    (attempt, review) => englishRecordOutcome(options.repository, attempt, review)
   );
-  const outcome = reviewOutcome(reviewed.text);
-  englishRecordOutcome(options.repository, reviewed.attempt, outcome);
   if (outcome !== "accepted") {
     logRefusal(options, request, "entry", headword, `reviewer returned ${outcome}`);
     return null;
   }
-  // One author request produced one complete entry-language group and one
-  // reviewer accepted it, so the group is persisted atomically for this
+  // One author request produced one complete entry-language group and every
+  // configured review pass accepted it, so the group is persisted atomically for this
   // language alone.
   options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
   // Read the group back so an authored language group answers with the entry's
@@ -1771,11 +1837,12 @@ async function completeEnglishExample(
 ): Promise<EnglishExample | null> {
   const mode = request.mode;
   const bilingual = request.lang !== "en";
+  let previousRefusal: string | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const authored = await callAndRecord(
       options,
       bilingual ? options.modelConfigs.bilingualExampleAuthor : options.modelConfigs.exampleAuthor,
-      englishExamplePrompt(candidateId, entry, sense, request.lang),
+      englishExamplePrompt(candidateId, entry, sense, request.lang, previousRefusal),
       mode,
       candidateId
     );
@@ -1784,11 +1851,12 @@ async function completeEnglishExample(
       example = parseEnglishExample(authored.text, entry, request.lang);
     } catch (error) {
       englishRecordOutcome(options.repository, authored.attempt, "malformed");
-      logRefusal(options, request, "example", entry.headword, refusalReason(error));
+      previousRefusal = refusalReason(error);
+      logRefusal(options, request, "example", entry.headword, previousRefusal);
       continue;
     }
     englishRecordOutcome(options.repository, authored.attempt, "candidate");
-    const reviewed = await callAndRecord(
+    const outcome = await requireUnanimousReview(
       options,
       options.modelConfigs.exampleReview,
       reviewPrompt(candidateId, {
@@ -1798,12 +1866,13 @@ async function completeEnglishExample(
         example
       }, exampleReviewCriteria),
       mode,
-      candidateId
+      candidateId,
+      options.reviewPasses,
+      (reviewAttempt, review) => englishRecordOutcome(options.repository, reviewAttempt, review)
     );
-    const outcome = reviewOutcome(reviewed.text);
-    englishRecordOutcome(options.repository, reviewed.attempt, outcome);
     if (outcome !== "accepted") {
-      logRefusal(options, request, "example", entry.headword, `reviewer returned ${outcome}`);
+      previousRefusal = `reviewer returned ${outcome}`;
+      logRefusal(options, request, "example", entry.headword, previousRefusal);
       continue;
     }
     options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
@@ -2091,6 +2160,7 @@ type EnglishRuntimeOptions = {
   modelConfigs: ReturnType<typeof englishModelConfigs>;
   canonicalInFlight: Map<string, Promise<unknown>>;
   exampleInFlight: Map<string, Promise<unknown>>;
+  reviewPasses: 1 | 2;
   logger?: EnrichmentLogger;
 };
 
@@ -2147,7 +2217,8 @@ function englishExamplePrompt(
   candidateId: string,
   entry: EnglishEntry,
   sense: EnglishEntry["senses"][number],
-  lang: ApiLang
+  lang: ApiLang,
+  previousRefusal?: string
 ): string {
   if (lang !== "en") {
     const language = englishExplanationLanguageNames[lang] ?? lang;
@@ -2160,7 +2231,11 @@ function englishExamplePrompt(
       `candidateId: ${candidateId}`,
       `explanation_language: ${lang}`,
       `headword: ${entry.headword}`,
-      `sense: ${JSON.stringify(sense)}`
+      `sense: ${JSON.stringify(sense)}`,
+      ...(previousRefusal ? [
+        `Previous candidate was refused: ${previousRefusal}`,
+        "Return a different candidate that corrects that failure."
+      ] : [])
     ].join("\n");
   }
   return [
@@ -2170,7 +2245,11 @@ function englishExamplePrompt(
     "Return only JSON matching the provided schema.",
     `candidateId: ${candidateId}`,
     `headword: ${entry.headword}`,
-    `sense: ${JSON.stringify(sense)}`
+    `sense: ${JSON.stringify(sense)}`,
+    ...(previousRefusal ? [
+      `Previous candidate was refused: ${previousRefusal}`,
+      "Return a different candidate that corrects that failure."
+    ] : [])
   ].join("\n");
 }
 

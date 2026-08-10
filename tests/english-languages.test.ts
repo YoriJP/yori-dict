@@ -308,7 +308,10 @@ test("missing ja and zh-tw groups are independent concurrent candidates and one 
 
     // Separate author and reviewer requests, separate retries and separate
     // terminal outcomes; the two languages never share a model request.
-    const candidates = gateway.calls.map((call) => call.prompt.match(/candidateId: (\S+)/)?.[1] ?? "");
+    const candidates = gateway.calls.map((call) => {
+      const match = call.prompt.match(/candidateId: (?:"([^"]+)"|(\S+))/);
+      return match?.[1] ?? match?.[2] ?? "";
+    });
     expect(new Set(candidates).size).toBeGreaterThan(1);
     expect(candidates.filter((id) => id.endsWith(":ja"))).toHaveLength(2);
     expect(candidates.filter((id) => id.endsWith(":zh-tw"))).toHaveLength(2);
