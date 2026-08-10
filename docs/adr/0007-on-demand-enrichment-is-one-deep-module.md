@@ -22,7 +22,7 @@ The canonical-headword call returns exactly one line: a headword or `SKIP`. Yori
 
 ## Consequences
 
-Existing and generated entries share the same example-completion path. Examples attach to senses and are accepted independently; failure to create an example never invalidates an entry.
+Existing and generated entries share the same example-completion path. Examples attach to senses and are accepted independently. Enrichment visits every entry in the winning relevance tier and every sense within it, retries one malformed or rejected example once, and returns correct partial data when a gap remains. Failure to create an example never invalidates an entry or changes match ranking.
 
 The module keeps bounded concurrency, in-flight deduplication, deterministic filters, and canonical persistence. It returns results rather than exposing storage operations to callers.
 

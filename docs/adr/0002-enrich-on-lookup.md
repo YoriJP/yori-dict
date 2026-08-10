@@ -18,7 +18,7 @@ The overlay is a small writable store alongside the read-only data release. Look
 
 Enrichment must be authenticated. The API is public, so an unauthenticated enrich path is an open drain on the model budget. Ordinary reader traffic never requests it.
 
-Misses within a request are generated with bounded concurrency and **no cap**. A cap fails work that would have succeeded; instead, any word that errors, times out, or is rejected is returned without an example and picked up on a later lookup. The caller's pipeline never breaks — a word only ever gets a thinner card.
+Misses within a request are generated with bounded concurrency and **no cap**. Enrichment attempts every missing example across the primary match and its same-tier alternatives. A malformed or rejected example receives one additional candidate; if both fail, correct content still returns with the gap visible and retryable. For translated groups, an example closes the gap only when it carries a non-empty translation in the requested language. English-under-English needs only its English example. Relevance remains authoritative, so completeness never promotes an alternative over the primary.
 
 The first lookup of a word is slow and every later one is instant. This is acceptable because the enriching caller is a build-time batch job, not reader traffic.
 

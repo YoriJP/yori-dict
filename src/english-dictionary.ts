@@ -116,10 +116,7 @@ export function lookupEnglishEntry(db: Database, query: string, lang: ApiLang): 
  * being told the first one was the answer.
  */
 export function lookupEnglishEntries(db: Database, query: string, lang: ApiLang): EnglishEntry[] {
-  const term = normalizeEnglishLookupTerm(query);
-  if (!term) return [];
-  const exists = (candidate: string) => englishLookupTermExists(db, candidate);
-  const resolved = exists(term) ? term : resolveEnglishLemma(term, exists);
+  const resolved = resolveEnglishLookupTerm(db, query);
   if (!resolved) return [];
   return db
     .query<{ entry_id: string }, [string]>(
@@ -132,6 +129,24 @@ export function lookupEnglishEntries(db: Database, query: string, lang: ApiLang)
       // language, not an entry to answer with another language's senses.
       return entry && entry.senses.length > 0 ? [entry] : [];
     });
+}
+
+export function lookupEnglishCandidates(db: Database, query: string): Array<{ id: string; headword: string }> {
+  const resolved = resolveEnglishLookupTerm(db, query);
+  if (!resolved) return [];
+  return db.query<{ entry_id: string }, [string]>(
+    "select distinct entry_id from en_lookup_terms where term = ? order by entry_id"
+  ).all(resolved).flatMap(({ entry_id }) => {
+    const entry = readEnglishEntryHeader(db, entry_id);
+    return entry ? [{ id: entry.id, headword: entry.headword }] : [];
+  });
+}
+
+function resolveEnglishLookupTerm(db: Database, query: string): string | null {
+  const term = normalizeEnglishLookupTerm(query);
+  if (!term) return null;
+  const exists = (candidate: string) => englishLookupTermExists(db, candidate);
+  return exists(term) ? term : resolveEnglishLemma(term, exists);
 }
 
 /** Whether the lexicon carries this exact lookup term. The stripper's validator. */

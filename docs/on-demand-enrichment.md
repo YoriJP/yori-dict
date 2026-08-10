@@ -21,12 +21,16 @@ type ResolveRequest = {
 
 type OnDemandDictionary = {
   resolve(request: ResolveRequest): Promise<DictionaryEntry | null>;
+  resolveAll?(request: ResolveRequest): Promise<{
+    item: DictionaryEntry | null;
+    alternatives: DictionaryEntry[];
+  }>;
 };
 ```
 
 `lang` is the requested explanation language. It scopes the canonical entry key, the example key, and the in-flight deduplication key, so work for one language never blocks or answers for another. Japanese authors en, de, zh-tw, zh-cn, and ko; English authors en, ja, and zh-tw. Each is an independent group written directly in that language; no language is produced by translating or character-converting another. Any other requested language resolves to `null` without a model call.
 
-The module returns an existing or accepted generated entry. `null` means the candidate was skipped, rejected, or could not be produced from acceptable content. A provider outage is not a miss: it fails the resolve call as a `ModelGatewayError`, and never returns `null`. What the HTTP layer does with that is the lookup contract's business — a single lookup answers with an error, and a batch isolates the one query while every other error still fails the request. The one exception is a generated example, which is optional content — when an example cannot be produced the entry keeps its accepted senses and the example stays missing and retryable.
+The module returns existing and accepted generated content. `null` means the primary candidate was skipped, rejected, or could not be produced from acceptable content. Enrichment is exhaustive but best-effort: it attempts every missing example in the primary entry and every same-tier alternative, while preserving the original relevance order. Malformed or rejected examples receive one fresh candidate. If both candidates fail, the correct senses still return and the gap remains retryable. A provider failure while enriching one example or alternative is isolated from the other correct content; storage failures still fail the request because persisted state is uncertain.
 
 Build-time consumers may send `X-Yori-Request-Id`. Structured lookup logs and
 private model attempt records retain that trace id, so a Yori News vocabulary
@@ -37,7 +41,7 @@ publishing prompts or model traces.
 
 Public lookup and owner-authorized enrichment are one route family at v1. `GET /v1/lookup` and `POST /v1/lookup/batch` both require an explicit `dictionary` and `lang`; an unsupported pair is a 400. Single lookup returns the entry or `null`; batch returns `entries` with one entry or `null` per submitted query, in order, without repeating the queries. Ordinary lookup is always model-free, including on a miss. `enrich=true` requires the owner bearer token and is checked before any model call; a token alone does not trigger generation. Database, persistence, configuration, and provider failures return 500 rather than `null` for a single lookup.
 
-An entry carries `alternatives`: the other entries the same match reached, in the same ranking order, after the one that answered it. They come from one match tier only — a surface that is itself a word never carries the entries of what it happens to deinflect to, because that is a different reading of the input rather than another candidate for the same one. One written form is often several unrelated words — こと is both 事 and 琴, `best` is three lexemes — and ranking picks the likeliest rather than the right one, so the rest travel with it. The field is absent when there are none, which is most queries. A consumer that wants one answer reads the entry exactly as before; a popup can offer the rest. An alternative never carries its own alternatives. Enrichment does not remove them: `resolve` returns a released entry unchanged when it is already complete, so an authored entry is not evidence the query was a miss, and it leads the same sibling list an unenriched lookup would return.
+An entry carries `alternatives`: the other entries the same match reached, in the same ranking order, after the one that answered it. They come from one match tier only — a surface that is itself a word never carries the entries of what it happens to deinflect to, because that is a different reading of the input rather than another candidate for the same one. One written form is often several unrelated words — こと is both 事 and 琴, `best` is three lexemes — and ranking picks the likeliest rather than the right one, so the rest travel with it. The field is absent when there are none, which is most queries. A consumer that wants one answer reads the entry exactly as before; a popup can offer the rest. An alternative never carries its own alternatives. Enrichment attempts missing language groups and examples across the whole winning tier, including candidates ordinary lookup hides because they lack the requested language. Completeness never changes ranking: a thinner primary is not displaced by a richer alternative.
 
 A batch is answered one query at a time. A query whose enrichment failed is `null`, the same as a miss, and the failure is recorded in the log as `lookup_failed` with that query on it. Only a provider failure is isolated this way. `resolve` writes attempt records and accepted entries as it goes, so narrowing the call is not enough to separate a dead provider from a failing database — the error type is what says which it was. Storage failures, wherever they are raised, still fail the request rather than reporting the word as absent. The alternative — failing the batch — meant one unavailable word discarded every entry beside it, which a consumer sending a page of text cannot afford. A batch in which *every* query failed still returns 500, because that is an expired token or a dead provider rather than a dictionary, and answering it with a full set of misses would let a consumer publish an empty artifact and believe it.
 
@@ -57,15 +61,16 @@ Renaming or removing a response field breaks consumers silently: the reader gets
 6. Build a source-evidence bundle and ask Luna to author one complete entry-language group for the requested language. Source evidence is minimum coverage, not a literal translation template, and the author may divide senses the way that language's dictionaries do.
 7. Run deterministic schema, script, provenance, label, and Taiwan-terminology checks.
 8. Ask Gemini for a reject-only review that returns exactly `ACCEPT` or `REJECT`. Any other output fails closed.
-9. Persist the accepted group in the canonical database, replacing only that entry's senses in that language, then generate and review one example for each of its senses that still lacks one. A generated example carries only the sense's own language pair.
-10. Return the canonical entry. Example failure produces a thinner entry, not a failed lookup.
+9. Repeat entry-language completion for every canonical entry in the winning relevance tier. Persist each accepted group independently without changing their ranking.
+10. For every sense, require at least one usable example. Japanese examples carry a translation in the requested explanation language. English examples do the same for `ja` and `zh-tw`; an English example under `en` needs no redundant translation. An existing example without the required language pair remains visible but does not close the gap.
+11. Generate and review missing pairs independently. A malformed or rejected example receives one additional attempt. Return all correct content after every bounded attempt finishes; unresolved gaps remain retryable.
 
 ## Failure policy
 
 - `SKIP`, deterministic rejection, semantic rejection, and malformed content all end the attempt and produce nothing. None of them is recorded, so the next lookup for that word tries again.
 - A refusal is logged as `enrichment_refused` with the stage, headword, and the rule that refused it. That log line is the only record.
 - Authoring and review are atomic per entry and language, so work in one language never disturbs another language's accepted content.
-- Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008.
+- Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008. Model failures while completing one example or alternative do not discard other correct entries; storage failures remain fatal.
 - Concurrent requests for the same canonical headword or sense share one in-flight operation.
 - A failed or rejected candidate is observable but never becomes dictionary data.
 

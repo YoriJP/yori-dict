@@ -238,8 +238,12 @@ test("a rejected example keeps accepted senses and allows one fresh later attemp
     }]
   }));
   gateway.script("entry-review", "ACCEPT");
-  gateway.script("example-author", JSON.stringify({ sentence: "The blorp echoed." }));
-  gateway.script("example-review", "REJECT");
+  gateway.script(
+    "example-author",
+    JSON.stringify({ sentence: "The blorp echoed." }),
+    JSON.stringify({ sentence: "A blorp sounded nearby." })
+  );
+  gateway.script("example-review", "REJECT", "REJECT");
   const rejected = await enrich("blorp");
 
   expect(rejected.senses).toHaveLength(1);

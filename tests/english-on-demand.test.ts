@@ -54,6 +54,70 @@ test("English resolve completes missing examples on released senses", async () =
   }]]);
 });
 
+test("English translated groups require a matching example translation", async () => {
+  const entry = releasedEntry();
+  entry.senses[0].lang = "ja";
+  entry.senses[0].examples = [{
+    text: "The bank approved the loan.",
+    source: "sourced",
+    sourceId: "fixture:1",
+    reviewStatus: "source"
+  }];
+  const repository = new MemoryEnglishRepository({ released: [["bank", entry]] });
+  const gateway = new ScriptedGateway([
+    JSON.stringify({ sentence: "The bank approved the loan.", translation: "銀行は融資を承認した。" }),
+    reviewAccepted
+  ]);
+
+  const completed = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "bank", targetDictionary: "en", lang: "ja" });
+
+  expect(completed?.senses[0].examples).toHaveLength(2);
+  expect(completed?.senses[0].examples[1].translations).toEqual([
+    { lang: "ja", text: "銀行は融資を承認した。" }
+  ]);
+});
+
+test("English resolve returns released data when optional enrichment context is invalid", async () => {
+  const entry = releasedEntry();
+  entry.senses[0].lang = "ja";
+  const repository = new MemoryEnglishRepository({ released: [["bank", entry]] });
+  const dictionary = createEnglishOnDemandDictionary({
+    repository,
+    modelGateway: new ScriptedGateway([]),
+    models: englishModels
+  });
+
+  const resolved = await dictionary.resolve({
+    query: "bank",
+    targetDictionary: "en",
+    lang: "ja",
+    context: { sentence: "https://invalid.example" }
+  });
+
+  expect(resolved).toEqual(entry);
+});
+
+test("English example enrichment retries one rejected candidate", async () => {
+  const entry = releasedEntry();
+  entry.senses[0].examples = [];
+  const repository = new MemoryEnglishRepository({ released: [["bank", entry]] });
+  const gateway = new ScriptedGateway([
+    JSON.stringify({ sentence: "The bank approved the loan." }),
+    "REJECT",
+    JSON.stringify({ sentence: "She deposited her salary at the bank." }),
+    reviewAccepted
+  ]);
+
+  const completed = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
+    .resolve({ query: "bank", targetDictionary: "en", lang: "en" });
+
+  expect(completed?.senses[0].examples[0].text).toBe("She deposited her salary at the bank.");
+  expect(gateway.calls.map(({ role }) => role)).toEqual([
+    "example-author", "example-review", "example-author", "example-review"
+  ]);
+});
+
 test("generated English examples require a complete lexical match", async () => {
   const entry = releasedEntry();
   entry.headword = "art";
@@ -66,7 +130,7 @@ test("generated English examples require a complete lexical match", async () => 
   const completed = await createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels })
     .resolve({ query: "art", targetDictionary: "en", lang: "en" });
   expect(completed?.senses[0].examples).toEqual([]);
-  expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author"]);
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-author"]);
 });
 
 test("English resolve rejects obvious non-lexical candidates before model eligibility", async () => {

@@ -268,6 +268,7 @@ test("alternatives come from one match tier, never mixing a word with a guess ab
   // The lower tier is still reached when nothing matches the surface itself.
   const deinflected = lookup.lookup("しった", "en");
   expect(deinflected.item?.word).toBe("知る");
+  expect(lookup.candidates?.("しった")[0]?.inflectionPath).toEqual(deinflected.item?.inflectionPath);
   lookup.close();
 });
 

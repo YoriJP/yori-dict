@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import type { LookupDb } from "./db";
+import { readJapaneseLookupItem, type LookupDb } from "./db";
 import { createJapaneseSchema } from "./japanese-schema";
 import { apiLanguages } from "./lang";
 import type {
@@ -115,6 +115,12 @@ export function openEnrichmentRepository(
   return {
     find(query, targetDictionary, lang) {
       return targetDictionary === "ja" ? lookupDb.lookup(query, lang).item : null;
+    },
+    findById(id, lang, inflectionPath) {
+      return readJapaneseLookupItem(db, id, lang, inflectionPath);
+    },
+    candidates(query) {
+      return lookupDb.candidates?.(query) ?? [];
     },
     findSources(query, targetDictionary) {
       return sourceLookup(query, targetDictionary);

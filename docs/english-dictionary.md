@@ -182,13 +182,14 @@ remain independently versioned.
 
 Enrichment is language scoped, like Japanese: `saveEntry(entry, lang, generation)` writes
 exactly one entry-language group atomically. Owner-authorized lookup fills only a missing
-entry, a missing explanation-language group, or a missing generated example — correct
+entry, a missing explanation-language group, or a missing complete example pair — correct
 imported senses are never rewritten, and short imported content is not treated as
 missing. One author request writes the complete missing group and one separate reviewer
 accepts or rejects it; examples are authored and reviewed independently, one sense at a
-time, and one useful learner example per sense is enough. A refused example is not saved and stays
-retryable on a later owner lookup, and so does a response the parser could not read: no
-refusal is recorded.
+time, and one useful learner example per sense is enough. English-under-English needs no
+redundant translation; `ja` and `zh-tw` require a non-empty paired sentence in their own
+language. A malformed or refused example gets one fresh candidate immediately. If both
+fail, neither is saved and the gap stays retryable on a later owner lookup.
 
 `ja` and `zh-tw` groups are siblings of the English group, not translations of it. Each has
 its own author request, reviewer, retries, and persistence key, keyed by entry *and*
@@ -207,8 +208,9 @@ judges it.
 
 A generated example for a non-English group is one bilingual pair: the English sentence
 must contain the headword, and its paired sentence must be written in that group's
-language. The pair is stored on the sense that owns it, so Japanese and Chinese examples
-stay separate even when their English sentences look alike.
+language. An existing example without that pair remains visible but does not stop
+enrichment from generating a complete pair. The pair is stored on the sense that owns it,
+so Japanese and Chinese examples stay separate even when their English sentences look alike.
 
 The English path rejects obvious names, wrong-script text, fragments, markup, URLs, and
 numbers before eligibility. Genuine words, compounds, phrasal verbs, idioms,
