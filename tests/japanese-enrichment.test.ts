@@ -173,8 +173,12 @@ test("a rejected example keeps accepted senses and allows one fresh later attemp
   gateway.reset();
   gateway.script("entry-author", authored(["알 수 없는 단어"]));
   gateway.script("entry-review", "ACCEPT");
-  gateway.script("example-author", example("나는 이 단어를 찾아보았다."));
-  gateway.script("example-review", "REJECT");
+  gateway.script(
+    "example-author",
+    example("나는 이 단어를 찾아보았다."),
+    example("나는 오늘 이 단어를 사용했다.")
+  );
+  gateway.script("example-review", "REJECT", "REJECT");
   const rejected = await enrich("未知語", "ko");
 
   // The sense survived the rejected example, and the example was not saved.

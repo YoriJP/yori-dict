@@ -83,6 +83,78 @@ test("completing one sense does not truncate existing examples on another sense"
   expect(completed?.senses[1].examples).toHaveLength(1);
 });
 
+test("an example without the requested translation does not count as complete", async () => {
+  const released = existingEntry();
+  released.senses[0].examples = [{
+    text: "学校へ行きます。",
+    translations: [{ lang: "zh-tw", text: "我去學校。" }],
+    source: "sourced",
+    sourceName: "fixture",
+    reviewStatus: "source"
+  }];
+  const gateway = new ScriptedGateway([exampleFor("学校", "I go to school."), reviewForPrompt]);
+
+  const completed = await createJapaneseOnDemandDictionary({
+    repository: new MemoryRepository({ released: [["学校", released]] }),
+    modelGateway: gateway
+  }).resolve(request("学校"));
+
+  expect(completed?.senses[0].examples).toHaveLength(2);
+  expect(completed?.senses[0].examples?.[1].translations).toEqual([
+    { lang: "en", text: "I go to school." }
+  ]);
+});
+
+test("example enrichment retries one malformed candidate", async () => {
+  const released = existingEntry();
+  released.senses[0].examples = undefined;
+  const gateway = new ScriptedGateway([
+    JSON.stringify({ sentence: "This does not match the schema." }),
+    exampleFor("学校"),
+    reviewForPrompt
+  ]);
+
+  const completed = await createJapaneseOnDemandDictionary({
+    repository: new MemoryRepository({ released: [["学校", released]] }),
+    modelGateway: gateway
+  }).resolve(request("学校"));
+
+  expect(completed?.senses[0].examples).toHaveLength(1);
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-author", "example-review"]);
+});
+
+test("resolveAll enriches every ranked alternative without changing the primary", async () => {
+  const primary = existingEntry();
+  primary.word = "事";
+  primary.id = "yori:e_thing";
+  primary.headwords = [{ text: "事", reading: "こと", kind: "kanji", common: true, tags: [] }];
+  primary.senses[0].id = "yori:s_thing";
+  primary.senses[0].examples = undefined;
+  const alternative = structuredClone(primary);
+  alternative.word = "琴";
+  alternative.id = "yori:e_koto";
+  alternative.headwords = [{ text: "琴", reading: "こと", kind: "kanji", common: false, tags: [] }];
+  alternative.senses[0].id = "yori:s_koto";
+  const repository = new MemoryRepository({
+    released: [["事", primary], ["琴", alternative]],
+    candidates: [["こと", [{ id: primary.id, headword: primary.word }, { id: alternative.id, headword: alternative.word }]]]
+  });
+  const gateway = new ScriptedGateway([
+    exampleFor("事"),
+    exampleFor("琴"),
+    reviewForPrompt,
+    reviewForPrompt
+  ]);
+
+  const resolved = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolveAll?.(request("こと"));
+
+  expect(resolved?.item?.id).toBe(primary.id);
+  expect(resolved?.item?.senses[0].examples).toHaveLength(1);
+  expect(resolved?.alternatives[0]?.id).toBe(alternative.id);
+  expect(resolved?.alternatives[0]?.senses[0].examples).toHaveLength(1);
+});
+
 test("resolve authors a source-grounded entry before completing its examples", async () => {
   const source: SourceEvidence = {
     source: "licensed-test-dictionary",
@@ -615,7 +687,7 @@ test("generated Japanese examples require the standalone headword or an inflecte
 
   const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("生"));
   expect(entry?.senses[0].examples).toBeUndefined();
-  expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author"]);
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-author"]);
 });
 
 test("reviewer explanations fail closed as malformed", async () => {
@@ -944,13 +1016,16 @@ class MemoryRepository implements EnrichmentRepository {
   readonly examples = new Map<string, PublicLookupItem["senses"][number]["examples"]>();
   private readonly released: Map<string, PublicLookupItem>;
   private readonly sources: Map<string, SourceEvidence[]>;
+  private readonly rankedCandidates: Map<string, Array<{ id: string; headword: string }>>;
 
   constructor(options: {
     released?: Array<[string, PublicLookupItem]>;
     sources?: Array<[string, SourceEvidence[]]>;
+    candidates?: Array<[string, Array<{ id: string; headword: string }>]>;
   } = {}) {
     this.released = new Map(options.released ?? []);
     this.sources = new Map(options.sources ?? []);
+    this.rankedCandidates = new Map(options.candidates ?? []);
   }
 
   find(query: string) {
@@ -963,6 +1038,21 @@ class MemoryRepository implements EnrichmentRepository {
         ? { ...sense, examples: this.examples.get(sense.id) }
         : sense)
     };
+  }
+
+  findById(id: string) {
+    const entry = [...this.entries.values(), ...this.released.values()].find((candidate) => candidate.id === id);
+    if (!entry) return null;
+    return {
+      ...entry,
+      senses: entry.senses.map((sense) => this.examples.has(sense.id)
+        ? { ...sense, examples: this.examples.get(sense.id) }
+        : sense)
+    };
+  }
+
+  candidates(query: string) {
+    return this.rankedCandidates.get(query) ?? [];
   }
 
   findSources(query: string) {

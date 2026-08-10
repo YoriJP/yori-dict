@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import {
   englishLookupTermExists,
+  lookupEnglishCandidates,
   lookupEnglishEntries,
   lookupEnglishEntry,
   normalizeEnglishLookupTerm,
@@ -97,9 +98,72 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
     return id;
   }
 
+  function readSources(entryId: string): EnglishSourceRecord[] {
+    const sources = db.query<
+      { source: string; source_version: string; source_entry_id: string; license: string; attribution: string },
+      [string]
+    >("select * from en_entry_sources where entry_id = ? order by source, source_entry_id").all(entryId);
+    const headword = db.query<{ headword: string }, [string]>(
+      "select headword from en_entries where id = ?"
+    ).get(entryId)?.headword ?? "";
+    return sources.flatMap((source): EnglishSourceRecord[] => {
+      const senses = db.query<
+        {
+          id: string;
+          part_of_speech: string;
+          registers: string;
+          regions: string;
+          domains: string;
+          dated: number;
+          usage: string;
+          source_ref: string | null;
+        },
+        [string, string]
+      >("select * from en_senses where entry_id = ? and source_name = ? order by lang, position")
+        .all(entryId, source.source)
+        .flatMap((sense) => sense.source_ref ? [{
+          evidenceId: sense.source_ref,
+          partOfSpeech: sense.part_of_speech,
+          glosses: db.query<{ text: string }, [string]>(
+            "select text from en_glosses where sense_id = ? order by position"
+          ).all(sense.id).map((row) => row.text),
+          registers: JSON.parse(sense.registers) as string[],
+          regions: JSON.parse(sense.regions) as string[],
+          domains: JSON.parse(sense.domains) as string[],
+          dated: sense.dated === 1,
+          usage: JSON.parse(sense.usage) as string[],
+          examples: [] as EnglishExample[]
+        }] : []);
+      if (senses.length === 0) return [];
+      return [{
+        source: source.source as EnglishSourceRecord["source"],
+        sourceVersion: source.source_version,
+        sourceEntryId: source.source_entry_id,
+        license: source.license,
+        attribution: source.attribution,
+        headword,
+        pronunciations: db.query<{ ipa: string; region: string | null; source_ref: string | null }, [string, string]>(
+          "select ipa, region, source_ref from en_pronunciations where entry_id = ? and source_name = ? order by position"
+        ).all(entryId, source.source).flatMap((row) => row.source_ref ? [{
+          ipa: row.ipa,
+          ...(row.region ? { region: row.region } : {}),
+          evidenceId: row.source_ref
+        }] : []),
+        senses
+      }];
+    });
+  }
+
   return {
     find(query, lang) {
       return lookupEnglishEntry(db, query, lang);
+    },
+    findById(id, lang) {
+      const entry = readEnglishEntry(db, id, lang);
+      return entry && entry.senses.length > 0 ? entry : null;
+    },
+    candidates(query) {
+      return lookupEnglishCandidates(db, query);
     },
     findAll(query, lang) {
       return lookupEnglishEntries(db, query, lang);
@@ -118,59 +182,10 @@ export function openEnglishEnrichmentRepository(path: string): PersistentEnglish
         "select entry_id as id from en_lookup_terms where term = ? order by entry_id limit 1"
       ).get(term);
       if (!entry) return [];
-      const sources = db.query<
-        { source: string; source_version: string; source_entry_id: string; license: string; attribution: string },
-        [string]
-      >("select * from en_entry_sources where entry_id = ? order by source, source_entry_id").all(entry.id);
-      const headword = db.query<{ headword: string }, [string]>(
-        "select headword from en_entries where id = ?"
-      ).get(entry.id)?.headword ?? term;
-      return sources.flatMap((source): EnglishSourceRecord[] => {
-        const senses = db.query<
-          {
-            id: string;
-            part_of_speech: string;
-            registers: string;
-            regions: string;
-            domains: string;
-            dated: number;
-            usage: string;
-            source_ref: string | null;
-          },
-          [string, string]
-        >(`select * from en_senses where entry_id = ? and source_name = ? order by lang, position`)
-          .all(entry.id, source.source)
-          .flatMap((sense) => sense.source_ref ? [{
-            evidenceId: sense.source_ref,
-            partOfSpeech: sense.part_of_speech,
-            glosses: db.query<{ text: string }, [string]>(
-              "select text from en_glosses where sense_id = ? order by position"
-            ).all(sense.id).map((row) => row.text),
-            registers: JSON.parse(sense.registers) as string[],
-            regions: JSON.parse(sense.regions) as string[],
-            domains: JSON.parse(sense.domains) as string[],
-            dated: sense.dated === 1,
-            usage: JSON.parse(sense.usage) as string[],
-            examples: [] as EnglishExample[]
-          }] : []);
-        if (senses.length === 0) return [];
-        return [{
-          source: source.source as EnglishSourceRecord["source"],
-          sourceVersion: source.source_version,
-          sourceEntryId: source.source_entry_id,
-          license: source.license,
-          attribution: source.attribution,
-          headword,
-          pronunciations: db.query<{ ipa: string; region: string | null; source_ref: string | null }, [string, string]>(
-            "select ipa, region, source_ref from en_pronunciations where entry_id = ? and source_name = ? order by position"
-          ).all(entry.id, source.source).flatMap((row) => row.source_ref ? [{
-            ipa: row.ipa,
-            ...(row.region ? { region: row.region } : {}),
-            evidenceId: row.source_ref
-          }] : []),
-          senses
-        }];
-      });
+      return readSources(entry.id);
+    },
+    findSourcesById(id) {
+      return readSources(id);
     },
     /**
      * Writes one entry-language group atomically. Only senses in `lang` are

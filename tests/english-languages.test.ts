@@ -446,7 +446,7 @@ test("correct imported target-language content is never rewritten and only its e
   }
 });
 
-test("a rejected example leaves the sense visible and permits one fresh later attempt", async () => {
+test("a rejected example retries once without disturbing the accepted sense", async () => {
   const { repository, gateway, dictionary, close } = await enrichable([
     JSON.stringify({ sentence: "The dog barked.", translation: "犬が吠えた。" }),
     "REJECT",
@@ -457,7 +457,7 @@ test("a rejected example leaves the sense visible and permits one fresh later at
   try {
     const first = await dictionary.resolve({ query: "dog", targetDictionary: "en", lang: "ja" });
     expect(first?.senses).toHaveLength(1);
-    expect(first?.senses[0].examples).toEqual([]);
+    expect(first?.senses[0].examples.map(({ text }) => text)).toEqual(["A dog slept by the fire."]);
     // The accepted sense survives the rejected example.
     expect(repository.find("dog", "ja")?.senses[0].glosses[0].text).toBe("人間に古くから飼われている哺乳類。");
 

@@ -14,7 +14,7 @@ import {
   type LookupEntry
 } from "./lookup-contract";
 import { ModelGatewayError } from "./on-demand-dictionary";
-import type { OnDemandDictionary, OnDemandEntry, ResolveRequest } from "./on-demand-dictionary";
+import type { OnDemandDictionary, OnDemandEntry, ResolveRequest, ResolvedMatches } from "./on-demand-dictionary";
 
 type AppOptions = {
   onDemand?: OnDemandDictionary;
@@ -123,7 +123,7 @@ export function createApp(
     const traceId = c.req.header("x-yori-request-id") ?? crypto.randomUUID();
     const lemma = c.req.query("lemma")?.trim();
     const enriched = wantsEnrichment && options.onDemand
-      ? await options.onDemand.resolve(resolveRequest(query, dictionary, lang, {
+      ? await resolveOnDemand(options.onDemand, resolveRequest(query, dictionary, lang, {
           lemma,
           reading: c.req.query("reading"),
           sentence: c.req.query("context")
@@ -172,10 +172,10 @@ export function createApp(
             reading: candidate.reading,
             sentence: candidate.context
           }, "bulk", traceId);
-      let enriched: OnDemandEntry | null = null;
+      let enriched: ResolvedMatches<OnDemandEntry> | null = null;
       if (body.enrich && options.onDemand) {
         try {
-          enriched = await options.onDemand.resolve(request);
+          enriched = await resolveOnDemand(options.onDemand, request);
         } catch (error) {
           // Only a provider failure is isolated, and `ModelGatewayError` is
           // what says so. `resolve` also writes attempt records and accepted
@@ -217,6 +217,14 @@ export function createApp(
   return app;
 }
 
+async function resolveOnDemand(
+  dictionary: OnDemandDictionary,
+  request: ResolveRequest
+): Promise<ResolvedMatches<OnDemandEntry>> {
+  if (dictionary.resolveAll) return dictionary.resolveAll(request);
+  return { item: await dictionary.resolve(request), alternatives: [] };
+}
+
 /**
  * Reads one entry for the requested dictionary and explanation language.
  * Enriched content is preferred when the owner asked for it; otherwise the
@@ -230,38 +238,48 @@ function readEntry(
   lang: ApiLang,
   query: string,
   lemma: string | undefined,
-  enriched: OnDemandEntry | null
+  enriched: ResolvedMatches<OnDemandEntry> | null
 ): LookupEntry | null {
   if (dictionary === "en") {
     const entries = options.englishLookupAll?.(query, lang) ?? [];
     const released = entries.length > 0 || !lemma || lemma === query
       ? entries
       : options.englishLookupAll?.(lemma, lang) ?? [];
-    return withAlternatives(
-      leadWithAuthored(asEnglishEntry(enriched), released).map((entry) => englishLookupEntry(entry, lang))
-    );
+    if (enriched?.ranked && !enriched.item) return null;
+    return withAlternatives(mergeEnriched(
+      enriched,
+      released,
+      asEnglishEntry
+    ).map((entry) => englishLookupEntry(entry, lang)));
   }
   const { item, alternatives } = db.lookup(query, lang);
   const released = [item, ...alternatives].filter((match): match is PublicLookupItem => match !== null);
-  return withAlternatives(
-    leadWithAuthored(asJapaneseEntry(enriched), released).map((match) => japaneseLookupEntry(match, lang))
-  );
+  if (enriched?.ranked && !enriched.item) return null;
+  return withAlternatives(mergeEnriched(
+    enriched,
+    released,
+    asJapaneseEntry
+  ).map((match) => japaneseLookupEntry(match, lang)));
 }
 
 /**
  * The entries to answer with, best first, when enrichment also ran.
  *
- * An authored entry leads, because it is the newer copy: enrichment either
- * created it for a word the store missed, or completed the store's own entry
- * with the examples it lacked. `resolve` returns a released entry unchanged
- * when it is already complete, so an authored entry is not evidence that the
- * query was a miss — and the siblings that query reached still belong to the
- * reader. Matching by id is what keeps the completed copy from appearing twice,
- * once as the answer and once as an alternative to itself.
+ * Enriched copies lead in their original relevance order, followed by any
+ * released matches the resolver did not return. Matching by id keeps a
+ * completed copy from appearing twice.
  */
-function leadWithAuthored<T extends { id: string }>(authored: T | null, released: T[]): T[] {
-  if (!authored) return released;
-  return [authored, ...released.filter((entry) => entry.id !== authored.id)];
+function mergeEnriched<T extends { id: string }>(
+  enriched: ResolvedMatches<OnDemandEntry> | null,
+  released: T[],
+  narrow: (entry: OnDemandEntry | null) => T | null
+): T[] {
+  const authored = enriched
+    ? [enriched.item, ...enriched.alternatives].map(narrow).filter((entry): entry is T => entry !== null)
+    : [];
+  if (authored.length === 0) return released;
+  const ids = new Set(authored.map(({ id }) => id));
+  return [...authored, ...released.filter(({ id }) => !ids.has(id))];
 }
 
 /**

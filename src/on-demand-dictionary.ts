@@ -32,6 +32,8 @@ export type ResolveRequest = {
     lemma?: string;
     reading?: string;
   };
+  /** Internal exact-match target used when enriching ranked alternatives. */
+  candidate?: { id: string; headword: string };
 };
 
 export type SourceEvidence = {
@@ -132,6 +134,8 @@ export type GenerationProvenance = {
  */
 export type EnrichmentRepository = {
   find(query: string, targetDictionary: TargetDictionary, lang: ApiLang): PublicLookupItem | null;
+  findById?(id: string, lang: ApiLang): PublicLookupItem | null;
+  candidates?(query: string): Array<{ id: string; headword: string }>;
   findSources(query: string, targetDictionary: TargetDictionary): SourceEvidence[];
   saveEntry(entry: PublicLookupItem, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
@@ -149,6 +153,14 @@ export type EnrichmentRepository = {
 
 export type DictionaryResolver<TEntry> = {
   resolve(request: ResolveRequest): Promise<TEntry | null>;
+  resolveAll?(request: ResolveRequest): Promise<ResolvedMatches<TEntry>>;
+};
+
+export type ResolvedMatches<TEntry> = {
+  item: TEntry | null;
+  alternatives: TEntry[];
+  /** Candidates came from a fixed relevance tier; a missing first slot must not be promoted. */
+  ranked?: boolean;
 };
 
 export type OnDemandEntry = PublicLookupItem | EnglishEntry;
@@ -163,6 +175,8 @@ export type JapaneseOnDemandDictionary = DictionaryResolver<PublicLookupItem>;
  */
 export type EnglishEnrichmentRepository = {
   find(query: string, lang: ApiLang): EnglishEntry | null;
+  findById?(id: string, lang: ApiLang): EnglishEntry | null;
+  candidates?(query: string): Array<{ id: string; headword: string }>;
   /**
    * Every entry the query reaches, best first. `find` returns only the first;
    * public lookup hands the rest to the reader, because one spelling can be
@@ -177,6 +191,7 @@ export type EnglishEnrichmentRepository = {
    */
   hasLookupTerm(term: string): boolean;
   findSources(query: string): EnglishSourceRecord[];
+  findSourcesById?(id: string): EnglishSourceRecord[];
   saveEntry(entry: EnglishEntry, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: EnglishExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
@@ -257,7 +272,38 @@ export function createOnDemandDictionary(options: {
       return request.targetDictionary === "en"
         ? options.english?.resolve(request) ?? Promise.resolve(null)
         : options.japanese.resolve(request);
+    },
+    async resolveAll(request) {
+      const resolver = request.targetDictionary === "en" ? options.english : options.japanese;
+      if (!resolver) return { item: null, alternatives: [] };
+      if (resolver.resolveAll) return resolver.resolveAll(request);
+      return { item: await resolver.resolve(request), alternatives: [] };
     }
+  };
+}
+
+async function resolveRanked<TEntry>(
+  request: ResolveRequest,
+  candidates: Array<{ id: string; headword: string }>,
+  resolve: (request: ResolveRequest) => Promise<TEntry | null>
+): Promise<ResolvedMatches<TEntry>> {
+  if (candidates.length === 0) {
+    return { item: await resolve(request), alternatives: [] };
+  }
+  const outcomes = await Promise.all(candidates.map(async (candidate) => {
+    try {
+      return { entry: await resolve({ ...request, candidate }), error: null };
+    } catch (error) {
+      if (error instanceof ModelGatewayError) return { entry: null, error };
+      throw error;
+    }
+  }));
+  if (outcomes.every(({ error }) => error !== null)) throw outcomes[0]!.error;
+  const resolved = outcomes.map(({ entry }) => entry);
+  return {
+    item: resolved[0] ?? null,
+    alternatives: resolved.slice(1).flatMap((entry) => entry === null ? [] : [entry]),
+    ranked: true
   };
 }
 
@@ -331,23 +377,32 @@ export function createJapaneseOnDemandDictionary(options: {
     ...(options.logger ? { logger: options.logger } : {})
   };
 
-  return {
-    async resolve(request) {
-      const traceId = request.traceId ?? crypto.randomUUID();
-      return traceContext.run(traceId, () => runWithModelSummary("ja", traceId, options.logger, async () => {
-      if (request.targetDictionary !== "ja" || !japaneseAuthoredLanguages.has(request.lang)) return null;
-      if (invalidRequest(request)) return null;
-      const existing = options.repository.find(request.query, request.targetDictionary, request.lang);
-      if (existing && existing.senses.every((sense) => (sense.examples?.length ?? 0) > 0)) return existing;
+  const resolveCore = async (request: ResolveRequest): Promise<PublicLookupItem | null> => {
+    if (request.targetDictionary !== "ja" || !japaneseAuthoredLanguages.has(request.lang)) return null;
+    if (invalidRequest(request)) return null;
+    const existing = request.candidate
+      ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
+      : options.repository.find(request.query, request.targetDictionary, request.lang);
+    if (existing && existing.senses.every((sense) => hasJapaneseExamplePair(sense, request.lang))) return existing;
 
-      const key = `${effectiveMode(request.mode)}:${requestOutcomeKey(request)}`;
-      const running = entryInFlight.get(key);
-      if (running) return running;
-      const task = (existing ? completeEntryExamples(runtime, existing, request) : resolveMissing(request, runtime))
-        .finally(() => entryInFlight.delete(key));
-      entryInFlight.set(key, task);
-      return task;
-      }));
+    const key = `${effectiveMode(request.mode)}:${requestOutcomeKey(request)}`;
+    const running = entryInFlight.get(key);
+    if (running) return running;
+    const task = (existing ? completeEntryExamples(runtime, existing, request) : resolveMissing(request, runtime))
+      .finally(() => entryInFlight.delete(key));
+    entryInFlight.set(key, task);
+    return task;
+  };
+  const run = <T>(request: ResolveRequest, work: () => Promise<T>) => {
+    const traceId = request.traceId ?? crypto.randomUUID();
+    return traceContext.run(traceId, () => runWithModelSummary("ja", traceId, options.logger, work));
+  };
+  return {
+    resolve(request) {
+      return run(request, () => resolveCore(request));
+    },
+    resolveAll(request) {
+      return run(request, () => resolveRanked(request, options.repository.candidates?.(request.query) ?? [], resolveCore));
     }
   };
 }
@@ -463,6 +518,13 @@ async function resolveMissing(
 ): Promise<PublicLookupItem | null> {
   if (request.targetDictionary !== "ja" || invalidRequest(request)) return null;
 
+  if (request.candidate) {
+    const evidence = options.repository
+      .findSources(request.candidate.headword, request.targetDictionary)
+      .filter((source) => source.headword === request.candidate!.headword);
+    return authorForHeadword(request, options, request.candidate.headword, evidence);
+  }
+
   let headword = request.context?.lemma?.trim() || request.query.trim();
   if (headword !== request.query.trim()) {
     const existing = options.repository.find(headword, request.targetDictionary, request.lang);
@@ -545,7 +607,9 @@ function authorForHeadword(
   evidence: SourceEvidence[]
 ): Promise<PublicLookupItem | null> {
   return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, headword), async () => {
-    const existing = options.repository.find(headword, request.targetDictionary, request.lang);
+    const existing = request.candidate
+      ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
+      : options.repository.find(headword, request.targetDictionary, request.lang);
     if (existing) return completeEntryExamples(options, existing, request);
     return authorEntry(request, options, headword, evidence);
   });
@@ -560,7 +624,9 @@ async function authorEntry(
   // An entry shares one identity across explanation languages. When the
   // dictionary already knows this headword, the authored group joins that
   // entry instead of creating a second entry the read path would never see.
-  const entryId = options.repository.canonicalEntry?.(headword)?.id ?? stableId("entry", headword);
+  const entryId = request.candidate?.id
+    ?? options.repository.canonicalEntry?.(headword)?.id
+    ?? stableId("entry", headword);
   const vocabulary = options.repository.labelVocabulary();
   const authored = await callAndRecord(
     options,
@@ -608,7 +674,9 @@ async function authorEntry(
   // Read the group back so an authored language group on an existing entry
   // answers with that entry's own identity, written forms, and source facts
   // rather than the candidate's placeholder ones.
-  const stored = options.repository.find(headword, request.targetDictionary, request.lang) ?? entry;
+  const stored = request.candidate
+    ? options.repository.findById?.(request.candidate.id, request.lang) ?? entry
+    : options.repository.find(headword, request.targetDictionary, request.lang) ?? entry;
   return completeEntryExamples(options, stored, request);
 }
 
@@ -648,20 +716,25 @@ async function completeEntryExamples(
   request: ResolveRequest
 ): Promise<PublicLookupItem> {
   const examples = await Promise.all(entry.senses.map((sense) => {
-    if ((sense.examples?.length ?? 0) > 0) return Promise.resolve(null);
+    if (hasJapaneseExamplePair(sense, request.lang)) return Promise.resolve(null);
     return completeExample(options, entry, sense, request).catch(missingExample);
   }));
   return {
     ...entry,
-    senses: entry.senses.map((sense, index) => examples[index] ? { ...sense, examples: [examples[index]!] } : sense)
+    senses: entry.senses.map((sense, index) => examples[index]
+      ? { ...sense, examples: [...(sense.examples ?? []), examples[index]!] }
+      : sense)
   };
 }
 
-/**
- * A generated example is optional content. When the provider cannot deliver
- * one, the sense keeps its accepted glosses and the example stays missing
- * and retryable instead of failing the whole lookup.
- */
+function hasJapaneseExamplePair(sense: PublicSense, lang: ApiLang): boolean {
+  return (sense.examples ?? []).some((example) =>
+    example.text.trim().length > 0
+    && example.translations.some((translation) => translation.lang === lang && translation.text.trim().length > 0)
+  );
+}
+
+/** A provider failure leaves this one example gap retryable without discarding correct content. */
 function missingExample(error: unknown): null {
   if (error instanceof ModelGatewayError) return null;
   throw error;
@@ -674,9 +747,17 @@ async function completeExample(
   request: ResolveRequest
 ): Promise<PublicExample | null> {
   return shareByKey(options.exampleInFlight, exampleOutcomeKey(request, sense.id), async () => {
-    const canonical = options.repository.find(entry.word, "ja", request.lang)
+    const canonicalEntry = request.candidate
+      ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
+      : options.repository.find(entry.word, "ja", request.lang);
+    const canonical = canonicalEntry
       ?.senses.find((candidate) => candidate.id === sense.id)
-      ?.examples?.[0];
+      ?.examples?.find((example) =>
+        example.text.trim().length > 0
+        && example.translations.some((translation) =>
+          translation.lang === request.lang && translation.text.trim().length > 0
+        )
+      );
     if (canonical) return canonical;
     return completeExampleWork(options, entry, sense, request);
   });
@@ -690,40 +771,40 @@ async function completeExampleWork(
 ): Promise<PublicExample | null> {
   const mode = request.mode;
   const candidateId = `${sense.id}:example`;
-  const authored = await callAndRecord(
-    options,
-    exampleAuthorConfig,
-    exampleAuthorPrompt(candidateId, entry, sense, request.lang),
-    mode,
-    candidateId
-  );
-  let example: PublicExample;
-  try {
-    example = parseExample(authored.text, entry.word, request.lang);
-  } catch (error) {
-    recordOutcome(options.repository, authored.attempt, "malformed");
-    logRefusal(options, request, "example", entry.word, refusalReason(error));
-    return null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const authored = await callAndRecord(
+      options,
+      exampleAuthorConfig,
+      exampleAuthorPrompt(candidateId, entry, sense, request.lang),
+      mode,
+      candidateId
+    );
+    let example: PublicExample;
+    try {
+      example = parseExample(authored.text, entry.word, request.lang);
+    } catch (error) {
+      recordOutcome(options.repository, authored.attempt, "malformed");
+      logRefusal(options, request, "example", entry.word, refusalReason(error));
+      continue;
+    }
+    recordOutcome(options.repository, authored.attempt, "candidate");
+    const reviewed = await callAndRecord(
+      options,
+      exampleReviewConfig,
+      reviewPrompt(candidateId, { entry: { word: entry.word, reading: entry.reading }, sense, example }),
+      mode,
+      candidateId
+    );
+    const review = reviewOutcome(reviewed.text);
+    recordOutcome(options.repository, reviewed.attempt, review);
+    if (review !== "accepted") {
+      logRefusal(options, request, "example", entry.word, `reviewer returned ${review}`);
+      continue;
+    }
+    options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
+    return example;
   }
-  recordOutcome(options.repository, authored.attempt, "candidate");
-  const reviewed = await callAndRecord(
-    options,
-    exampleReviewConfig,
-    reviewPrompt(candidateId, { entry: { word: entry.word, reading: entry.reading }, sense, example }),
-    mode,
-    candidateId
-  );
-  const review = reviewOutcome(reviewed.text);
-  recordOutcome(options.repository, reviewed.attempt, review);
-  if (review !== "accepted") {
-    // A refused example is never saved and never removes accepted senses. It
-    // stays missing, and a later owner-authorized lookup tries a fresh
-    // candidate.
-    logRefusal(options, request, "example", entry.word, `reviewer returned ${review}`);
-    return null;
-  }
-  options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
-  return example;
+  return null;
 }
 
 /** Full provenance for content a reviewer accepted. */
@@ -843,7 +924,7 @@ function refusalReason(error: unknown): string {
 }
 
 function entryOutcomeKey(request: ResolveRequest, headword: string): string {
-  return `entry:${request.targetDictionary}:${request.lang}:${headword.trim()}`;
+  return `entry:${request.targetDictionary}:${request.lang}:${request.candidate?.id ?? headword.trim()}`;
 }
 
 function exampleOutcomeKey(request: ResolveRequest, senseId: string): string {
@@ -853,6 +934,7 @@ function exampleOutcomeKey(request: ResolveRequest, senseId: string): string {
 function requestOutcomeKey(request: ResolveRequest): string {
   const identity = JSON.stringify({
     query: request.query.trim(),
+    candidateId: request.candidate?.id ?? "",
     lemma: request.context?.lemma?.trim() ?? "",
     reading: request.context?.reading?.trim() ?? "",
     sentence: request.context?.sentence?.trim() ?? ""
@@ -1373,34 +1455,43 @@ export function createEnglishOnDemandDictionary(options: {
     exampleInFlight: new Map(),
     ...(options.logger ? { logger: options.logger } : {})
   };
-  return {
-    async resolve(request) {
-      const traceId = request.traceId ?? crypto.randomUUID();
-      return traceContext.run(traceId, () => runWithModelSummary("en", traceId, options.logger, async () => {
-      if (request.targetDictionary !== "en" || !englishAuthoredLanguages.has(request.lang)) return null;
-      const surface = normalizeEnglishHeadword(request.query);
-      const lemma = request.context?.lemma ? normalizeEnglishHeadword(request.context.lemma) : "";
-      const existing = options.repository.find(surface, request.lang)
+  const resolveCore = async (request: ResolveRequest): Promise<EnglishEntry | null> => {
+    if (request.targetDictionary !== "en" || !englishAuthoredLanguages.has(request.lang)) return null;
+    const surface = normalizeEnglishHeadword(request.query);
+    const lemma = request.context?.lemma ? normalizeEnglishHeadword(request.context.lemma) : "";
+    const existing = request.candidate
+      ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
+      : options.repository.find(surface, request.lang)
         ?? (lemma && lemma !== surface
           ? options.repository.find(lemma, request.lang)
           : null);
-      if (existing && existing.senses.every((sense) => sense.examples.length > 0)) return existing;
-      if (invalidEnglishRequest(request)) return null;
-      const key = englishRequestKey(request);
-      const running = inFlight.get(key);
-      if (running) return running;
-      const task = (existing ? completeCanonicalEnglishEntry(existing, request, runtime) : resolveMissingEnglish(request, runtime))
-        .finally(() => inFlight.delete(key));
-      inFlight.set(key, task);
-      return task;
-      }));
+    if (existing && existing.senses.every((sense) => hasEnglishExamplePair(sense, request.lang))) return existing;
+    if (invalidEnglishRequest(request)) return null;
+    const key = englishRequestKey(request);
+    const running = inFlight.get(key);
+    if (running) return running;
+    const task = (existing ? completeCanonicalEnglishEntry(existing, request, runtime) : resolveMissingEnglish(request, runtime))
+      .finally(() => inFlight.delete(key));
+    inFlight.set(key, task);
+    return task;
+  };
+  const run = <T>(request: ResolveRequest, work: () => Promise<T>) => {
+    const traceId = request.traceId ?? crypto.randomUUID();
+    return traceContext.run(traceId, () => runWithModelSummary("en", traceId, options.logger, work));
+  };
+  return {
+    resolve(request) {
+      return run(request, () => resolveCore(request));
+    },
+    resolveAll(request) {
+      return run(request, () => resolveRanked(request, options.repository.candidates?.(request.query) ?? [], resolveCore));
     }
   };
 }
 
 /**
  * A canonical entry is never rewritten. Imported senses stay exactly as the
- * pinned sources wrote them; only a missing generated example is filled in.
+ * pinned sources wrote them; only a missing complete example pair is filled in.
  */
 function completeCanonicalEnglishEntry(
   entry: EnglishEntry,
@@ -1414,6 +1505,15 @@ async function resolveMissingEnglish(
   request: ResolveRequest,
   options: EnglishRuntimeOptions
 ): Promise<EnglishEntry | null> {
+  if (request.candidate) {
+    const sources = options.repository.findSourcesById?.(request.candidate.id)
+      ?? options.repository.findSources(request.candidate.headword);
+    return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, request.candidate.headword), async () => {
+      const existing = options.repository.findById?.(request.candidate!.id, request.lang) ?? null;
+      if (existing) return completeEnglishExamples(existing, request, options);
+      return authorEnglishEntry(request, request.candidate!.headword, sources, options);
+    });
+  }
   let headword = normalizeEnglishHeadword(request.context?.lemma || request.query);
   let sources = options.repository.findSources(headword);
   if (sources.length > 0) {
@@ -1444,7 +1544,7 @@ async function resolveMissingEnglish(
   const key = entryOutcomeKey(request, normalizeEnglishHeadword(headword));
   return shareByKey(options.canonicalInFlight, key, async () => {
     const existing = options.repository.find(headword, request.lang);
-    if (existing) return existing;
+    if (existing) return completeEnglishExamples(existing, request, options);
     return authorEnglishEntry(request, headword, sources, options);
   });
 }
@@ -1478,7 +1578,7 @@ async function authorEnglishEntry(
   sources: EnglishSourceRecord[],
   options: EnglishRuntimeOptions
 ): Promise<EnglishEntry | null> {
-  const entryId = englishStableId("entry", headword);
+  const entryId = request.candidate?.id ?? englishStableId("entry", headword);
   // One candidate id per entry *and* language, so two languages authored at the
   // same time never share a model request or its recorded attempt.
   const candidateId = englishCandidateId(entryId, request.lang);
@@ -1530,7 +1630,9 @@ async function authorEnglishEntry(
   // Read the group back so an authored language group answers with the entry's
   // own pronunciations and source facts, exactly as a later lookup would. The
   // author writes senses only; it never writes those entry-level facts.
-  const stored = options.repository.find(entry.headword, request.lang) ?? entry;
+  const stored = request.candidate
+    ? options.repository.findById?.(request.candidate.id, request.lang) ?? entry
+    : options.repository.find(entry.headword, request.lang) ?? entry;
   return completeEnglishExamples(stored, request, options);
 }
 
@@ -1540,11 +1642,21 @@ async function completeEnglishExamples(
   options: EnglishRuntimeOptions
 ): Promise<EnglishEntry> {
   const completed = await Promise.all(entry.senses.map(async (sense) => {
-    if (sense.examples.length > 0) return null;
+    if (hasEnglishExamplePair(sense, request.lang)) return null;
     const candidateId = `${sense.id}:example`;
     return shareByKey(options.exampleInFlight, exampleOutcomeKey(request, sense.id), async () => {
-      const canonical = options.repository.find(entry.headword, request.lang)
-        ?.senses.find((candidate) => candidate.id === sense.id)?.examples[0];
+      const canonicalEntry = request.candidate
+        ? options.repository.findById?.(request.candidate.id, request.lang) ?? null
+        : options.repository.find(entry.headword, request.lang);
+      const canonical = canonicalEntry
+        ?.senses.find((candidate) => candidate.id === sense.id)?.examples
+        .find((example) => {
+          if (example.text.trim().length === 0) return false;
+          if (request.lang === "en") return true;
+          return example.translations?.some((translation) =>
+            translation.lang === request.lang && translation.text.trim().length > 0
+          ) ?? false;
+        });
       if (canonical) return canonical;
       return completeEnglishExample(entry, sense, candidateId, request, options);
     }).catch(missingExample);
@@ -1557,6 +1669,16 @@ async function completeEnglishExamples(
   };
 }
 
+function hasEnglishExamplePair(sense: EnglishEntry["senses"][number], lang: ApiLang): boolean {
+  return sense.examples.some((example) => {
+    if (example.text.trim().length === 0) return false;
+    if (lang === "en") return true;
+    return example.translations?.some((translation) =>
+      translation.lang === lang && translation.text.trim().length > 0
+    ) ?? false;
+  });
+}
+
 async function completeEnglishExample(
   entry: EnglishEntry,
   sense: EnglishEntry["senses"][number],
@@ -1564,8 +1686,9 @@ async function completeEnglishExample(
   request: ResolveRequest,
   options: EnglishRuntimeOptions
 ): Promise<EnglishExample | null> {
-    const mode = request.mode;
-    const bilingual = request.lang !== "en";
+  const mode = request.mode;
+  const bilingual = request.lang !== "en";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     const authored = await callAndRecord(
       options,
       bilingual ? options.modelConfigs.bilingualExampleAuthor : options.modelConfigs.exampleAuthor,
@@ -1579,7 +1702,7 @@ async function completeEnglishExample(
     } catch (error) {
       englishRecordOutcome(options.repository, authored.attempt, "malformed");
       logRefusal(options, request, "example", entry.headword, refusalReason(error));
-      return null;
+      continue;
     }
     englishRecordOutcome(options.repository, authored.attempt, "candidate");
     const reviewed = await callAndRecord(
@@ -1597,14 +1720,13 @@ async function completeEnglishExample(
     const outcome = reviewOutcome(reviewed.text);
     englishRecordOutcome(options.repository, reviewed.attempt, outcome);
     if (outcome !== "accepted") {
-      // A refused example is never saved and never removes accepted senses.
-      // It stays missing, and a later owner-authorized lookup tries a fresh
-      // candidate.
       logRefusal(options, request, "example", entry.headword, `reviewer returned ${outcome}`);
-      return null;
+      continue;
     }
     options.repository.saveExample(sense.id, example, acceptedGeneration(authored.attempt));
     return example;
+  }
+  return null;
 }
 
 /**
@@ -2029,6 +2151,7 @@ function englishStableId(kind: "entry" | "sense", value: string): string {
 function englishRequestKey(request: ResolveRequest): string {
   return `request:en:${request.lang}:${createHash("sha256").update(JSON.stringify({
     query: normalizeEnglishHeadword(request.query),
+    candidateId: request.candidate?.id ?? "",
     lemma: request.context?.lemma ? normalizeEnglishHeadword(request.context.lemma) : "",
     sentence: request.context?.sentence?.trim() ?? ""
   })).digest("hex").slice(0, 20)}`;

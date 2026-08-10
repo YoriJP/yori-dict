@@ -81,6 +81,8 @@ type ExampleRow = {
 export type LookupDb = {
   /** Returns only senses owned by `lang`; it never falls back to another language. */
   lookup(query: string, lang: ApiLang): LookupResponse;
+  /** Canonical entries in the best relevance tier, independent of explanation language. */
+  candidates?(query: string): Array<{ id: string; headword: string }>;
   meta(): {
     apiVersion: "v1";
     dictionaryVersion: string | null;
@@ -103,6 +105,9 @@ export function openLookupDb(path: string): LookupDb {
   return {
     lookup(query, lang) {
       return lookup(db, query, lang);
+    },
+    candidates(query) {
+      return lookupJapaneseCandidates(db, query);
     },
     meta() {
       return {
@@ -225,6 +230,12 @@ export function visitJapaneseEntries(path: string, visit: (record: JapaneseEntry
 }
 
 function lookup(db: Database, query: string, lang: ApiLang): LookupResponse {
+  const candidates = lookupCandidates(db, query);
+  const [item, ...alternatives] = readMatchingItems(db, candidates, lang);
+  return { item: item ?? null, alternatives };
+}
+
+function lookupCandidates(db: Database, query: string): LookupCandidate[] {
   const normalizedQuery = normalizeQuery(query);
   const candidates: LookupCandidate[] = [];
 
@@ -248,8 +259,25 @@ function lookup(db: Database, query: string, lang: ApiLang): LookupResponse {
     });
   }
 
-  const [item, ...alternatives] = readMatchingItems(db, candidates, lang);
-  return { item: item ?? null, alternatives };
+  return candidates;
+}
+
+/** The best relevance tier before explanation-language availability filters it. */
+export function lookupJapaneseCandidates(db: Database, query: string): Array<{ id: string; headword: string }> {
+  const tiers = groupCandidateTiers(lookupCandidates(db, query));
+  const first = [...tiers.keys()].sort((a, b) => a - b)[0];
+  if (first === undefined) return [];
+  const seen = new Set<string>();
+  const entries: Array<{ id: string; headword: string }> = [];
+  for (const candidate of tiers.get(first)!) {
+    for (const entryId of candidate.entryIds) {
+      if (seen.has(entryId)) continue;
+      seen.add(entryId);
+      const headword = readHeadwords(db, entryId)[0]?.text;
+      if (headword) entries.push({ id: entryId, headword });
+    }
+  }
+  return entries;
 }
 
 /**
@@ -340,10 +368,7 @@ function readMatchingItems(
   // would bury it under guesses about a verb they did not use. A lower tier is
   // still consulted when the better one cannot answer in this language, which
   // is the rule that was already here — this only stops the tiers mixing.
-  const tiers = new Map<number, LookupCandidate[]>();
-  for (const candidate of candidates) {
-    tiers.set(candidate.rank, [...(tiers.get(candidate.rank) ?? []), candidate]);
-  }
+  const tiers = groupCandidateTiers(candidates);
   for (const rank of [...tiers.keys()].sort((a, b) => a - b)) {
     const items: PublicLookupItem[] = [];
     const seen = new Set<string>();
@@ -364,6 +389,14 @@ function readMatchingItems(
   return [];
 }
 
+function groupCandidateTiers(candidates: LookupCandidate[]): Map<number, LookupCandidate[]> {
+  const tiers = new Map<number, LookupCandidate[]>();
+  for (const candidate of candidates) {
+    tiers.set(candidate.rank, [...(tiers.get(candidate.rank) ?? []), candidate]);
+  }
+  return tiers;
+}
+
 function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): PublicLookupItem {
   const headword = entry.headwords[0];
   return {
@@ -379,6 +412,11 @@ function toLookupItem(entry: PublicEntry, inflectionPath: InflectionStep[]): Pub
     headwords: entry.headwords,
     senses: entry.senses
   };
+}
+
+export function readJapaneseLookupItem(db: Database, entryId: string, lang: ApiLang): PublicLookupItem | null {
+  const entry = readEntry(db, entryId, lang);
+  return entry && entry.senses.length > 0 ? toLookupItem(entry, []) : null;
 }
 
 function readEntry(db: Database, entryId: string, lang: ApiLang): PublicEntry | null {

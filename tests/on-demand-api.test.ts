@@ -179,6 +179,56 @@ test("an enriched hit on a released word keeps the siblings that word reached", 
   expect(entry.alternatives[0].id).toBe("yori:e_sibling");
 });
 
+test("enriched alternatives replace their released copies without changing rank", async () => {
+  const primary = generatedEntry();
+  primary.id = "yori:e_primary";
+  primary.source = "jmdict";
+  const sibling = { ...generatedEntry(), id: "yori:e_sibling", word: "琴" };
+  const enrichedSibling = structuredClone(sibling);
+  enrichedSibling.senses[0].examples = [{
+    text: "琴を弾きます。",
+    translations: [{ lang: "en", text: "I play the koto." }],
+    source: "generated",
+    reviewStatus: "checked"
+  }];
+  const db = emptyDb();
+  db.lookup = () => ({ item: primary, alternatives: [sibling] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    onDemand: {
+      async resolve() { return primary; },
+      async resolveAll() { return { item: primary, alternatives: [enrichedSibling], ranked: true }; }
+    }
+  });
+
+  const response = await app.request("/v1/lookup?q=%E3%81%93%E3%81%A8&dictionary=ja&lang=en&enrich=true", {
+    headers: { authorization: "Bearer secret" }
+  });
+  const entry = await response.json();
+  expect(entry.id).toBe(primary.id);
+  expect(entry.alternatives).toHaveLength(1);
+  expect(entry.alternatives[0].id).toBe(sibling.id);
+  expect(entry.alternatives[0].senses[0].examples[0].translations[0].text).toBe("I play the koto.");
+});
+
+test("a failed primary is not replaced by a successfully enriched alternative", async () => {
+  const sibling = { ...generatedEntry(), id: "yori:e_sibling", word: "琴" };
+  const db = emptyDb();
+  db.lookup = () => ({ item: sibling, alternatives: [] });
+  const app = createApp(db, {
+    enrichmentToken: "secret",
+    onDemand: {
+      async resolve() { return null; },
+      async resolveAll() { return { item: null, alternatives: [sibling], ranked: true }; }
+    }
+  });
+
+  const response = await app.request("/v1/lookup?q=%E3%81%93%E3%81%A8&dictionary=ja&lang=en&enrich=true", {
+    headers: { authorization: "Bearer secret" }
+  });
+  expect(await response.json()).toBeNull();
+});
+
 test("a storage failure inside resolve fails the batch, unlike a provider failure", async () => {
   // `resolve` writes attempt records and accepted entries as it goes, so a
   // locked database throws from inside it just as a dead provider does.
