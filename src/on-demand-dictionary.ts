@@ -885,8 +885,14 @@ async function callAndRecord(
   mode: ResolveRequest["mode"],
   candidateId: string
 ): Promise<{ text: string; attempt: AttemptRecord }> {
+  // Both modes end on standard, because an entry lost to a capacity dip costs
+  // more than the call that would have finished it: the backfill that wanted it
+  // has already moved on, and the gap only closes if someone notices and asks
+  // again. Bulk buys one extra Flex attempt first, since it can afford to wait
+  // and Flex is the cheaper tier; on-demand has someone waiting and escalates
+  // straight away.
   const tiers: ServiceTier[] = config.requestedServiceTier === "flex"
-    ? mode === "bulk" ? ["flex", "flex", "flex"] : ["flex", "standard"]
+    ? mode === "bulk" ? ["flex", "flex", "standard"] : ["flex", "standard"]
     : ["standard"];
   let failure = new ModelGatewayError("permanent", "Model gateway made no attempt");
   for (const [index, requestedServiceTier] of tiers.entries()) {

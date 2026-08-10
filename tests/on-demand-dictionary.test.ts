@@ -820,10 +820,13 @@ test("a transient Flex failure falls back once to standard while permanent failu
     modelGateway: bulkGateway,
     sleep: async (ms) => { waits.push(ms); }
   }).resolve({ ...request("稀語"), mode: "bulk" });
-  expect(bulkGateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "flex", "flex"]);
+  // Bulk waits out one repeat of Flex, then escalates rather than losing the
+  // entry: a gap only closes if someone notices it and asks again.
+  expect(bulkGateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "flex", "standard"]);
   // Flex refuses on capacity, not on the request, so asking again immediately
-  // meets the same shortage. Each repeat of a tier waits longer than the last.
-  expect(waits).toEqual(sameTierBackoffMs);
+  // meets the same shortage. Escalating to a tier that has capacity does not
+  // wait, so only the repeated tier does.
+  expect(waits).toEqual([sameTierBackoffMs[0]]);
 });
 
 test("bulk and on-demand calls do not share an in-flight retry policy", async () => {

@@ -102,9 +102,11 @@ version are pinned in code.
 
 One limiter bounds every model call in the process, across both dictionaries and all requests. It is therefore the ceiling on total enrichment throughput: a batch fans its queries out in parallel, a tier fans its candidates out, and an entry fans its senses out, and all of that queues behind the same slots. A consumer cannot raise its own throughput by sending more concurrent requests, so a change here is the only thing that moves a backfill.
 
-All model calls request Flex first. On-demand transient failures fall back to standard once; bulk calls make at most three Flex attempts. The SDK retry mechanism is disabled so this policy has one owner.
+All model calls request Flex first, and both modes end on standard rather than giving up. On-demand falls back after one Flex failure; bulk waits out a second Flex attempt first, since it can afford the delay and Flex is the cheaper tier. The SDK retry mechanism is disabled so this policy has one owner.
 
-A retry that repeats a tier waits first, and each repeat waits longer. Flex refuses on a shortage of spare capacity rather than on anything about the request, and it does not bill the refusal, so asking again in the same millisecond meets the same shortage — bulk's three Flex attempts were three ways of losing one entry at the same instant. A retry that escalates to a different tier has nothing to wait for and does not pause.
+A retry that repeats a tier waits first, and each repeat waits longer. Flex refuses on a shortage of spare capacity rather than on anything about the request, and it does not bill the refusal, so asking again in the same millisecond meets the same shortage. A retry that escalates to a different tier has capacity waiting for it and does not pause.
+
+Ending on standard costs more than a third Flex attempt and is worth it: an entry lost to a capacity dip is a gap that only closes if someone notices it and asks again, long after the backfill that wanted it has finished.
 
 The per-attempt timeout is a guard against a call that will never answer, not a latency budget. Abandoning a call does not stop the work — the tokens are generated and billed either way — so a ceiling short enough to cut off calls that would have succeeded pays for an entry up to three times and stores nothing.
 

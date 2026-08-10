@@ -14,7 +14,7 @@ A refusal is logged as `enrichment_refused` with the stage, the headword, and th
 
 Only transient provider, transport, timeout, rate-limit, and service-tier failures retry within a single attempt.
 
-Bulk work uses Flex for at most three total transient attempts, then records an error. On-demand work attempts Flex once and may fall back once to standard service after a transient Flex failure. Authentication, configuration, and permanent request errors never retry.
+Both modes make at most three total transient attempts and both end on standard service. Bulk attempts Flex twice, waiting between the two, then falls back to standard; on-demand attempts Flex once and falls back straight away, because someone is waiting for it. A retry that repeats a tier waits first and each repeat waits longer, since Flex refuses on a shortage of spare capacity rather than on the request and does not bill the refusal; a retry that escalates has capacity waiting for it and does not pause. Authentication, budget, configuration, and permanent request errors never retry.
 
 OpenRouter model fallback is disabled and required parameters must be supported. SDK retries are also disabled: the enrichment module alone owns the Flex and standard-tier retry policy.
 
