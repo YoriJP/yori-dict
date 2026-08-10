@@ -18,6 +18,10 @@ if (!Bun.argv.includes("--run")) {
 const corpusPath = flag("--corpus") ?? "fixtures/on-demand-regression-corpus.json";
 const corpus = await Bun.file(resolve(corpusPath)).json() as Corpus;
 const selectedCase = flag("--case");
+if (Bun.argv.includes("--case") && !selectedCase?.trim()) {
+  console.error("--case requires a non-empty candidate");
+  process.exit(2);
+}
 const eligibility = corpus.eligibility.filter((candidate) => !selectedCase || candidate.candidate === selectedCase);
 if (selectedCase && eligibility.length !== 1) {
   console.error(`Eval case not found: ${selectedCase}`);
