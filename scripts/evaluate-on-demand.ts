@@ -4,6 +4,7 @@ import {
   createJapaneseOnDemandDictionary,
   onDemandEvaluationContracts,
   type AttemptRecord,
+  type EnrichmentRefusal,
   type EnrichmentRepository,
   type ModelRequest,
   type SourceEvidence
@@ -14,17 +15,26 @@ if (!Bun.argv.includes("--run")) {
   console.error("Paid evaluation is disabled. Re-run with --run to call OpenRouter.");
   process.exit(2);
 }
+const corpusPath = flag("--corpus") ?? "fixtures/on-demand-regression-corpus.json";
+const corpus = await Bun.file(resolve(corpusPath)).json() as Corpus;
+const selectedCase = flag("--case");
+if (Bun.argv.includes("--case") && !selectedCase?.trim()) {
+  console.error("--case requires a non-empty candidate");
+  process.exit(2);
+}
+const eligibility = corpus.eligibility.filter((candidate) => !selectedCase || candidate.candidate === selectedCase);
+if (selectedCase && eligibility.length !== 1) {
+  console.error(`Eval case not found: ${selectedCase}`);
+  process.exit(2);
+}
 if (!process.env.OPENROUTER_API_KEY) {
   console.error("OPENROUTER_API_KEY is required.");
   process.exit(2);
 }
-
-const corpusPath = flag("--corpus") ?? "fixtures/on-demand-regression-corpus.json";
-const corpus = await Bun.file(resolve(corpusPath)).json() as Corpus;
 const gateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY });
 let failed = 0;
 
-for (const test of corpus.eligibility) {
+for (const test of eligibility) {
   const response = await gateway.call(request({
     role: "eligibility",
     model: onDemandEvaluationContracts.eligibility.model,
@@ -36,11 +46,12 @@ for (const test of corpus.eligibility) {
   console.log(`${passed ? "PASS" : "FAIL"} eligibility/${test.candidate}: ${response.text.trim()}`);
 
   const production = await evaluateProductionPath(test, gateway);
-  if (!production) failed += 1;
-  console.log(`${production ? "PASS" : "FAIL"} production/${test.candidate}`);
+  if (!production.passed) failed += 1;
+  console.log(`${production.passed ? "PASS" : "FAIL"} production/${test.candidate}`);
+  if (!production.passed) console.log(JSON.stringify(production.diagnostics));
 }
 
-for (const test of corpus.reviewDefects) {
+for (const test of selectedCase ? [] : corpus.reviewDefects) {
   const candidateId = `eval:${test.id}`;
   const response = await gateway.call(request({
     role: "entry-review",
@@ -54,7 +65,7 @@ for (const test of corpus.reviewDefects) {
   console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}: ${verdict}`);
 }
 
-const total = corpus.eligibility.length * 2 + corpus.reviewDefects.length;
+const total = eligibility.length * 2 + (selectedCase ? 0 : corpus.reviewDefects.length);
 console.log(`${total - failed}/${total} passed`);
 if (failed > 0) process.exitCode = 1;
 
@@ -75,7 +86,10 @@ function parseReview(text: string): "accepted" | "rejected" | "malformed" {
   return "malformed";
 }
 
-async function evaluateProductionPath(test: EligibilityCase, gateway: ReturnType<typeof createOpenRouterModelGateway>): Promise<boolean> {
+async function evaluateProductionPath(
+  test: EligibilityCase,
+  gateway: ReturnType<typeof createOpenRouterModelGateway>
+): Promise<{ passed: boolean; diagnostics: Record<string, unknown> }> {
   const source: SourceEvidence = {
     source: "paid-regression-fixture",
     sourceEntryId: test.candidate,
@@ -88,9 +102,15 @@ async function evaluateProductionPath(test: EligibilityCase, gateway: ReturnType
     }))
   };
   const repository = new EvaluationRepository(source);
-  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, timeoutMs: 60_000 });
+  const refusals: EnrichmentRefusal[] = [];
+  const dictionary = createJapaneseOnDemandDictionary({
+    repository,
+    modelGateway: gateway,
+    timeoutMs: 60_000,
+    logger: (event) => { if (event.event === "enrichment_refused") refusals.push(event); }
+  });
   const entry = await dictionary.resolve({ query: test.candidate, targetDictionary: "ja", lang: "en" });
-  return Boolean(
+  const passed = Boolean(
     entry
     && entry.word === test.expected
     && entry.senses.length >= test.sourceSenses.length
@@ -99,6 +119,16 @@ async function evaluateProductionPath(test: EligibilityCase, gateway: ReturnType
     && repository.attempts.some((attempt) => attempt.role === "entry-review" && attempt.outcome === "accepted")
     && repository.attempts.some((attempt) => attempt.role === "example-review" && attempt.outcome === "accepted")
   );
+  return {
+    passed,
+    diagnostics: {
+      attempts: repository.attempts.map(({ role, outcome, promptVersion }) => ({ role, outcome, promptVersion })),
+      refusals: refusals.map(({ stage, headword, reason }) => ({ stage, headword, reason })),
+      inputTokens: repository.attempts.reduce((sum, attempt) => sum + (attempt.inputTokens ?? 0), 0),
+      outputTokens: repository.attempts.reduce((sum, attempt) => sum + (attempt.outputTokens ?? 0), 0),
+      costUsd: repository.attempts.reduce((sum, attempt) => sum + (attempt.costUsd ?? 0), 0)
+    }
+  };
 }
 
 class EvaluationRepository implements EnrichmentRepository {

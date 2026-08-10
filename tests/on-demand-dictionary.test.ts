@@ -59,6 +59,11 @@ test("resolve completes missing examples once across concurrent requests", async
   expect(first?.senses[0].examples).toHaveLength(1);
   expect(second).toEqual(first);
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-review"]);
+  expect(gateway.calls[0]).toMatchObject({ promptVersion: "example-author-v2" });
+  expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword spelling as a standalone lexical item");
+  expect(gateway.calls[1]).toMatchObject({ promptVersion: "example-review-v3" });
+  expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
+  expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
 });
 
 test("completing one sense does not truncate existing examples on another sense", async () => {
@@ -721,6 +726,31 @@ test("generated Japanese examples require the standalone headword or an inflecte
   const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway }).resolve(request("生"));
   expect(entry?.senses[0].examples).toBeUndefined();
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-author"]);
+});
+
+test("Japanese example validation logs actionable deterministic reason codes", async () => {
+  const released = existingEntry();
+  released.word = "生";
+  released.reading = "せい";
+  released.headwords = [{ text: "生", reading: "せい", kind: "kanji", common: false, tags: [] }];
+  released.senses[0].examples = undefined;
+  const refusals: Array<Record<string, unknown>> = [];
+  const gateway = new ScriptedGateway([
+    JSON.stringify({ sentence: "先生が教室に入った。", translation: "The teacher entered the classroom." }),
+    JSON.stringify({ sentence: "生の魚を食べた。", translation: "生の魚を食べた。" })
+  ]);
+
+  const entry = await createJapaneseOnDemandDictionary({
+    repository: new MemoryRepository({ released: [["生", released]] }),
+    modelGateway: gateway,
+    logger: (event) => { if (event.event === "enrichment_refused") refusals.push(event); }
+  }).resolve(request("生"));
+
+  expect(entry?.senses[0].examples).toBeUndefined();
+  expect(refusals.map(({ reason }) => reason)).toEqual([
+    "headword_not_used",
+    "wrong_translation_language"
+  ]);
 });
 
 test("reviewer explanations fail closed as malformed", async () => {

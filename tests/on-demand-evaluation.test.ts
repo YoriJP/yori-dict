@@ -25,3 +25,31 @@ test("the paid evaluation refuses to call a model without an explicit --run", as
   expect(await child.exited).toBe(2);
   expect(await new Response(child.stderr).text()).toContain("Paid evaluation is disabled");
 });
+
+test("a targeted paid evaluation refuses an unknown case before model setup", async () => {
+  const child = Bun.spawn([
+    "bun", "run", "scripts/evaluate-on-demand.ts", "--run", "--case", "missing-case"
+  ], {
+    cwd: process.cwd(),
+    env: { ...Bun.env, OPENROUTER_API_KEY: "" },
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  expect(await child.exited).toBe(2);
+  expect(await new Response(child.stderr).text()).toContain("Eval case not found: missing-case");
+});
+
+test("a targeted paid evaluation requires a non-empty case selector", async () => {
+  for (const suffix of [["--case"], ["--case", ""]]) {
+    const child = Bun.spawn([
+      "bun", "run", "scripts/evaluate-on-demand.ts", "--run", ...suffix
+    ], {
+      cwd: process.cwd(),
+      env: { ...Bun.env, OPENROUTER_API_KEY: "should-not-be-used" },
+      stdout: "pipe",
+      stderr: "pipe"
+    });
+    expect(await child.exited).toBe(2);
+    expect(await new Response(child.stderr).text()).toContain("--case requires a non-empty candidate");
+  }
+});

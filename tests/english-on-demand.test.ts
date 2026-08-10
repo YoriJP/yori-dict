@@ -52,6 +52,11 @@ test("English resolve completes missing examples on released senses", async () =
   expect(repository.savedExamples).toEqual([["yori:en:s_bank", {
     text: "She deposited her salary at the bank.", source: "generated", reviewStatus: "checked"
   }]]);
+  expect(gateway.calls[0]).toMatchObject({ promptVersion: "english-example-author-v2" });
+  expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword exactly as a complete lexical item");
+  expect(gateway.calls[1]).toMatchObject({ promptVersion: "english-example-review-v3" });
+  expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
+  expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
 });
 
 test("English translated groups require a matching example translation", async () => {
