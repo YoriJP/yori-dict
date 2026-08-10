@@ -237,6 +237,58 @@ test("a release that starts covering an authored headword takes over its entry",
   lookup.close();
 });
 
+test("a release graft waits for an active writer before taking its retention snapshot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-en-concurrent-graft-"));
+  const production = join(root, "production.sqlite");
+  migrateProductionDatabase(production);
+
+  const sources = [await fixtureWordNet(root), await fixtureWiktionary(root)];
+  const current = await rebuildEnglishDictionary({
+    sources,
+    out: join(root, "current.sqlite"),
+    version: "2026.08.1",
+    retainFrom: null
+  });
+  const incoming = await rebuildEnglishDictionary({
+    sources,
+    out: join(root, "incoming.sqlite"),
+    version: "2026.08.2",
+    retainFrom: null
+  });
+  expect(importEnglishRelease(production, current.path)).toBe(true);
+
+  // Enrich-on-Lookup is a separate process in production. Hold its write
+  // transaction open until this process has started the graft, then commit.
+  // A deferred graft can read its retention snapshot while this writer owns
+  // the database, then fail to upgrade that stale WAL snapshot to a write.
+  const writer = Bun.spawn([
+    "bun",
+    "-e",
+    `
+      import { Database } from "bun:sqlite";
+      const db = new Database(Bun.argv[1]);
+      db.exec("pragma journal_mode = WAL; pragma busy_timeout = 5000; begin immediate");
+      console.log("locked");
+      await Bun.sleep(250);
+      db.prepare("insert or replace into en_metadata (key, value) values ('writerProbe', 'committed')").run();
+      db.exec("commit");
+      db.close();
+    `,
+    production
+  ], { stdout: "pipe", stderr: "pipe" });
+  const signal = await writer.stdout.getReader().read();
+  expect(new TextDecoder().decode(signal.value)).toContain("locked");
+
+  expect(importEnglishRelease(production, incoming.path)).toBe(true);
+  expect(await writer.exited).toBe(0);
+
+  const db = new Database(production, { readonly: true });
+  expect(db.query<{ value: string }, []>(
+    "select value from en_metadata where key = 'dictionaryVersion'"
+  ).get()?.value).toBe("2026.08.2");
+  db.close();
+});
+
 async function fixtureFlorp(root: string): Promise<EnglishSourceInput> {
   const file = join(root, "wordnet-florp.zip");
   await Bun.write(file, createStoredZip([
