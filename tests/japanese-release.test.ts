@@ -34,7 +34,7 @@ test("the Japanese release publishes sibling language groups, per-language packs
   expect(rows).toHaveLength(15);
 
   const generated = rows.find((entry) => entry.word === "未知語");
-  expect(Object.keys(generated.languages).sort()).toEqual(["en", "zh-tw"]);
+  expect(Object.keys(generated.languages).sort()).toEqual(["en", "ja", "zh-tw"]);
   // One entry, different sense counts, identifiers, wording, and order per
   // explanation language.
   expect(generated.languages.en.senses.map((sense: { glosses: Array<{ text: string }> }) =>
@@ -43,6 +43,9 @@ test("the Japanese release publishes sibling language groups, per-language packs
   expect(generated.languages["zh-tw"].senses.map((sense: { glosses: Array<{ text: string }> }) =>
     sense.glosses.map(({ text }) => text)
   )).toEqual([["未知詞"]]);
+  expect(generated.languages.ja.senses.map((sense: { glosses: Array<{ text: string }> }) =>
+    sense.glosses.map(({ text }) => text)
+  )).toEqual([["意味がまだ知られていない語"]]);
   expect(generated.languages.en.senses[0].id).not.toBe(generated.languages["zh-tw"].senses[0].id);
   expect(generated.languages.en.senses[0].provenance).toBe("generated");
 
@@ -56,8 +59,10 @@ test("the Japanese release publishes sibling language groups, per-language packs
   expect(manifest.entries).toBe(15);
   expect(manifest.coverage.en).toEqual({ entries: 15, senses: 18, glosses: 21, examples: 2 });
   expect(manifest.coverage["zh-tw"]).toEqual({ entries: 2, senses: 2, glosses: 2, examples: 0 });
+  expect(manifest.coverage.ja).toEqual({ entries: 1, senses: 1, glosses: 1, examples: 1 });
   expect(manifest.yomitan).toEqual({
     en: "yori-ja-en.zip",
+    ja: "yori-ja-ja.zip",
     "zh-tw": "yori-ja-zh-tw.zip"
   });
   expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
@@ -100,8 +105,8 @@ test("no release artifact mixes explanation languages", async () => {
     "select sense.lang as lang, example.translations as translations from ja_examples example join ja_senses sense on sense.id = example.sense_id"
   ).all();
   for (const example of examples) {
-    // A bilingual pair stays with the language that owns it.
-    expect(JSON.parse(example.translations).map((item: { lang: string }) => item.lang)).toEqual([example.lang]);
+    const expected = example.lang === "ja" ? [] : [example.lang];
+    expect(JSON.parse(example.translations).map((item: { lang: string }) => item.lang)).toEqual(expected);
   }
   released.close();
 
@@ -114,7 +119,7 @@ test("no release artifact mixes explanation languages", async () => {
         expect(sense.lang).toBe(lang);
         for (const gloss of sense.glosses) expect(foreignToLanguage(lang, gloss.text)).toBe(false);
         for (const example of sense.examples) {
-          expect(example.translations.map(({ lang: pairLang }) => pairLang)).toEqual([lang]);
+          expect(example.translations.map(({ lang: pairLang }) => pairLang)).toEqual(lang === "ja" ? [] : [lang]);
         }
       }
     }
@@ -273,7 +278,7 @@ test("a JMdict component EDRDG does not license never reaches a release", async 
 
   const released = new Database(artifacts.sqlite, { readonly: true });
   expect(released.query<{ lang: string }, []>("select distinct lang from ja_senses order by lang").all())
-    .toEqual([{ lang: "en" }, { lang: "zh-tw" }]);
+    .toEqual([{ lang: "en" }, { lang: "ja" }, { lang: "zh-tw" }]);
   released.close();
 });
 
@@ -286,6 +291,7 @@ test("a Yomitan pack keeps its language's sense order and coexists with the othe
   const names = Object.values(artifacts.yomitan).map((path) => path.split("/").at(-1));
   expect(new Set(names).size).toBe(names.length);
   expect(names).toContain("yori-ja-en.zip");
+  expect(names).toContain("yori-ja-ja.zip");
 });
 
 test("repeating a release from identical accepted data is deterministic", async () => {
@@ -310,6 +316,14 @@ async function release(): Promise<{ path: string; artifacts: JapaneseReleaseArti
   const repository = openEnrichmentRepository(path, lookup);
   repository.saveEntry(generatedGroup("en", ["unknown term", "unlisted word"]), "en", generation);
   repository.saveEntry(generatedGroup("zh-tw", ["未知詞"]), "zh-tw", generation);
+  const japanese = generatedGroup("ja", ["意味がまだ知られていない語"]);
+  repository.saveEntry(japanese, "ja", generation);
+  repository.saveExample(japanese.senses[0]!.id, {
+    text: "この未知語の意味を調べた。",
+    translations: [],
+    source: "generated",
+    reviewStatus: "checked"
+  }, generation);
   repository.close();
   lookup.close();
 

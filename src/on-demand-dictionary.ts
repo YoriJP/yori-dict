@@ -352,7 +352,7 @@ async function resolveRanked<TEntry>(
  * converting or translating another one. Taiwanese and Simplified Chinese are
  * separate authored languages rather than character conversions of each other.
  */
-const japaneseAuthoredLanguages = new Set<ApiLang>(["en", "de", "zh-tw", "zh-cn", "ko"]);
+const japaneseAuthoredLanguages = new Set<ApiLang>(["en", "de", "zh-tw", "zh-cn", "ko", "ja"]);
 
 const japaneseLanguageNames: Record<ApiLang, string> = {
   en: "English",
@@ -386,7 +386,7 @@ function invalidExplanationText(lang: ApiLang, text: string): boolean {
     case "ko":
       return kanaPattern.test(value) || !hangulPattern.test(value);
     case "ja":
-      return hangulPattern.test(value) || !(kanaPattern.test(value) || hanPattern.test(value));
+      return hangulPattern.test(value) || !kanaPattern.test(value);
   }
 }
 
@@ -525,6 +525,17 @@ const exampleSchema = {
     required: ["sentence", "translation"]
   }
 };
+const monolingualExampleSchema = {
+  name: "japanese_monolingual_dictionary_example",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      sentence: { type: "string" }
+    },
+    required: ["sentence"]
+  }
+};
 
 const lunaModel = "openai/gpt-5.6-luna";
 const geminiReviewModel = "google/gemini-3-flash-preview";
@@ -540,6 +551,12 @@ const entryAuthorConfigFor = (vocabulary: LabelVocabulary, hasEvidence: boolean)
   modelConfig("entry-author", lunaModel, "entry-author-v2", entrySchemaFor(vocabulary, hasEvidence));
 const entryReviewConfig = modelConfig("entry-review", geminiReviewModel, "entry-review-v5");
 const exampleAuthorConfig = modelConfig("example-author", lunaModel, "example-author-v3", exampleSchema);
+const monolingualExampleAuthorConfig = modelConfig(
+  "example-author",
+  lunaModel,
+  "japanese-monolingual-example-author-v1",
+  monolingualExampleSchema
+);
 const exampleReviewConfig = modelConfig("example-review", geminiReviewModel, "example-review-v6");
 
 type ModelConfig = Omit<ModelRequest, "prompt" | "signal">;
@@ -705,7 +722,7 @@ async function authorEntry(
   const review = await requireUnanimousReview(
     options,
     entryReviewConfig,
-    reviewPrompt(entryId, { entry, sourceEvidence: evidence }),
+    reviewPrompt(entryId, { explanationLanguage: request.lang, entry, sourceEvidence: evidence }),
     request.mode,
     entryId,
     options.reviewPasses,
@@ -779,7 +796,9 @@ async function completeEntryExamples(
 function hasJapaneseExamplePair(sense: PublicSense, lang: ApiLang): boolean {
   return (sense.examples ?? []).some((example) =>
     example.text.trim().length > 0
-    && example.translations.some((translation) => translation.lang === lang && translation.text.trim().length > 0)
+    && (lang === "ja"
+      ? example.translations.length === 0
+      : example.translations.some((translation) => translation.lang === lang && translation.text.trim().length > 0))
   );
 }
 
@@ -803,9 +822,11 @@ async function completeExample(
       ?.senses.find((candidate) => candidate.id === sense.id)
       ?.examples?.find((example) =>
         example.text.trim().length > 0
-        && example.translations.some((translation) =>
-          translation.lang === request.lang && translation.text.trim().length > 0
-        )
+        && (request.lang === "ja"
+          ? example.translations.length === 0
+          : example.translations.some((translation) =>
+              translation.lang === request.lang && translation.text.trim().length > 0
+            ))
       );
     if (canonical) return canonical;
     return completeExampleWork(options, entry, sense, request);
@@ -824,7 +845,7 @@ async function completeExampleWork(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const authored = await callAndRecord(
       options,
-      exampleAuthorConfig,
+      request.lang === "ja" ? monolingualExampleAuthorConfig : exampleAuthorConfig,
       exampleAuthorPrompt(candidateId, entry, sense, request.lang, previousRefusal),
       mode,
       candidateId
@@ -1108,7 +1129,7 @@ function parseAuthoredEntry(
       if (!knownEvidence.has(evidenceId)) throw new Error("Unknown source evidence");
       usedEvidence.add(evidenceId);
     }
-    const glosses = parseGlosses(sense.glosses, lang);
+    const glosses = parseGlosses(sense.glosses, lang, [expectedHeadword, value.reading]);
     const misc = requiredStringList(sense.registers);
     const field = requiredStringList(sense.domains);
     const dialect = requiredStringList(sense.dialect);
@@ -1182,12 +1203,15 @@ function parseAuthoredEntry(
   };
 }
 
-function parseGlosses(value: unknown, lang: ApiLang): PublicSense["glosses"] {
+function parseGlosses(value: unknown, lang: ApiLang, circularTerms: string[]): PublicSense["glosses"] {
   const glosses = requiredStringList(value);
   if (glosses.length === 0) throw new Error("Missing gloss");
   if (new Set(glosses).size !== glosses.length) throw new Error("Duplicate gloss");
   if (glosses.some((gloss) => invalidExplanationText(lang, gloss))) {
     throw new Error(`Gloss is not written in ${lang}`);
+  }
+  if (lang === "ja" && glosses.some((gloss) => isCircularGloss(gloss, circularTerms))) {
+    throw new Error("Circular Japanese gloss");
   }
   return glosses.map((text) => ({
     text,
@@ -1197,26 +1221,49 @@ function parseGlosses(value: unknown, lang: ApiLang): PublicSense["glosses"] {
   }));
 }
 
+function isCircularGloss(gloss: string, terms: string[]): boolean {
+  const value = normalizeCircularText(gloss);
+  return terms.some((term) => {
+    const normalized = normalizeCircularText(term);
+    if (!normalized) return false;
+    return value === normalized
+      || value === `${normalized}こと`
+      || value === `${normalized}のこと`
+      || value === `${normalized}という意味`;
+  });
+}
+
+function normalizeCircularText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/\s+/gu, "")
+    .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "");
+}
+
 const japaneseWordSegmenter = new Intl.Segmenter("ja-JP", { granularity: "word" });
 const inflectionBoundaries = new Set(["は", "が", "を", "に", "へ", "と", "で", "も", "や", "か", "から", "まで", "より"]);
 
-/**
- * A generated example is a bilingual pair: the Japanese sentence and its
- * sentence in the sense's own explanation language. It carries no other
- * language, so it can only ever be shown under the sense that owns it.
- */
+/** A generated example is monolingual for Japanese explanations and bilingual otherwise. */
 function parseExample(text: string, headword: string, lang: ApiLang): PublicExample {
   let value: Record<string, any>;
   try {
     value = parseObject(text);
-    assertExactKeys(value, ["sentence", "translation"]);
+    assertExactKeys(value, lang === "ja" ? ["sentence"] : ["sentence", "translation"]);
   } catch {
     throw new Error("invalid_schema");
   }
-  if (typeof value.sentence !== "string" || typeof value.translation !== "string") {
+  if (typeof value.sentence !== "string" || (lang !== "ja" && typeof value.translation !== "string")) {
     throw new Error("invalid_schema");
   }
   if (!sentenceContainsHeadword(value.sentence, headword)) throw new Error("headword_not_used");
+  if (lang === "ja") {
+    return {
+      text: value.sentence,
+      translations: [],
+      source: "generated",
+      reviewStatus: "checked"
+    };
+  }
   const translation = value.translation.trim();
   if (invalidExplanationText(lang, translation)) throw new Error("wrong_translation_language");
   return {
@@ -1369,6 +1416,10 @@ function entryAuthorPrompt(
     "Include every schema array; use an empty array when a field does not apply.",
     "You may add an established missing sense with provenance generated and no evidence ids.",
     `Write every gloss as natural ${japaneseLanguageNames[request.lang]} dictionary wording. Divide senses the way a ${japaneseLanguageNames[request.lang]} dictionary would; do not translate another language's wording line by line.`,
+    ...(request.lang === "ja" ? [
+      "Every gloss must contain kana and explain the sense for an advanced learner.",
+      "Do not return the headword, its reading, a synonym, or empty boilerplate as a definition."
+    ] : []),
     // The schema enumerates the label codes. This line exists only because the
     // model's observed failure was to translate them into the explanation
     // language; without it the codes are the one field it renders, not selects.
@@ -1388,6 +1439,23 @@ function exampleAuthorPrompt(
   lang: ApiLang,
   previousRefusal?: string
 ): string {
+  if (lang === "ja") {
+    return [
+      "Write one monolingual Japanese learner example for the supplied dictionary sense.",
+      "Treat the supplied headword and sense as authoritative. Demonstrate that sense clearly, not another homograph or meaning.",
+      "Write a natural, safe, concise Japanese sentence. Use the supplied headword spelling as a standalone lexical item, or a grammatically valid inflected form of it; do not substitute another spelling, synonym, or related word.",
+      "For a particle, auxiliary, or other function word, make its supplied grammatical function unambiguous in the sentence.",
+      "Return only JSON with the sentence field. Do not include a translation field.",
+      `candidateId: ${candidateId}`,
+      "explanation_language: ja",
+      `headword: ${entry.word}`,
+      `sense: ${JSON.stringify(sense)}`,
+      ...(previousRefusal ? [
+        `Previous candidate was refused: ${previousRefusal}`,
+        "Return a different candidate that corrects that failure."
+      ] : [])
+    ].join("\n");
+  }
   return [
     "Write one bilingual Japanese learner example for the supplied dictionary sense.",
     "Treat the supplied headword and sense as authoritative. Demonstrate that sense clearly, not another homograph or meaning.",
@@ -1411,7 +1479,8 @@ function exampleAuthorPrompt(
  * pronunciations and source evidence.
  */
 const entryReviewCriteria =
-  "Check coverage, sense structure, pronunciation, labels, source provenance, Taiwan terminology, factual accuracy, and safety.";
+  "Check coverage, sense structure, pronunciation, labels, source provenance, Taiwan terminology, factual accuracy, and safety. "
+  + "For Japanese explanations, require natural explanatory Japanese with kana and reject headword-only, boilerplate, synonym-only, or otherwise circular glosses.";
 
 /**
  * An explanation group is a different shape, and the criteria above reject every

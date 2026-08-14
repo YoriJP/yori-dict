@@ -46,9 +46,17 @@ _Avoid_: Definition, meaning
 The language a sense explains an entry in, stored on the sense rather than encoded into a table name. A lookup names one, and gets that language's own senses or nothing.
 _Avoid_: Target language, gloss language, language pair
 
+**Explanation Group**:
+The complete meaning coverage and ordered senses through which one explanation language explains one entry. Groups for different explanation languages are independent and need not divide meaning in the same way; completeness does not promise that every sense already has an example.
+_Avoid_: Translation set, language version, parallel senses
+
 **Gloss**:
-A sense rendered into one language. A sense holds one or more glosses; the two are not interchangeable.
+A sense rendered into one language. A sense may hold complementary glosses, but distinct meanings remain separate senses; glosses and senses are not interchangeable.
 _Avoid_: Definition, translation, sense
+
+**Circular Gloss**:
+A gloss that repeats the headword, reading, or empty boilerplate instead of explaining the sense. Obvious forms are invalid directly; semantic circularity is a review judgement.
+_Avoid_: Short gloss, synonym
 
 **Lookup Term**:
 An indexed string that resolves a query to entries, matched by kanji or by reading.
@@ -95,6 +103,10 @@ _Avoid_: Overlay, release artifact, cache
 **Sense Example**:
 A sentence illustrating one specific sense, attached to that sense rather than to the entry.
 _Avoid_: Entry example, usage note
+
+**Monolingual Sense Example**:
+A Sense Example written in the same language as both its entry and its Explanation Group. It stands on its own rather than carrying a duplicate rendering in that same language.
+_Avoid_: Self-translation, untranslated example
 
 **Sourced Example**:
 A sense example written by a human and imported from an outside corpus.

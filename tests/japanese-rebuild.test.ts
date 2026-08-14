@@ -125,6 +125,25 @@ test("a rebuild retains accepted generated content and does not reorder imported
       evidenceIds: []
     }]
   }, "zh-tw", generation);
+  const japaneseSenseId = "yori:s_generated_school:ja:1";
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      id: japaneseSenseId,
+      position: 1,
+      appliesTo: { kanji: ["*"], kana: ["*"] },
+      partOfSpeech: ["n"],
+      glosses: [{ lang: "ja", text: "教育を行うための施設", source: "generated", reviewStatus: "checked" }],
+      provenance: "generated",
+      evidenceIds: []
+    }]
+  }, "ja", generation);
+  repository.saveExample(japaneseSenseId, {
+    text: "毎朝、学校へ行きます。",
+    translations: [],
+    source: "generated",
+    reviewStatus: "checked"
+  }, exampleGeneration);
   // An authored group written from licensed evidence carries source
   // provenance. It is still enrichment, and a rebuild must keep it.
   repository.saveEntry({
@@ -150,7 +169,9 @@ test("a rebuild retains accepted generated content and does not reorder imported
   lookup.close();
 
   const result = await rebuildJapaneseDictionary({ input: "fixtures/jmdict-sample.json", out });
-  expect(result.retained).toEqual({ entries: 1, groups: 2, examples: 1 });
+  // Examples carried inside retained groups are counted with the group; the
+  // standalone count is for generated Examples reattached to imported Senses.
+  expect(result.retained).toEqual({ entries: 1, groups: 3, examples: 1 });
 
   const reopened = openLookupDb(out);
   const generated = reopened.lookup("未知語", "en").item;
@@ -162,6 +183,12 @@ test("a rebuild retains accepted generated content and does not reorder imported
   expect(taiwanese?.id).toBe(reopened.lookup("学校", "en").item?.id);
   expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
   expect(taiwanese?.senses[0].provenance).toBe("generated");
+  const japanese = reopened.lookup("学校", "ja").item;
+  expect(japanese?.senses[0].glosses[0].text).toBe("教育を行うための施設");
+  expect(japanese?.senses[0].examples?.[0]).toMatchObject({
+    text: "毎朝、学校へ行きます。",
+    translations: []
+  });
   // The source-provenance authored group survived too: enrichment is marked by
   // its generation reference, not by every sense claiming to be generated.
   expect(reopened.lookup("学校", "ko").item?.senses[0].glosses[0].text).toBe("학교");

@@ -11,7 +11,7 @@ download a release.
 
 | Dictionary | Explanation languages |
 | --- | --- |
-| Japanese headwords | `en`, `de`, `zh-tw`, `zh-cn`, `ko` |
+| Japanese headwords | `en`, `de`, `zh-tw`, `zh-cn`, `ko`, `ja` |
 | English headwords | `en`, `ja`, `zh-tw` |
 
 Every language pair owns its own senses, ordering, examples, and provenance.
@@ -39,6 +39,18 @@ Look up an inflected Japanese word:
 ```sh
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&dictionary=ja&lang=zh-tw'
 ```
+
+Look up the same word with Japanese explanations:
+
+```sh
+curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&dictionary=ja&lang=ja'
+```
+
+Japanese is an independent Explanation Group, not a translation of the English
+group. Public lookup returns that group or `null` without fallback. Authorized
+Enrich-on-Lookup can author a missing group directly in Japanese. Its
+Monolingual Sense Examples keep `translations: []` instead of repeating the
+same Japanese sentence as a self-translation.
 
 Look up an English word explained in Japanese:
 

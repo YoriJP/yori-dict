@@ -92,9 +92,13 @@ async function read(query: string, lang: string) {
 }
 
 function authored(glosses: string[]): string {
+  return authoredWord("未知語", "みちご", glosses);
+}
+
+function authoredWord(headword: string, reading: string, glosses: string[]): string {
   return JSON.stringify({
-    headword: "未知語",
-    reading: "みちご",
+    headword,
+    reading,
     senses: glosses.map((gloss) => ({
       partOfSpeech: ["n"],
       registers: [],
@@ -111,6 +115,10 @@ function authored(glosses: string[]): string {
 
 function example(translation: string): string {
   return JSON.stringify({ sentence: "この未知語の意味を調べた。", translation });
+}
+
+function monolingualExample(sentence = "この未知語の意味を調べた。"): string {
+  return JSON.stringify({ sentence });
 }
 
 test("one author request fills one missing entry-language group", async () => {
@@ -156,6 +164,82 @@ test("a second language is authored independently without rewriting the first", 
   const english = await read("未知語", "en");
   expect(english.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text))
     .toEqual(["unknown term", "unlisted word"]);
+});
+
+test("an authorized lookup authors and persists an independent Japanese Explanation Group", async () => {
+  gateway.reset();
+  expect(await read("未知語", "ja")).toBeNull();
+
+  gateway.script("entry-author", authored(["意味がまだ知られていない語"]));
+  gateway.script("entry-review", "ACCEPT");
+  // Example completion is a separate retryable gap. These malformed candidates
+  // prove the accepted Explanation Group survives without pulling #53 into
+  // this slice.
+  gateway.script("example-author", "{}", "{}");
+  const japanese = await enrich("未知語", "ja");
+
+  expect(japanese.lang).toBe("ja");
+  expect(japanese.senses[0].glosses[0].text).toBe("意味がまだ知られていない語");
+  expect(japanese.senses[0].examples).toEqual([]);
+  expect((await read("未知語", "ja")).senses[0].id).toBe(japanese.senses[0].id);
+  const meta = await (await app.request("/v1/meta")).json();
+  expect(meta.dictionaries.ja.languages).toContain("ja");
+  expect((await read("未知語", "en")).senses).toHaveLength(2);
+  expect((await read("未知語", "zh-tw")).senses).toHaveLength(1);
+});
+
+test("Japanese authoring rejects wrong-script and objectively Circular Glosses before review", async () => {
+  for (const candidate of [
+    { headword: "循環語", reading: "じゅんかんご", gloss: "循環語のこと" },
+    { headword: "説明語", reading: "せつめいご", gloss: "せつめいごという意味" },
+    { headword: "新語", reading: "しんご", gloss: "摂食" }
+  ]) {
+    gateway.reset();
+    gateway.script("eligibility", candidate.headword);
+    gateway.script("entry-author", authoredWord(candidate.headword, candidate.reading, [candidate.gloss]));
+    expect(await enrich(candidate.headword, "ja")).toBeNull();
+    expect(gateway.roles()).toEqual(["eligibility", "entry-author"]);
+    expect(await read(candidate.headword, "ja")).toBeNull();
+  }
+
+  gateway.reset();
+  gateway.script("eligibility", "定義語");
+  gateway.script("entry-author", authoredWord("定義語", "ていぎご", ["定義語とは、意味を詳しく説明する語"]));
+  gateway.script("entry-review", "REJECT");
+  expect(await enrich("定義語", "ja")).toBeNull();
+  expect(gateway.roles()).toEqual(["eligibility", "entry-author", "entry-review"]);
+});
+
+test("a Japanese Explanation Group completes with a Monolingual Sense Example", async () => {
+  gateway.reset();
+  // A redundant self-translation violates the strict Japanese author contract.
+  // Both candidates fail before review and leave the Example gap retryable.
+  gateway.script(
+    "example-author",
+    JSON.stringify({ sentence: "この未知語の意味を調べた。", translation: "この未知語の意味を調べた。" }),
+    JSON.stringify({ sentence: "今日は未知語を一つ覚えた。", translation: "今日は未知語を一つ覚えた。" })
+  );
+  const malformed = await enrich("未知語", "ja");
+  expect(malformed.senses[0].examples).toEqual([]);
+  expect(gateway.roles()).toEqual(["example-author", "example-author"]);
+
+  gateway.reset();
+  gateway.script("example-author", monolingualExample());
+  gateway.script("example-review", "ACCEPT");
+  const completed = await enrich("未知語", "ja");
+  expect(completed.senses[0].examples[0]).toEqual({
+    text: "この未知語の意味を調べた。",
+    translations: [],
+    source: "generated",
+    reviewStatus: "checked"
+  });
+
+  // The accepted Example is canonical and closes the gap without changing the
+  // bilingual requirements or spending again on a later authorized lookup.
+  expect((await read("未知語", "ja")).senses[0].examples[0].translations).toEqual([]);
+  gateway.reset();
+  await enrich("未知語", "ja");
+  expect(gateway.calls).toEqual([]);
 });
 
 test("a rejected language group never becomes visible and spares the accepted ones", async () => {

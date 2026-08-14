@@ -98,7 +98,7 @@ paths:
                 dictionaries:
                   ja:
                     languages: [en, ko, zh-cn, zh-tw]
-                    accepts: [en, de, zh-tw, zh-cn, ko]
+                    accepts: [en, de, zh-tw, zh-cn, ko, ja]
                   en:
                     languages: [en]
                     accepts: [en, ja, zh-tw]
@@ -159,7 +159,7 @@ paths:
           required: true
           description: >-
             Explanation language of the returned senses. There is no default and no
-            fallback. `ja` supports en, de, zh-tw, zh-cn, and ko; `en` supports en,
+            fallback. `ja` supports en, de, zh-tw, zh-cn, ko, and ja; `en` supports en,
             ja, and zh-tw. Any other combination is a request error. A supported
             language with no content yet returns null rather than an error; read
             `dictionaries` in `/v1/meta` to discover which pairs have content.
@@ -739,7 +739,10 @@ components:
           example: もっと果物を食べるべきです。
         translations:
           type: array
-          description: Paired sentences from the same example. Empty when the example has none.
+          description: >-
+            Paired sentences from the same example. A Japanese Explanation Group uses
+            an empty list because its Monolingual Sense Example needs no Japanese
+            self-translation; bilingual groups require their requested language.
           items:
             $ref: "#/components/schemas/ExampleTranslation"
         source:
