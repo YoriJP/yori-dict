@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -56,9 +57,11 @@ const gateway = new ScriptedGateway();
 let lookupDb: LookupDb;
 let repository: PersistentEnrichmentRepository;
 let app: ReturnType<typeof createApp>;
+let twoPassApp: ReturnType<typeof createApp>;
+let dbPath: string;
 
 beforeAll(async () => {
-  const dbPath = join(mkdtempSync(join(tmpdir(), "yori-ja-enrich-")), "yori.sqlite");
+  dbPath = join(mkdtempSync(join(tmpdir(), "yori-ja-enrich-")), "yori.sqlite");
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`.quiet();
   migrateProductionDatabase(dbPath);
   lookupDb = openLookupDb(dbPath);
@@ -69,6 +72,12 @@ beforeAll(async () => {
       japanese: createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
     })
   });
+  twoPassApp = createApp(lookupDb, {
+    enrichmentToken: "owner-token",
+    onDemand: createOnDemandDictionary({
+      japanese: createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, reviewPasses: 2 })
+    })
+  });
 });
 
 afterAll(() => {
@@ -76,8 +85,8 @@ afterAll(() => {
   lookupDb.close();
 });
 
-async function enrich(query: string, lang: string) {
-  const response = await app.request(
+async function enrich(query: string, lang: string, targetApp = app) {
+  const response = await targetApp.request(
     `/v1/lookup?q=${encodeURIComponent(query)}&dictionary=ja&lang=${lang}&enrich=true`,
     { headers: { authorization: "Bearer owner-token" } }
   );
@@ -239,6 +248,65 @@ test("a Japanese Explanation Group completes with a Monolingual Sense Example", 
   expect((await read("未知語", "ja")).senses[0].examples[0].translations).toEqual([]);
   gateway.reset();
   await enrich("未知語", "ja");
+  expect(gateway.calls).toEqual([]);
+});
+
+test("Japanese entry and Example review require two unanimous passes", async () => {
+  gateway.reset();
+  gateway.script("eligibility", "二段語");
+  gateway.script("entry-author", authoredWord("二段語", "にだんご", ["二つの段階で確認する語"]));
+  gateway.script("entry-review", "ACCEPT", "REJECT");
+  expect(await enrich("二段語", "ja", twoPassApp)).toBeNull();
+  expect(await read("二段語", "ja")).toBeNull();
+  expect(gateway.calls.filter(({ role }) => role === "entry-review").map(({ promptVersion }) => promptVersion))
+    .toEqual(["entry-review-v5", "entry-review-v5-verification-v2"]);
+
+  gateway.reset();
+  gateway.script("eligibility", "全会語");
+  gateway.script("entry-author", authoredWord("全会語", "ぜんかいご", ["全員の同意によって採用される語"]));
+  gateway.script("entry-review", "ACCEPT", "ACCEPT");
+  gateway.script("example-author", monolingualExample("この全会語は全員の同意を得た。"));
+  gateway.script("example-review", "ACCEPT", "REJECT");
+  const withoutExample = await enrich("全会語", "ja", twoPassApp);
+  expect(withoutExample.senses[0].examples).toEqual([]);
+  expect((await read("全会語", "ja")).senses[0].examples).toEqual([]);
+
+  gateway.reset();
+  gateway.script("example-author", monolingualExample("この全会語は全員の同意を得た。"));
+  gateway.script("example-review", "ACCEPT", "ACCEPT");
+  const completed = await enrich("全会語", "ja", twoPassApp);
+  expect(completed.senses[0].examples[0].translations).toEqual([]);
+  expect(gateway.calls.filter(({ role }) => role === "example-review").map(({ promptVersion }) => promptVersion))
+    .toEqual(["example-review-v6", "example-review-v6-verification-v2"]);
+});
+
+test("a sourced monolingual Japanese Example closes the Example gap", async () => {
+  gateway.reset();
+  gateway.script("eligibility", "出典語");
+  gateway.script("entry-author", authoredWord("出典語", "しゅってんご", ["出典が明らかにされている語"]));
+  gateway.script("entry-review", "ACCEPT");
+  gateway.script("example-author", "{}", "{}");
+  const authoredEntry = await enrich("出典語", "ja");
+  expect(authoredEntry.senses[0].examples).toEqual([]);
+
+  const seed = new Database(dbPath);
+  seed.prepare(`
+    insert into ja_examples (
+      sense_id, position, text, translations, source, source_name, source_id, review_status, generation_id
+    ) values (?, 1, ?, '[]', 'sourced', 'fixture', 'ja-source-1', 'source', null)
+  `).run(authoredEntry.senses[0].id, "この出典語は資料に記録されている。");
+  seed.close();
+
+  gateway.reset();
+  const completed = await enrich("出典語", "ja");
+  expect(completed.senses[0].examples[0]).toEqual({
+    text: "この出典語は資料に記録されている。",
+    translations: [],
+    source: "sourced",
+    sourceName: "fixture",
+    sourceId: "ja-source-1",
+    reviewStatus: "source"
+  });
   expect(gateway.calls).toEqual([]);
 });
 
