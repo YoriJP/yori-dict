@@ -22,7 +22,7 @@ const sourceToApiLang: Record<string, ApiLang> = {
  * its JMdict component is unlicensed, so Yori Dict writes its own German
  * content rather than dropping the language.
  */
-const supportedApiLangs = new Set<ApiLang>(["en", "de", "zh-tw", "zh-cn", "ko"]);
+const supportedApiLangs = new Set<ApiLang>(["en", "de", "zh-tw", "zh-cn", "ko", "ja"]);
 
 export function toApiLang(sourceLang: string): ApiLang | null {
   return sourceToApiLang[sourceLang] ?? null;

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -56,9 +57,11 @@ const gateway = new ScriptedGateway();
 let lookupDb: LookupDb;
 let repository: PersistentEnrichmentRepository;
 let app: ReturnType<typeof createApp>;
+let twoPassApp: ReturnType<typeof createApp>;
+let dbPath: string;
 
 beforeAll(async () => {
-  const dbPath = join(mkdtempSync(join(tmpdir(), "yori-ja-enrich-")), "yori.sqlite");
+  dbPath = join(mkdtempSync(join(tmpdir(), "yori-ja-enrich-")), "yori.sqlite");
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${dbPath}`.quiet();
   migrateProductionDatabase(dbPath);
   lookupDb = openLookupDb(dbPath);
@@ -69,6 +72,12 @@ beforeAll(async () => {
       japanese: createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
     })
   });
+  twoPassApp = createApp(lookupDb, {
+    enrichmentToken: "owner-token",
+    onDemand: createOnDemandDictionary({
+      japanese: createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, reviewPasses: 2 })
+    })
+  });
 });
 
 afterAll(() => {
@@ -76,8 +85,8 @@ afterAll(() => {
   lookupDb.close();
 });
 
-async function enrich(query: string, lang: string) {
-  const response = await app.request(
+async function enrich(query: string, lang: string, targetApp = app) {
+  const response = await targetApp.request(
     `/v1/lookup?q=${encodeURIComponent(query)}&dictionary=ja&lang=${lang}&enrich=true`,
     { headers: { authorization: "Bearer owner-token" } }
   );
@@ -92,9 +101,13 @@ async function read(query: string, lang: string) {
 }
 
 function authored(glosses: string[]): string {
+  return authoredWord("未知語", "みちご", glosses);
+}
+
+function authoredWord(headword: string, reading: string, glosses: string[]): string {
   return JSON.stringify({
-    headword: "未知語",
-    reading: "みちご",
+    headword,
+    reading,
     senses: glosses.map((gloss) => ({
       partOfSpeech: ["n"],
       registers: [],
@@ -111,6 +124,10 @@ function authored(glosses: string[]): string {
 
 function example(translation: string): string {
   return JSON.stringify({ sentence: "この未知語の意味を調べた。", translation });
+}
+
+function monolingualExample(sentence = "この未知語の意味を調べた。"): string {
+  return JSON.stringify({ sentence });
 }
 
 test("one author request fills one missing entry-language group", async () => {
@@ -156,6 +173,141 @@ test("a second language is authored independently without rewriting the first", 
   const english = await read("未知語", "en");
   expect(english.senses.map((sense: { glosses: Array<{ text: string }> }) => sense.glosses[0].text))
     .toEqual(["unknown term", "unlisted word"]);
+});
+
+test("an authorized lookup authors and persists an independent Japanese Explanation Group", async () => {
+  gateway.reset();
+  expect(await read("未知語", "ja")).toBeNull();
+
+  gateway.script("entry-author", authored(["意味がまだ知られていない語"]));
+  gateway.script("entry-review", "ACCEPT");
+  // Example completion is a separate retryable gap. These malformed candidates
+  // prove the accepted Explanation Group survives without pulling #53 into
+  // this slice.
+  gateway.script("example-author", "{}", "{}");
+  const japanese = await enrich("未知語", "ja");
+
+  expect(japanese.lang).toBe("ja");
+  expect(japanese.senses[0].glosses[0].text).toBe("意味がまだ知られていない語");
+  expect(japanese.senses[0].examples).toEqual([]);
+  expect((await read("未知語", "ja")).senses[0].id).toBe(japanese.senses[0].id);
+  const meta = await (await app.request("/v1/meta")).json();
+  expect(meta.dictionaries.ja.languages).toContain("ja");
+  expect((await read("未知語", "en")).senses).toHaveLength(2);
+  expect((await read("未知語", "zh-tw")).senses).toHaveLength(1);
+});
+
+test("Japanese authoring rejects wrong-script and objectively Circular Glosses before review", async () => {
+  for (const candidate of [
+    { headword: "循環語", reading: "じゅんかんご", gloss: "循環語のこと" },
+    { headword: "説明語", reading: "せつめいご", gloss: "せつめいごという意味" },
+    { headword: "新語", reading: "しんご", gloss: "摂食" }
+  ]) {
+    gateway.reset();
+    gateway.script("eligibility", candidate.headword);
+    gateway.script("entry-author", authoredWord(candidate.headword, candidate.reading, [candidate.gloss]));
+    expect(await enrich(candidate.headword, "ja")).toBeNull();
+    expect(gateway.roles()).toEqual(["eligibility", "entry-author"]);
+    expect(await read(candidate.headword, "ja")).toBeNull();
+  }
+
+  gateway.reset();
+  gateway.script("eligibility", "定義語");
+  gateway.script("entry-author", authoredWord("定義語", "ていぎご", ["定義語とは、意味を詳しく説明する語"]));
+  gateway.script("entry-review", "REJECT");
+  expect(await enrich("定義語", "ja")).toBeNull();
+  expect(gateway.roles()).toEqual(["eligibility", "entry-author", "entry-review"]);
+});
+
+test("a Japanese Explanation Group completes with a Monolingual Sense Example", async () => {
+  gateway.reset();
+  // A redundant self-translation violates the strict Japanese author contract.
+  // Both candidates fail before review and leave the Example gap retryable.
+  gateway.script(
+    "example-author",
+    JSON.stringify({ sentence: "この未知語の意味を調べた。", translation: "この未知語の意味を調べた。" }),
+    JSON.stringify({ sentence: "今日は未知語を一つ覚えた。", translation: "今日は未知語を一つ覚えた。" })
+  );
+  const malformed = await enrich("未知語", "ja");
+  expect(malformed.senses[0].examples).toEqual([]);
+  expect(gateway.roles()).toEqual(["example-author", "example-author"]);
+
+  gateway.reset();
+  gateway.script("example-author", monolingualExample());
+  gateway.script("example-review", "ACCEPT");
+  const completed = await enrich("未知語", "ja");
+  expect(completed.senses[0].examples[0]).toEqual({
+    text: "この未知語の意味を調べた。",
+    translations: [],
+    source: "generated",
+    reviewStatus: "checked"
+  });
+
+  // The accepted Example is canonical and closes the gap without changing the
+  // bilingual requirements or spending again on a later authorized lookup.
+  expect((await read("未知語", "ja")).senses[0].examples[0].translations).toEqual([]);
+  gateway.reset();
+  await enrich("未知語", "ja");
+  expect(gateway.calls).toEqual([]);
+});
+
+test("Japanese entry and Example review require two unanimous passes", async () => {
+  gateway.reset();
+  gateway.script("eligibility", "二段語");
+  gateway.script("entry-author", authoredWord("二段語", "にだんご", ["二つの段階で確認する語"]));
+  gateway.script("entry-review", "ACCEPT", "REJECT");
+  expect(await enrich("二段語", "ja", twoPassApp)).toBeNull();
+  expect(await read("二段語", "ja")).toBeNull();
+  expect(gateway.calls.filter(({ role }) => role === "entry-review").map(({ promptVersion }) => promptVersion))
+    .toEqual(["entry-review-v5", "entry-review-v5-verification-v2"]);
+
+  gateway.reset();
+  gateway.script("eligibility", "全会語");
+  gateway.script("entry-author", authoredWord("全会語", "ぜんかいご", ["全員の同意によって採用される語"]));
+  gateway.script("entry-review", "ACCEPT", "ACCEPT");
+  gateway.script("example-author", monolingualExample("この全会語は全員の同意を得た。"));
+  gateway.script("example-review", "ACCEPT", "REJECT");
+  const withoutExample = await enrich("全会語", "ja", twoPassApp);
+  expect(withoutExample.senses[0].examples).toEqual([]);
+  expect((await read("全会語", "ja")).senses[0].examples).toEqual([]);
+
+  gateway.reset();
+  gateway.script("example-author", monolingualExample("この全会語は全員の同意を得た。"));
+  gateway.script("example-review", "ACCEPT", "ACCEPT");
+  const completed = await enrich("全会語", "ja", twoPassApp);
+  expect(completed.senses[0].examples[0].translations).toEqual([]);
+  expect(gateway.calls.filter(({ role }) => role === "example-review").map(({ promptVersion }) => promptVersion))
+    .toEqual(["example-review-v6", "example-review-v6-verification-v2"]);
+});
+
+test("a sourced monolingual Japanese Example closes the Example gap", async () => {
+  gateway.reset();
+  gateway.script("eligibility", "出典語");
+  gateway.script("entry-author", authoredWord("出典語", "しゅってんご", ["出典が明らかにされている語"]));
+  gateway.script("entry-review", "ACCEPT");
+  gateway.script("example-author", "{}", "{}");
+  const authoredEntry = await enrich("出典語", "ja");
+  expect(authoredEntry.senses[0].examples).toEqual([]);
+
+  const seed = new Database(dbPath);
+  seed.prepare(`
+    insert into ja_examples (
+      sense_id, position, text, translations, source, source_name, source_id, review_status, generation_id
+    ) values (?, 1, ?, '[]', 'sourced', 'fixture', 'ja-source-1', 'source', null)
+  `).run(authoredEntry.senses[0].id, "この出典語は資料に記録されている。");
+  seed.close();
+
+  gateway.reset();
+  const completed = await enrich("出典語", "ja");
+  expect(completed.senses[0].examples[0]).toEqual({
+    text: "この出典語は資料に記録されている。",
+    translations: [],
+    source: "sourced",
+    sourceName: "fixture",
+    sourceId: "ja-source-1",
+    reviewStatus: "source"
+  });
+  expect(gateway.calls).toEqual([]);
 });
 
 test("a rejected language group never becomes visible and spares the accepted ones", async () => {

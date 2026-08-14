@@ -91,6 +91,10 @@ test("serves OpenAPI YAML from the OpenAPI route", async () => {
   const body = await res.text();
   expect(body).toStartWith("openapi: 3.1.0");
   expect(body).toContain(`dataRelease: ${dataReleaseUrl}`);
+  expect(body).toContain("accepts: [en, de, zh-tw, zh-cn, ko, ja]");
+  expect(body).toContain("`ja` supports en, de, zh-tw, zh-cn, ko, and ja");
+  expect(body).toContain("A Japanese Explanation Group uses");
+  expect(body).toContain("an empty list because its Monolingual Sense Example");
 });
 
 test("returns metadata", async () => {
@@ -106,7 +110,7 @@ test("returns metadata", async () => {
   // `accepts` stays put while `languages` follows the rows, so a dictionary
   // with nothing mounted still reports what a lookup would take.
   expect(body.dictionaries).toEqual({
-    ja: { languages: ["en", "zh-tw"], accepts: ["en", "de", "zh-tw", "zh-cn", "ko"] },
+    ja: { languages: ["en", "zh-tw"], accepts: ["en", "de", "zh-tw", "zh-cn", "ko", "ja"] },
     en: { languages: [], accepts: ["en", "ja", "zh-tw"] }
   });
   expect(body.languages).toEqual(["en", "zh-tw"]);

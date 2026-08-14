@@ -169,7 +169,7 @@ test("metadata advertises only explanation languages with senses behind them", a
   // a language absent from `languages` is a coverage gap Enrich-on-Lookup can
   // fill, not a language the API will refuse.
   expect(meta.dictionaries).toEqual({
-    ja: { languages: ["en", "zh-tw"], accepts: ["en", "de", "zh-tw", "zh-cn", "ko"] },
+    ja: { languages: ["en", "zh-tw"], accepts: ["en", "de", "zh-tw", "zh-cn", "ko", "ja"] },
     en: { languages: ["en"], accepts: ["en", "ja", "zh-tw"] }
   });
 
@@ -185,6 +185,7 @@ test("metadata advertises only explanation languages with senses behind them", a
     }
   }
   expect(meta.dictionaries.ja.languages).not.toContain("de");
+  expect(meta.dictionaries.ja.languages).not.toContain("ja");
 
   // Every source the served data draws on is credited once, with a license and
   // a URL a reader can follow to satisfy the obligation they inherit.
@@ -250,6 +251,18 @@ test("a supported language with no content is answered, not refused", async () =
   const german = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=de");
   expect(german.status).toBe(200);
   expect(await german.json()).toBeNull();
+
+  const japanese = await app.request("/v1/lookup?q=%E9%A3%9F%E3%81%B9%E3%82%8B&dictionary=ja&lang=ja");
+  expect(japanese.status).toBe(200);
+  expect(await japanese.json()).toBeNull();
+
+  const batch = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ dictionary: "ja", lang: "ja", queries: ["食べる", "学校"] })
+  });
+  expect(batch.status).toBe(200);
+  expect((await batch.json()).entries).toEqual([null, null]);
   expect(gateway.calls).toEqual([]);
 });
 

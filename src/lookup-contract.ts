@@ -16,7 +16,7 @@ export type LookupDictionary = "ja" | "en";
  * returns the requested language's own ordered sense list or nothing.
  */
 export const lookupLanguages: Record<LookupDictionary, ApiLang[]> = {
-  ja: ["en", "de", "zh-tw", "zh-cn", "ko"],
+  ja: ["en", "de", "zh-tw", "zh-cn", "ko", "ja"],
   en: ["en", "ja", "zh-tw"]
 };
 

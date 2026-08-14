@@ -1,0 +1,3 @@
+# Japanese explanation groups use monolingual sense examples
+
+A Japanese Explanation Group uses Monolingual Sense Examples: each example is a natural Japanese sentence attached to the sense it demonstrates, and its public translation list is empty rather than repeating the same sentence in Japanese. The Japanese example author returns only that sentence; a redundant translation field is malformed rather than silently ignored. A valid sourced or independently reviewed generated example can satisfy the example gap. This preserves the stable public example shape without manufacturing a self-translation, while bilingual Explanation Groups continue to require a non-empty translation in their own Explanation Language.
