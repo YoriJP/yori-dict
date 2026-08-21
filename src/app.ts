@@ -122,13 +122,24 @@ export function createApp(
     }
     const traceId = c.req.header("x-yori-request-id") ?? crypto.randomUUID();
     const lemma = c.req.query("lemma")?.trim();
-    const enriched = wantsEnrichment && options.onDemand
-      ? await resolveOnDemand(options.onDemand, resolveRequest(query, dictionary, lang, {
+    let enriched: ResolvedMatches<OnDemandEntry> | null = null;
+    if (wantsEnrichment && options.onDemand) {
+      try {
+        enriched = await resolveOnDemand(options.onDemand, resolveRequest(query, dictionary, lang, {
           lemma,
           reading: c.req.query("reading"),
           sentence: c.req.query("context")
-        }, undefined, traceId))
-      : null;
+        }, undefined, traceId));
+      } catch (error) {
+        // Same trade as the batch: the published entry needs no model, so a
+        // provider refusing the account costs the caller its examples, not its
+        // answer. Anything that is not the provider still fails the request.
+        const accountLevel = enrichmentOutage(error);
+        if (!accountLevel) throw error;
+        logLookupFailure(options, traceId, dictionary, lang, query, error);
+        c.header("X-Yori-Enrichment", accountLevel.kind);
+      }
+    }
     const entry = readEntry(db, options, dictionary, lang, query, lemma, enriched);
     logLookup(options, traceId, dictionary, lang, query, wantsEnrichment, entry);
     return c.json(entry);
@@ -164,7 +175,15 @@ export function createApp(
     // reporting it as one would let a consumer record a gap that never
     // existed. Those fail the request, as they do for a single lookup.
     let unavailable = 0;
-    const entries = await Promise.all(body.queries.map(async (candidate) => {
+    // Set by the first query to meet an account-level refusal, and reported
+    // back with the response. Once set, no further query asks the provider —
+    // see the probe below, which is what makes that true — and every query
+    // still gets its stored answer.
+    let outage: ModelGatewayError | null = null;
+    const entries: Array<LookupEntry | null> = new Array(body.queries.length).fill(null);
+
+    const answerAt = async (index: number): Promise<void> => {
+      const candidate = body.queries[index];
       const request = typeof candidate === "string"
         ? resolveRequest(candidate, dictionary, lang, {}, "bulk", traceId)
         : resolveRequest(candidate.query, dictionary, lang, {
@@ -173,7 +192,7 @@ export function createApp(
             sentence: candidate.context
           }, "bulk", traceId);
       let enriched: ResolvedMatches<OnDemandEntry> | null = null;
-      if (body.enrich && options.onDemand) {
+      if (body.enrich && options.onDemand && outage === null) {
         try {
           enriched = await resolveOnDemand(options.onDemand, request);
         } catch (error) {
@@ -189,14 +208,25 @@ export function createApp(
           // provider rejects are the same: they refuse every later query too,
           // so isolating them would hand back a page of misses that are really
           // one account-level fault, and the consumer would publish the gaps as
-          // though the words did not exist. Those fail the batch at the first
-          // one rather than after all of them.
-          if (!isIsolatedModelFailure(error)) throw error;
-          // The word is not lost: the failure is logged, and the next enriched
-          // lookup of it attempts again.
-          logLookupFailure(options, traceId, dictionary, lang, request.query, error);
-          unavailable += 1;
-          return null;
+          // though the words did not exist. Those end enrichment for the batch
+          // at the first one rather than after all of them — but the published
+          // entries need no model, so the query still gets its stored answer
+          // and the reason travels back with the response.
+          const accountLevel = enrichmentOutage(error);
+          if (accountLevel) {
+            logLookupFailure(options, traceId, dictionary, lang, request.query, error);
+            outage ??= accountLevel;
+            enriched = null;
+          } else if (isIsolatedModelFailure(error)) {
+            // The word is not lost: the failure is logged, and the next
+            // enriched lookup of it attempts again.
+            logLookupFailure(options, traceId, dictionary, lang, request.query, error);
+            unavailable += 1;
+            entries[index] = null;
+            return;
+          } else {
+            throw error;
+          }
         }
       }
       const entry = readEntry(
@@ -209,8 +239,31 @@ export function createApp(
         enriched
       );
       logLookup(options, traceId, dictionary, lang, request.query, body.enrich === true, entry);
-      return entry;
-    }));
+      entries[index] = entry;
+    };
+
+    // The first query goes alone, the rest together.
+    //
+    // `Array.map` runs every callback up to its first `await`, so fanning the
+    // whole batch out at once meant all of them had already asked the provider
+    // before any refusal could set `outage` — the flag skipped nothing and a
+    // spent budget cost one doomed request per word. Answering one query first
+    // makes the guarantee real: an account-level refusal is discovered once and
+    // the remaining queries go straight to storage.
+    //
+    // The price is one sequential call. Against a cold enrichment chunk, where
+    // each word already costs seconds and the client sends twenty at a time,
+    // that is a few percent of the chunk — paid only on enriched batches, and
+    // only once.
+    //
+    // It bounds the waste rather than abolishing it: a leading query already in
+    // the published dictionary needs no model, so it cannot discover a refusal
+    // and the queries behind it still fan out into one. That is the uncommon
+    // case — a batch is sent precisely because its words need enriching — and
+    // the alternative, waves of increasing width, would put a barrier between
+    // each wave and cost far more than it saves on the healthy path.
+    await answerAt(0);
+    await Promise.all(body.queries.slice(1).map((_, offset) => answerAt(offset + 1)));
     // A batch where *every* query failed is a different thing entirely — an
     // expired token, a provider outage, a misconfigured key — and answering it
     // with a full set of misses would let a consumer publish an empty
@@ -218,7 +271,7 @@ export function createApp(
     if (unavailable > 0 && unavailable === body.queries.length) {
       return c.json({ error: "Lookup is temporarily unavailable" }, 500);
     }
-    return c.json({ entries });
+    return c.json({ entries, ...(outage ? { enrichment: enrichmentStatus(outage) } : {}) });
   });
 
   return app;
@@ -232,6 +285,45 @@ export function createApp(
 function isIsolatedModelFailure(error: unknown): error is ModelGatewayError {
   return error instanceof ModelGatewayError
     && (error.kind === "transient" || error.kind === "permanent");
+}
+
+/**
+ * The provider refusing the account rather than the word.
+ *
+ * A spent budget, an expired key, a request shape the provider rejects: the
+ * next query meets the same answer, so there is nothing to retry and nothing
+ * about the word to learn. Distinct from anything that is not a
+ * `ModelGatewayError` at all — a locked or failing database is this server's
+ * problem and still fails the request.
+ */
+function enrichmentOutage(error: unknown): ModelGatewayError | null {
+  return error instanceof ModelGatewayError && !isIsolatedModelFailure(error) ? error : null;
+}
+
+/**
+ * What the stored dictionary can still answer is worth more than an error.
+ *
+ * This used to throw, and the request became a 500 saying lookup was
+ * "temporarily unavailable". Every part of that was wrong for a spent budget:
+ * the published entries were sitting in SQLite and needed no model at all, and
+ * the one word in the message consumers key their retry logic on was
+ * "temporarily". The yori-news run of 2026-08-20 read the 500 as a service
+ * blip and waited out 450s of backoff per article against a budget that would
+ * not refill, then died on its systemd start timeout with ten finished
+ * articles unpublished.
+ *
+ * So enrichment degrades instead of failing: the batch falls back to stored
+ * entries and carries the reason back to the caller, which can publish what it
+ * has and say plainly that the definitions are thinner today.
+ */
+export type EnrichmentStatus = {
+  status: "unavailable";
+  reason: ModelGatewayError["kind"];
+  message: string;
+};
+
+function enrichmentStatus(error: ModelGatewayError): EnrichmentStatus {
+  return { status: "unavailable", reason: error.kind, message: error.message };
 }
 
 async function resolveOnDemand(

@@ -197,7 +197,22 @@ paths:
         "200":
           description: >-
             The entry in the requested explanation language, or null when no acceptable
-            content exists for that dictionary and language.
+            content exists for that dictionary and language. A null is also returned when
+            enrichment was requested but the provider refused the account; the
+            X-Yori-Enrichment header is present in that case and the null must not be
+            recorded as a settled dictionary miss.
+          headers:
+            X-Yori-Enrichment:
+              description: >-
+                Present only when the model provider refused the account rather than a
+                word — a spent budget, an expired key, a rejected request shape. The
+                published dictionary answered this request; anything enrichment would
+                have authored is missing. `budget` will not clear on its own and needs
+                someone to raise the limit, the rest need a config change, and none of
+                them are worth retrying on a timer.
+              schema:
+                type: string
+                enum: [authentication, configuration, unsupported-parameter, budget]
           content:
             application/json:
               schema:
@@ -218,8 +233,10 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: >-
-            A database, persistence, configuration, or model-provider failure. Operational
-            failures stay errors and never become a null entry.
+            A database or persistence failure. Operational failures stay errors and never
+            become a null entry. A model-provider failure no longer lands here when it is
+            about the account: those degrade to a 200 carrying the published entry and the
+            X-Yori-Enrichment header.
           content:
             application/json:
               schema:
@@ -244,6 +261,9 @@ paths:
           description: >-
             One entry or null per submitted query, in the same order and with the same
             length as the input, including duplicate queries. The queries are not repeated.
+            Also returned when the provider refused the account: the published dictionary
+            answers every query and an `enrichment` object says why the entries are
+            thinner than requested.
           content:
             application/json:
               schema:
@@ -269,10 +289,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: >-
-            A storage or projection failure, wherever it is raised, and a batch in
-            which every query's provider call failed. A provider failure for one
-            query while another survives is not one of these: that query is a null
-            entry and the batch returns 200.
+            A storage or projection failure, wherever it is raised, and a batch in which
+            every query's provider call failed for a reason about that call. A provider
+            failure for one query while another survives is not one of these: that query
+            is a null entry and the batch returns 200. Nor is a refusal about the account
+            — a spent budget, an expired key, a rejected request shape — which degrades to
+            a 200 carrying `enrichment` rather than failing the batch.
           content:
             application/json:
               schema:
@@ -441,15 +463,42 @@ components:
           description: >-
             Same length and order as the submitted queries. Duplicate queries keep
             separate positions and the submitted query strings are not repeated.
-            A query whose enrichment failed is null, the same as a miss, so one
-            unavailable word never discards the entries beside it; the failure is
-            recorded in the server log. A batch in which every query failed
-            returns 500 instead, so a total outage cannot be mistaken for a
-            dictionary with nothing in it. Only a provider failure is isolated
-            this way; a storage or projection error still fails the request,
-            wherever it is raised.
+            A query whose enrichment failed for a reason about that call is null,
+            the same as a miss, so one unavailable word never discards the entries
+            beside it; the failure is recorded in the server log. A batch in which
+            every query failed that way returns 500 instead, so a total outage
+            cannot be mistaken for a dictionary with nothing in it. When the
+            refusal is about the account, `enrichment` is present and a null here
+            is unsettled rather than a miss — the word may be one enrichment would
+            have authored. Only a provider failure is treated either way; a storage
+            or projection error still fails the request, wherever it is raised.
           items:
             $ref: "#/components/schemas/LookupResult"
+        enrichment:
+          type: object
+          required: [status, reason, message]
+          description: >-
+            Present only when the model provider refused the account rather than
+            a word — a spent budget, an expired key, a rejected request shape.
+            Enrichment is skipped for the rest of the batch and every query is
+            answered from the published dictionary instead, so the response is a
+            200 carrying thinner entries rather than an error. Callers must treat
+            a null in `entries` as unsettled while this is present: the word may
+            simply be one enrichment would have authored. Absent on a healthy
+            request, so its presence is the whole signal.
+          properties:
+            status:
+              type: string
+              enum: [unavailable]
+            reason:
+              type: string
+              enum: [authentication, configuration, unsupported-parameter, budget]
+              description: >-
+                Why the provider refused. `budget` will not clear on its own and
+                needs someone to raise the limit; the rest need a config change.
+                None of them are worth retrying on a timer.
+            message:
+              type: string
     LookupEntry:
       type: object
       description: >-
