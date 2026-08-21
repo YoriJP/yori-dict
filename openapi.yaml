@@ -450,6 +450,31 @@ components:
             wherever it is raised.
           items:
             $ref: "#/components/schemas/LookupResult"
+        enrichment:
+          type: object
+          required: [status, reason, message]
+          description: >-
+            Present only when the model provider refused the account rather than
+            a word — a spent budget, an expired key, a rejected request shape.
+            Enrichment is skipped for the rest of the batch and every query is
+            answered from the published dictionary instead, so the response is a
+            200 carrying thinner entries rather than an error. Callers must treat
+            a null in `entries` as unsettled while this is present: the word may
+            simply be one enrichment would have authored. Absent on a healthy
+            request, so its presence is the whole signal.
+          properties:
+            status:
+              type: string
+              enum: [unavailable]
+            reason:
+              type: string
+              enum: [authentication, configuration, unsupported-parameter, budget]
+              description: >-
+                Why the provider refused. `budget` will not clear on its own and
+                needs someone to raise the limit; the rest need a config change.
+                None of them are worth retrying on a timer.
+            message:
+              type: string
     LookupEntry:
       type: object
       description: >-

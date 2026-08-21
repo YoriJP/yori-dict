@@ -378,35 +378,60 @@ test("enrichment requires the owner token before any model call", async () => {
   expect(gateway.calls.map(({ role }) => role)).toEqual(["eligibility"]);
 });
 
-test("a provider failure is an operational error rather than a dictionary miss", async () => {
+test("an account-level provider failure degrades enrichment instead of failing", async () => {
   gateway.reset();
   gateway.failure = new ModelGatewayError("authentication", "bad key");
+  // The published entry needed no model, so a refused account costs the caller
+  // its generated examples, not its answer. The header says enrichment is off
+  // so a null here is not mistaken for a settled dictionary miss.
+  // `blorp` has no published entry, so this is the case that used to 500. It
+  // now answers null, and the header is what stops a caller reading that null
+  // as a settled dictionary miss.
   const single = await app.request("/v1/lookup?q=blorp&dictionary=en&lang=en&enrich=true", {
     headers: { authorization: "Bearer owner-token" }
   });
-  expect(single.status).toBe(500);
-  expect(await single.json()).toEqual({ error: "Lookup is temporarily unavailable" });
+  expect(single.status).toBe(200);
+  expect(single.headers.get("x-yori-enrichment")).toBe("authentication");
+  expect(await single.json()).toBeNull();
 
-  // A bad key refuses every query, so a batch carrying one does not get to
-  // report the word it happened to be holding as absent. It fails whole, at the
-  // first failure rather than after all of them.
+  // A bad key refuses every query, so the batch stops asking after the first
+  // and answers the rest from storage. `bank` is published; `blorp` is not, and
+  // comes back null — which is why the reason has to travel with the response.
   const badKeyBatch = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
     body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["bank", "blorp"] })
   });
-  expect(badKeyBatch.status).toBe(500);
+  expect(badKeyBatch.status).toBe(200);
+  const badKeyBody = await badKeyBatch.json();
+  expect(badKeyBody.entries[0]?.headword).toBe("bank");
+  expect(badKeyBody.entries[1]).toBeNull();
+  expect(badKeyBody.enrichment).toEqual({
+    status: "unavailable",
+    reason: "authentication",
+    message: "bad key"
+  });
 
-  // A spent budget is the same shape of fault: the money is gone for every
-  // later query too, and a consumer told "no such word" would publish the gap.
+  // A spent budget is the same shape of fault and gets the same treatment. It
+  // is reported as `budget` rather than folded into a generic 500, because a
+  // consumer's retry logic has to be able to tell "come back later" from
+  // "this will not refill on its own".
   gateway.failure = new ModelGatewayError("budget", "credit limit reached");
   const spentBatch = await app.request("/v1/lookup/batch", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
     body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["bank", "blorp"] })
   });
-  expect(spentBatch.status).toBe(500);
+  expect(spentBatch.status).toBe(200);
+  const spentBody = await spentBatch.json();
+  expect(spentBody.entries[0]?.headword).toBe("bank");
+  expect(spentBody.enrichment.reason).toBe("budget");
 
+  gateway.reset();
+});
+
+test("a provider failure about one call is still a miss for that call alone", async () => {
+  gateway.reset();
   // A dead provider is about the call, not the account. A batch is answered
   // word by word, so that one is a miss for its own query and does not discard
   // the entries beside it: a consumer sending a page of text should not lose
@@ -418,9 +443,11 @@ test("a provider failure is an operational error rather than a dictionary miss",
     body: JSON.stringify({ dictionary: "en", lang: "en", enrich: true, queries: ["bank", "blorp"] })
   });
   expect(batch.status).toBe(200);
-  const { entries } = await batch.json();
-  expect(entries[0]?.headword).toBe("bank");
-  expect(entries[1]).toBeNull();
+  const body = await batch.json();
+  expect(body.entries[0]?.headword).toBe("bank");
+  expect(body.entries[1]).toBeNull();
+  // Nothing was refused at the account level, so nothing is reported as such.
+  expect(body.enrichment).toBeUndefined();
 
   // A batch where nothing at all came back is the other thing: a dead provider
   // rather than a dictionary. Answering it with a full set of misses would let
