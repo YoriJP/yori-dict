@@ -1,0 +1,8 @@
+[install]
+# pnpm-style symlinked node_modules: a package can only import what it declares.
+# Set explicitly so local, CI and Docker builds all use the same layout.
+linker = "isolated"
+
+# Supply-chain cooldown: refuse versions published less than 1 day ago.
+# Applies when resolving (bun add / bun update), not to versions already in bun.lock.
+minimumReleaseAge = 86400
