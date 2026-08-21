@@ -176,13 +176,14 @@ export function createApp(
     // existed. Those fail the request, as they do for a single lookup.
     let unavailable = 0;
     // Set by the first query to meet an account-level refusal, and reported
-    // back with the response. A batch is answered concurrently, so this spares
-    // only the queries not yet in flight rather than stopping the batch dead;
-    // the account is refused either way, and a refusal is cheap. What matters
-    // is that every query still gets its stored answer and the caller is told
-    // why the answers are thinner than it asked for.
+    // back with the response. Once set, no further query asks the provider —
+    // see the probe below, which is what makes that true — and every query
+    // still gets its stored answer.
     let outage: ModelGatewayError | null = null;
-    const entries = await Promise.all(body.queries.map(async (candidate) => {
+    const entries: Array<LookupEntry | null> = new Array(body.queries.length).fill(null);
+
+    const answerAt = async (index: number): Promise<void> => {
+      const candidate = body.queries[index];
       const request = typeof candidate === "string"
         ? resolveRequest(candidate, dictionary, lang, {}, "bulk", traceId)
         : resolveRequest(candidate.query, dictionary, lang, {
@@ -221,7 +222,8 @@ export function createApp(
             // enriched lookup of it attempts again.
             logLookupFailure(options, traceId, dictionary, lang, request.query, error);
             unavailable += 1;
-            return null;
+            entries[index] = null;
+            return;
           } else {
             throw error;
           }
@@ -237,8 +239,31 @@ export function createApp(
         enriched
       );
       logLookup(options, traceId, dictionary, lang, request.query, body.enrich === true, entry);
-      return entry;
-    }));
+      entries[index] = entry;
+    };
+
+    // The first query goes alone, the rest together.
+    //
+    // `Array.map` runs every callback up to its first `await`, so fanning the
+    // whole batch out at once meant all of them had already asked the provider
+    // before any refusal could set `outage` — the flag skipped nothing and a
+    // spent budget cost one doomed request per word. Answering one query first
+    // makes the guarantee real: an account-level refusal is discovered once and
+    // the remaining queries go straight to storage.
+    //
+    // The price is one sequential call. Against a cold enrichment chunk, where
+    // each word already costs seconds and the client sends twenty at a time,
+    // that is a few percent of the chunk — paid only on enriched batches, and
+    // only once.
+    //
+    // It bounds the waste rather than abolishing it: a leading query already in
+    // the published dictionary needs no model, so it cannot discover a refusal
+    // and the queries behind it still fan out into one. That is the uncommon
+    // case — a batch is sent precisely because its words need enriching — and
+    // the alternative, waves of increasing width, would put a barrier between
+    // each wave and cost far more than it saves on the healthy path.
+    await answerAt(0);
+    await Promise.all(body.queries.slice(1).map((_, offset) => answerAt(offset + 1)));
     // A batch where *every* query failed is a different thing entirely — an
     // expired token, a provider outage, a misconfigured key — and answering it
     // with a full set of misses would let a consumer publish an empty

@@ -427,6 +427,27 @@ test("an account-level provider failure degrades enrichment instead of failing",
   expect(spentBody.entries[0]?.headword).toBe("bank");
   expect(spentBody.enrichment.reason).toBe("budget");
 
+  // The refusal is discovered once, not once per word. Before the first query
+  // was answered alone, every callback had already asked the provider before
+  // any of them could set the flag, so a spent budget cost one doomed request
+  // per query. Only holds when the leading query actually reaches the provider;
+  // one already published needs no model and cannot discover the refusal.
+  gateway.reset();
+  gateway.failure = new ModelGatewayError("budget", "credit limit reached");
+  const spentWide = await app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer owner-token" },
+    body: JSON.stringify({
+      dictionary: "en",
+      lang: "en",
+      enrich: true,
+      queries: ["blorp", "blorpier", "blorpiest", "blorpiester"]
+    })
+  });
+  expect(spentWide.status).toBe(200);
+  expect((await spentWide.json()).enrichment.reason).toBe("budget");
+  expect(gateway.calls.length).toBe(1);
+
   gateway.reset();
 });
 
