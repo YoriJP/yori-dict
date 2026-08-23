@@ -13,7 +13,11 @@ import {
   type LookupDictionary,
   type LookupEntry
 } from "./lookup-contract";
-import { ModelGatewayError } from "./on-demand-dictionary";
+import {
+  isAccountLevelModelFailure,
+  ModelCircuitOpenError,
+  ModelGatewayError
+} from "./on-demand-dictionary";
 import type { OnDemandDictionary, OnDemandEntry, ResolveRequest, ResolvedMatches } from "./on-demand-dictionary";
 
 type AppOptions = {
@@ -175,10 +179,10 @@ export function createApp(
     // reporting it as one would let a consumer record a gap that never
     // existed. Those fail the request, as they do for a single lookup.
     let unavailable = 0;
-    // Set by the first query to meet an account-level refusal, and reported
-    // back with the response. Once set, no further query asks the provider —
-    // see the probe below, which is what makes that true — and every query
-    // still gets its stored answer.
+    // Set by the first query to meet an account-level refusal and reported back
+    // with the response. The shared model-call gate opens the account circuit,
+    // so queued work fails locally while work already admitted is allowed to
+    // finish.
     let outage: ModelGatewayError | null = null;
     const entries: Array<LookupEntry | null> = new Array(body.queries.length).fill(null);
 
@@ -242,28 +246,10 @@ export function createApp(
       entries[index] = entry;
     };
 
-    // The first query goes alone, the rest together.
-    //
-    // `Array.map` runs every callback up to its first `await`, so fanning the
-    // whole batch out at once meant all of them had already asked the provider
-    // before any refusal could set `outage` — the flag skipped nothing and a
-    // spent budget cost one doomed request per word. Answering one query first
-    // makes the guarantee real: an account-level refusal is discovered once and
-    // the remaining queries go straight to storage.
-    //
-    // The price is one sequential call. Against a cold enrichment chunk, where
-    // each word already costs seconds and the client sends twenty at a time,
-    // that is a few percent of the chunk — paid only on enriched batches, and
-    // only once.
-    //
-    // It bounds the waste rather than abolishing it: a leading query already in
-    // the published dictionary needs no model, so it cannot discover a refusal
-    // and the queries behind it still fan out into one. That is the uncommon
-    // case — a batch is sent precisely because its words need enriching — and
-    // the alternative, waves of increasing width, would put a barrier between
-    // each wave and cost far more than it saves on the healthy path.
-    await answerAt(0);
-    await Promise.all(body.queries.slice(1).map((_, offset) => answerAt(offset + 1)));
+    // Healthy batches fan out immediately. Account-outage coordination belongs
+    // beside the shared provider dependency, not here: serializing one query as
+    // a probe added one complete model workflow to every healthy batch.
+    await Promise.all(body.queries.map((_, index) => answerAt(index)));
     // A batch where *every* query failed is a different thing entirely — an
     // expired token, a provider outage, a misconfigured key — and answering it
     // with a full set of misses would let a consumer publish an empty
@@ -297,7 +283,7 @@ function isIsolatedModelFailure(error: unknown): error is ModelGatewayError {
  * problem and still fails the request.
  */
 function enrichmentOutage(error: unknown): ModelGatewayError | null {
-  return error instanceof ModelGatewayError && !isIsolatedModelFailure(error) ? error : null;
+  return isAccountLevelModelFailure(error) ? error : null;
 }
 
 /**
@@ -496,6 +482,7 @@ function logLookupFailure(
   query: string,
   error: unknown
 ): void {
+  if (error instanceof ModelCircuitOpenError) return;
   options.logger?.({
     event: "lookup_failed",
     traceId,

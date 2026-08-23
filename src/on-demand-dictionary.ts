@@ -15,6 +15,7 @@ export type TargetDictionary = LookupDictionary;
 
 const traceContext = new AsyncLocalStorage<string | undefined>();
 const modelRunContext = new AsyncLocalStorage<ModelRunMetrics>();
+const modelCallTimingContext = new AsyncLocalStorage<ModelCallTiming>();
 
 /**
  * `lang` is the requested explanation language. It scopes every key that
@@ -107,6 +108,15 @@ export class ModelGatewayError extends Error {
   }
 }
 
+/**
+ * A call the shared gate refused locally because an earlier call proved the
+ * provider account unavailable. It retains the provider error kind for HTTP
+ * degradation, but it is not an Attempt Record because no provider was asked.
+ */
+export class ModelCircuitOpenError extends ModelGatewayError {
+  readonly skipped = true;
+}
+
 export type AttemptRecord = {
   traceId?: string;
   candidateId?: string;
@@ -119,6 +129,8 @@ export type AttemptRecord = {
   effectiveServiceTier?: ServiceTier;
   requestId?: string;
   durationMs: number;
+  queueDurationMs?: number;
+  providerDurationMs?: number;
   inputTokens?: number;
   outputTokens?: number;
   costUsd?: number;
@@ -213,7 +225,14 @@ export type EnglishEnrichmentRepository = {
 
 export type EnglishOnDemandDictionary = DictionaryResolver<EnglishEntry>;
 
-export type ModelCallLimiter = <T>(work: () => Promise<T>) => Promise<T>;
+export type ModelCallGate = <T>(work: () => Promise<T>) => Promise<T>;
+/** @deprecated Use `ModelCallGate`; the gate now also owns outage coordination. */
+export type ModelCallLimiter = ModelCallGate;
+
+type ModelCallTiming = {
+  queueDurationMs?: number;
+  providerDurationMs?: number;
+};
 
 /**
  * Model work is bounded once for both dictionaries. These were runtime
@@ -221,15 +240,15 @@ export type ModelCallLimiter = <T>(work: () => Promise<T>) => Promise<T>;
  * Changing them is a code change, which is how the deployed value stays
  * visible to a reader.
  *
- * One limiter gates every model call in the process, so this is the ceiling on
- * total enrichment throughput no matter how many requests arrive or how many
- * clients send them. A batch fans its queries out in parallel, a tier fans its
- * candidates out, and an entry fans its senses out; all of it queues here. At
- * four, a Yori News backfill ran at about sixteen seconds of queue time per
- * entry and every shard measured the same number, because they were measuring
- * the queue rather than themselves.
+ * One gate bounds every model call in the process, across both dictionaries and
+ * every request. Its limiter is the throughput ceiling; its circuit breaker
+ * remembers account-level refusals so queued work does not repeat a failure
+ * already known to affect the whole account.
  */
 export const enrichmentConcurrency = 24;
+
+/** How long an open account circuit waits before admitting one recovery probe. */
+export const modelCircuitCooldownMs = 60_000;
 
 /**
  * A guard against a call that will never answer, not a latency budget.
@@ -396,13 +415,15 @@ export function createJapaneseOnDemandDictionary(options: {
   concurrency?: number;
   timeoutMs?: number;
   sleep?: Sleep;
+  gate?: ModelCallGate;
+  /** @deprecated Use `gate`. */
   limiter?: ModelCallLimiter;
   reviewPasses?: 1 | 2;
   logger?: EnrichmentLogger;
 }): JapaneseOnDemandDictionary {
   const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
   const timeoutMs = positiveInteger(options.timeoutMs ?? modelTimeoutMs, "Model timeout");
-  const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
+  const runModelCall = options.gate ?? options.limiter ?? createModelCallGate(concurrency);
   const entryInFlight = new Map<string, Promise<PublicLookupItem | null>>();
   const canonicalInFlight = new Map<string, Promise<unknown>>();
   const exampleInFlight = new Map<string, Promise<unknown>>();
@@ -411,7 +432,7 @@ export function createJapaneseOnDemandDictionary(options: {
     sleep: options.sleep ?? defaultSleep,
     modelGateway: {
       call(input) {
-        return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs));
+        return runModelCall(() => callWithTimeout(options.modelGateway, input, timeoutMs));
       }
     },
     canonicalInFlight,
@@ -971,13 +992,14 @@ async function callAndRecord(
       await options.sleep(sameTierBackoffMs[Math.min(index - 1, sameTierBackoffMs.length - 1)]!);
     }
     const started = performance.now();
+    const timing: ModelCallTiming = {};
     try {
-      const response = await options.modelGateway.call({
+      const response = await modelCallTimingContext.run(timing, () => options.modelGateway.call({
         ...config,
         requestedServiceTier,
         prompt,
         signal: new AbortController().signal
-      });
+      }));
       const attempt: AttemptRecord = {
         ...config,
         traceId: traceContext.getStore(),
@@ -988,6 +1010,8 @@ async function callAndRecord(
         effectiveServiceTier: response.effectiveServiceTier,
         requestId: response.requestId,
         durationMs: Math.max(0, performance.now() - started),
+        ...(timing.queueDurationMs === undefined ? {} : { queueDurationMs: timing.queueDurationMs }),
+        ...(timing.providerDurationMs === undefined ? {} : { providerDurationMs: timing.providerDurationMs }),
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         costUsd: response.costUsd,
@@ -1000,16 +1024,20 @@ async function callAndRecord(
       failure = error instanceof ModelGatewayError
         ? error
         : new ModelGatewayError("permanent", error instanceof Error ? error.message : "Unknown model gateway error");
-      persistAttempt(options.repository, {
-        ...config,
-        traceId: traceContext.getStore(),
-        candidateId,
-        requestedServiceTier,
-        durationMs: Math.max(0, performance.now() - started),
-        prompt: boundedLog(prompt),
-        error: boundedLog(failure.message),
-        outcome: failure.kind
-      });
+      if (!(failure instanceof ModelCircuitOpenError)) {
+        persistAttempt(options.repository, {
+          ...config,
+          traceId: traceContext.getStore(),
+          candidateId,
+          requestedServiceTier,
+          durationMs: Math.max(0, performance.now() - started),
+          ...(timing.queueDurationMs === undefined ? {} : { queueDurationMs: timing.queueDurationMs }),
+          ...(timing.providerDurationMs === undefined ? {} : { providerDurationMs: timing.providerDurationMs }),
+          prompt: boundedLog(prompt),
+          error: boundedLog(failure.message),
+          outcome: failure.kind
+        });
+      }
       if (failure.kind !== "transient" || requestedServiceTier !== "flex") throw failure;
     }
   }
@@ -1652,20 +1680,22 @@ export function createEnglishOnDemandDictionary(options: {
   concurrency?: number;
   timeoutMs?: number;
   sleep?: Sleep;
+  gate?: ModelCallGate;
+  /** @deprecated Use `gate`. */
   limiter?: ModelCallLimiter;
   reviewPasses?: 1 | 2;
   logger?: EnrichmentLogger;
 }): EnglishOnDemandDictionary {
   const concurrency = positiveInteger(options.concurrency ?? enrichmentConcurrency, "Enrichment concurrency");
   const timeoutMs = positiveInteger(options.timeoutMs ?? modelTimeoutMs, "Model timeout");
-  const runLimited = options.limiter ?? createModelCallLimiter(concurrency);
+  const runModelCall = options.gate ?? options.limiter ?? createModelCallGate(concurrency);
   const inFlight = new Map<string, Promise<EnglishEntry | null>>();
   const canonicalInFlight = new Map<string, Promise<unknown>>();
   const runtime: EnglishRuntimeOptions = {
     repository: options.repository,
     sleep: options.sleep ?? defaultSleep,
     modelGateway: {
-      call(input) { return runLimited(() => callWithTimeout(options.modelGateway, input, timeoutMs)); }
+      call(input) { return runModelCall(() => callWithTimeout(options.modelGateway, input, timeoutMs)); }
     },
     modelConfigs: englishModelConfigs(options.models ?? englishModels),
     canonicalInFlight,
@@ -2511,21 +2541,92 @@ function shareByKey<T>(inFlight: Map<string, Promise<unknown>>, key: string, wor
   return task;
 }
 
-export function createModelCallLimiter(concurrency: number): ModelCallLimiter {
+export function createModelCallGate(
+  concurrency: number,
+  options: { cooldownMs?: number; now?: () => number } = {}
+): ModelCallGate {
   positiveInteger(concurrency, "Enrichment concurrency");
+  const cooldownMs = positiveInteger(options.cooldownMs ?? modelCircuitCooldownMs, "Model circuit cooldown");
+  const now = options.now ?? (() => performance.now());
   let active = 0;
-  const queue: Array<() => void> = [];
-  return <T>(work: () => Promise<T>) => new Promise<T>((resolve, reject) => {
-    const run = () => {
+  let outage: ModelGatewayError | null = null;
+  let retryAt = 0;
+  let probeActive = false;
+  const queue: Array<{
+    queuedAt: number;
+    timing?: ModelCallTiming;
+    work: () => Promise<unknown>;
+    resolve: (value: unknown) => void;
+    reject: (error: unknown) => void;
+  }> = [];
+
+  const drain = () => {
+    while (active < concurrency && queue.length > 0) {
+      const item = queue.shift()!;
       active += 1;
-      work().then(resolve, reject).finally(() => {
+      const admittedAt = now();
+      const timing = item.timing;
+      if (timing) timing.queueDurationMs = Math.max(0, admittedAt - item.queuedAt);
+
+      let probe = false;
+      if (outage) {
+        if (admittedAt < retryAt || probeActive) {
+          item.reject(new ModelCircuitOpenError(outage.kind, outage.message));
+          active -= 1;
+          continue;
+        }
+        probeActive = true;
+        probe = true;
+      }
+
+      const providerStarted = now();
+      Promise.resolve().then(item.work).then(
+        (value) => {
+          if (timing) timing.providerDurationMs = Math.max(0, now() - providerStarted);
+          if (probe) {
+            outage = null;
+            probeActive = false;
+          }
+          item.resolve(value);
+        },
+        (error) => {
+          if (timing) timing.providerDurationMs = Math.max(0, now() - providerStarted);
+          if (isAccountLevelModelFailure(error)) {
+            outage = error;
+            retryAt = now() + cooldownMs;
+            probeActive = false;
+          } else if (probe) {
+            outage = null;
+            probeActive = false;
+          }
+          item.reject(error);
+        }
+      ).finally(() => {
         active -= 1;
-        queue.shift()?.();
+        drain();
       });
-    };
-    if (active < concurrency) run();
-    else queue.push(run);
+    }
+  };
+
+  return <T>(work: () => Promise<T>) => new Promise<T>((resolve, reject) => {
+    queue.push({
+      queuedAt: now(),
+      timing: modelCallTimingContext.getStore(),
+      work,
+      resolve: resolve as (value: unknown) => void,
+      reject
+    });
+    drain();
   });
+}
+
+/** @deprecated Use `createModelCallGate`; it retains the limiter behavior. */
+export const createModelCallLimiter = createModelCallGate;
+
+export function isAccountLevelModelFailure(error: unknown): error is ModelGatewayError {
+  return error instanceof ModelGatewayError
+    && error.kind !== "transient"
+    && error.kind !== "permanent";
 }
 
 function sameStringSet(actual: Set<string>, expected: Set<string>): boolean {

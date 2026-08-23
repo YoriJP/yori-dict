@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   createJapaneseOnDemandDictionary,
-  createModelCallLimiter,
+  createModelCallGate,
   sameTierBackoffMs,
   type EnrichmentRepository,
   type CanonicalCandidate,
@@ -944,6 +944,10 @@ test("model calls are globally bounded and timeouts use the transient fallback p
 
   await Promise.all([dictionary.resolve(request("学校")), dictionary.resolve(request("教室"))]);
   expect(maximum).toBe(1);
+  for (const attempt of repository.attempts as Array<Record<string, unknown>>) {
+    expect(attempt.queueDurationMs).toBeNumber();
+    expect(attempt.providerDurationMs).toBeNumber();
+  }
 
   const timeoutGateway = new ScriptedGateway([
     (modelRequest) => new Promise<string>((_resolve, reject) => {
@@ -959,7 +963,7 @@ test("model calls are globally bounded and timeouts use the transient fallback p
   expect(timeoutGateway.calls.map(({ requestedServiceTier }) => requestedServiceTier)).toEqual(["flex", "standard"]);
 });
 
-test("one shared limiter bounds model calls across independent resolvers", async () => {
+test("one shared model-call gate bounds calls across independent resolvers", async () => {
   const first = existingEntry();
   first.senses[0].examples = undefined;
   const second = existingEntry();
@@ -988,16 +992,107 @@ test("one shared limiter bounds model calls across independent resolvers", async
       };
     }
   };
-  const limiter = createModelCallLimiter(1);
+  const gate = createModelCallGate(1);
   const school = createJapaneseOnDemandDictionary({
-    repository: new MemoryRepository({ released: [["学校", first]] }), modelGateway: gateway, limiter
+    repository: new MemoryRepository({ released: [["学校", first]] }), modelGateway: gateway, gate
   });
   const classroom = createJapaneseOnDemandDictionary({
-    repository: new MemoryRepository({ released: [["教室", second]] }), modelGateway: gateway, limiter
+    repository: new MemoryRepository({ released: [["教室", second]] }), modelGateway: gateway, gate
   });
 
   await Promise.all([school.resolve(request("学校")), classroom.resolve(request("教室"))]);
   expect(maximum).toBe(1);
+});
+
+test("the shared model-call gate stops queued work after an account-level failure", async () => {
+  const gate = createModelCallGate(2);
+  let providerCalls = 0;
+  let releaseRefusal!: () => void;
+  let releaseActive!: () => void;
+  const holdRefusal = new Promise<void>((resolve) => { releaseRefusal = resolve; });
+  const holdActive = new Promise<void>((resolve) => { releaseActive = resolve; });
+  const refused = gate(async () => {
+    providerCalls += 1;
+    await holdRefusal;
+    throw new ModelGatewayError("budget", "credit limit reached");
+  });
+  const alreadyActive = gate(async () => {
+    providerCalls += 1;
+    await holdActive;
+    return "finished";
+  });
+  const queued = gate(async () => {
+    providerCalls += 1;
+    return "should not run";
+  });
+  const refusedOutcome = refused.catch((error) => error);
+  const queuedOutcome = queued.catch((error) => error);
+
+  releaseRefusal();
+  expect(await refusedOutcome).toEqual(new ModelGatewayError("budget", "credit limit reached"));
+  expect(await queuedOutcome).toMatchObject({ kind: "budget", skipped: true });
+  expect(providerCalls).toBe(2);
+  releaseActive();
+  expect(await alreadyActive).toBe("finished");
+});
+
+test("the model-call gate admits one recovery probe after its cooldown", async () => {
+  let now = 0;
+  let providerCalls = 0;
+  const gate = createModelCallGate(1, { cooldownMs: 10, now: () => now });
+
+  await expect(gate(async () => {
+    providerCalls += 1;
+    throw new ModelGatewayError("authentication", "expired key");
+  })).rejects.toMatchObject({ kind: "authentication" });
+  await expect(gate(async () => {
+    providerCalls += 1;
+    return "should not run";
+  })).rejects.toMatchObject({ kind: "authentication", skipped: true });
+  expect(providerCalls).toBe(1);
+
+  now = 10;
+  expect(await gate(async () => {
+    providerCalls += 1;
+    return "recovered";
+  })).toBe("recovered");
+  expect(await gate(async () => {
+    providerCalls += 1;
+    return "closed";
+  })).toBe("closed");
+  expect(providerCalls).toBe(3);
+});
+
+test("work skipped by an open circuit is not recorded as a provider attempt", async () => {
+  const first = existingEntry();
+  first.senses[0].examples = undefined;
+  const second = existingEntry();
+  second.word = "教室";
+  second.id = "yori:e_jmdict_room";
+  second.headwords = [{ text: "教室", reading: "きょうしつ", kind: "kanji", common: true, tags: [] }];
+  second.senses = [{ ...second.senses[0], id: "yori:s_jmdict_room_1", examples: undefined }];
+  const repository = new MemoryRepository({ released: [["学校", first], ["教室", second]] });
+  let providerCalls = 0;
+  const gateway: ModelGateway = {
+    async call() {
+      providerCalls += 1;
+      throw new ModelGatewayError("budget", "credit limit reached");
+    }
+  };
+  const dictionary = createJapaneseOnDemandDictionary({
+    repository,
+    modelGateway: gateway,
+    gate: createModelCallGate(1)
+  });
+
+  const outcomes = await Promise.allSettled([
+    dictionary.resolve(request("学校")),
+    dictionary.resolve(request("教室"))
+  ]);
+
+  expect(outcomes.map(({ status }) => status)).toEqual(["fulfilled", "fulfilled"]);
+  expect(providerCalls).toBe(1);
+  expect(repository.attempts).toHaveLength(1);
 });
 
 test("invalid concurrency and timeout configuration fails during startup", () => {

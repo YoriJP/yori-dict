@@ -13,6 +13,7 @@ import { importEnglishRelease, migrateProductionDatabase } from "../src/producti
 import {
   createEnglishOnDemandDictionary,
   createJapaneseOnDemandDictionary,
+  createModelCallGate,
   createOnDemandDictionary,
   ModelGatewayError,
   type ModelGateway,
@@ -59,6 +60,7 @@ let dbPath: string;
 let lookupDb: LookupDb;
 let closeRepositories: () => void;
 let app: ReturnType<typeof createApp>;
+let resetApp: () => void;
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), "yori-lookup-contract-"));
@@ -105,19 +107,24 @@ beforeAll(async () => {
     japaneseRepository.close();
     englishRepository.close();
   };
-  app = createApp(lookupDb, {
-    enrichmentToken: "owner-token",
-    englishLookupAll: (query, lang) => englishRepository.findAll(query, lang),
-    englishMeta: () => englishRepository.meta(),
-    onDemand: createOnDemandDictionary({
-      japanese: createJapaneseOnDemandDictionary({ repository: japaneseRepository, modelGateway: gateway }),
-      english: createEnglishOnDemandDictionary({
-        repository: englishRepository,
-        modelGateway: gateway,
-        models: { author: "test/author", reviewer: "test/reviewer" }
+  resetApp = () => {
+    const modelGate = createModelCallGate(2);
+    app = createApp(lookupDb, {
+      enrichmentToken: "owner-token",
+      englishLookupAll: (query, lang) => englishRepository.findAll(query, lang),
+      englishMeta: () => englishRepository.meta(),
+      onDemand: createOnDemandDictionary({
+        japanese: createJapaneseOnDemandDictionary({ repository: japaneseRepository, modelGateway: gateway, gate: modelGate }),
+        english: createEnglishOnDemandDictionary({
+          repository: englishRepository,
+          modelGateway: gateway,
+          gate: modelGate,
+          models: { author: "test/author", reviewer: "test/reviewer" }
+        })
       })
-    })
-  });
+    });
+  };
+  resetApp();
 });
 
 afterAll(() => {
@@ -416,6 +423,7 @@ test("an account-level provider failure degrades enrichment instead of failing",
   // is reported as `budget` rather than folded into a generic 500, because a
   // consumer's retry logic has to be able to tell "come back later" from
   // "this will not refill on its own".
+  resetApp();
   gateway.failure = new ModelGatewayError("budget", "credit limit reached");
   const spentBatch = await app.request("/v1/lookup/batch", {
     method: "POST",
@@ -427,12 +435,11 @@ test("an account-level provider failure degrades enrichment instead of failing",
   expect(spentBody.entries[0]?.headword).toBe("bank");
   expect(spentBody.enrichment.reason).toBe("budget");
 
-  // The refusal is discovered once, not once per word. Before the first query
-  // was answered alone, every callback had already asked the provider before
-  // any of them could set the flag, so a spent budget cost one doomed request
-  // per query. Only holds when the leading query actually reaches the provider;
-  // one already published needs no model and cannot discover the refusal.
+  // Healthy work is admitted concurrently. A refusal can therefore reach the
+  // calls already holding a gate slot, but it stops every queued call from
+  // reaching the provider. This fixture gives the shared gate two slots.
   gateway.reset();
+  resetApp();
   gateway.failure = new ModelGatewayError("budget", "credit limit reached");
   const spentWide = await app.request("/v1/lookup/batch", {
     method: "POST",
@@ -446,13 +453,14 @@ test("an account-level provider failure degrades enrichment instead of failing",
   });
   expect(spentWide.status).toBe(200);
   expect((await spentWide.json()).enrichment.reason).toBe("budget");
-  expect(gateway.calls.length).toBe(1);
+  expect(gateway.calls.length).toBe(2);
 
   gateway.reset();
 });
 
 test("a provider failure about one call is still a miss for that call alone", async () => {
   gateway.reset();
+  resetApp();
   // A dead provider is about the call, not the account. A batch is answered
   // word by word, so that one is a miss for its own query and does not discard
   // the entries beside it: a consumer sending a page of text should not lose

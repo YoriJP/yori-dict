@@ -111,6 +111,35 @@ test("batch enrichment accepts contextual candidates while preserving order", as
   expect(entries.map((entry: { headword: string }) => entry.headword)).toEqual(["未知語", "未知語"]);
 });
 
+test("a healthy enriched batch starts every query before any query finishes", async () => {
+  let started = 0;
+  let firstStarted!: () => void;
+  let release!: () => void;
+  const observedFirst = new Promise<void>((resolve) => { firstStarted = resolve; });
+  const allMayFinish = new Promise<void>((resolve) => { release = resolve; });
+  const onDemand: JapaneseOnDemandDictionary = {
+    async resolve() {
+      started += 1;
+      firstStarted();
+      await allMayFinish;
+      return generatedEntry();
+    }
+  };
+  const app = createApp(emptyDb(), { onDemand: japaneseResolver(onDemand), enrichmentToken: "secret" });
+  const response = app.request("/v1/lookup/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer secret" },
+    body: JSON.stringify({ dictionary: "ja", lang: "en", enrich: true, queries: ["一", "二", "三", "四"] })
+  });
+
+  await observedFirst;
+  await Bun.sleep(0);
+  const startedBeforeAnyFinished = started;
+  release();
+  expect((await response).status).toBe(200);
+  expect(startedBeforeAnyFinished).toBe(4);
+});
+
 test("one failed word is a miss and the rest of the batch survives", async () => {
   const events: Record<string, unknown>[] = [];
   const released = generatedEntry();
