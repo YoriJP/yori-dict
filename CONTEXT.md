@@ -151,5 +151,5 @@ The full record of what produced a candidate: model snapshot, reasoning effort, 
 _Avoid_: Model name, model version
 
 **Attempt Record**:
-The observable record of one provider call: role, prompt version, model snapshot, reasoning effort, provider, requested and effective service tier, request id, duration, token use, and classified outcome.
+The observable record of one provider call: role, prompt version, model snapshot, reasoning effort, provider, requested and effective service tier, request id, total duration, limiter queue duration, provider duration, token use, and classified outcome. Work rejected locally by an open account circuit is not an attempt because no provider was called.
 _Avoid_: Debug log, trace dump

@@ -6,7 +6,7 @@ import { createOpenRouterModelGateway } from "./model-gateway";
 import {
   createEnglishOnDemandDictionary,
   createJapaneseOnDemandDictionary,
-  createModelCallLimiter,
+  createModelCallGate,
   createOnDemandDictionary,
   enrichmentConcurrency,
   modelTimeoutMs
@@ -16,7 +16,7 @@ import { openSourceEvidenceIndex } from "./source-index";
 const dbPath = process.env.YORI_DB_PATH ?? "data/yori.sqlite";
 const logger = (event: Record<string, unknown>) => console.info(JSON.stringify(event));
 const modelGateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_API_KEY });
-const modelLimiter = createModelCallLimiter(enrichmentConcurrency);
+const modelGate = createModelCallGate(enrichmentConcurrency);
 const releasedDb = openLookupDb(dbPath);
 const sourceIndex = await openSourceEvidenceIndex(
   (process.env.YORI_JA_SOURCE_EVIDENCE_PATHS ?? "").split(",").map((path) => path.trim()).filter(Boolean)
@@ -29,7 +29,7 @@ const repository = openEnrichmentRepository(
 const japaneseOnDemand = createJapaneseOnDemandDictionary({
   repository,
   modelGateway,
-  limiter: modelLimiter,
+  gate: modelGate,
   reviewPasses: 2,
   timeoutMs: modelTimeoutMs,
   logger
@@ -38,7 +38,7 @@ const englishRepository = openEnglishEnrichmentRepository(dbPath);
 const englishOnDemand = createEnglishOnDemandDictionary({
   repository: englishRepository,
   modelGateway,
-  limiter: modelLimiter,
+  gate: modelGate,
   reviewPasses: 2,
   timeoutMs: modelTimeoutMs,
   logger
