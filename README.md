@@ -69,8 +69,16 @@ curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
 Every lookup must name one `dictionary` (`ja` or `en`) and one `lang`. Neither
 has a default, and an unsupported pair is a request error. Single lookup returns
 the entry or `null`. Batch lookup returns `entries`: one entry or `null` per
-query, in the submitted order and length, without repeating the queries. `null`
-means no acceptable content exists; database and provider failures stay errors.
+query, in the submitted order and length, without repeating the queries.
+
+Ordinary lookup is model-free, and its `null` means no acceptable content exists.
+Authenticated `enrich=true` lookup is best-effort. If the model provider refuses
+the account, a single lookup still returns the stored entry or `null` with an
+`X-Yori-Enrichment` response header; a batch still returns its stored `entries`
+with an `enrichment` object. Those signals mean a returned `null` is unsettled,
+not a confirmed dictionary miss. Database and persistence failures remain
+errors. A provider failure isolated to one batch item makes that item `null`; a
+batch in which every item fails that way returns an error.
 
 Both dictionaries share one base entry shape — `id`, `dictionary`, `lang`,
 `headword`, `headwords`, `senses`, `sources` — while Japanese keeps its
@@ -80,6 +88,26 @@ helps match individual Japanese words; it is not sentence parsing.
 For the complete request and response schemas, use the
 [interactive API documentation](https://yori-dict-production.up.railway.app/doc)
 or the [OpenAPI specification](https://github.com/YoriJP/yori-dict/blob/main/openapi.yaml).
+Build-time clients may send `X-Yori-Request-Id` on either lookup route to carry
+their own trace id through lookup and enrichment logs.
+
+## Local development
+
+The repository pins Bun 1.4.0. Install dependencies and start the API with:
+
+```sh
+bun install --frozen-lockfile
+bun run dev
+```
+
+The first start prepares `data/yori.sqlite`: it downloads and verifies the
+Japanese release pinned in `data-release.json`, then imports or rebuilds the
+pinned English release if needed. The API starts at <http://localhost:3000>,
+with interactive documentation at <http://localhost:3000/doc>.
+
+Ordinary lookup needs no environment variables. Authenticated enrichment needs
+`OPENROUTER_API_KEY` and `YORI_ENRICHMENT_TOKEN`; storage and source-evidence
+overrides are documented in [On-demand enrichment](docs/on-demand-enrichment.md#runtime-configuration).
 
 ## Downloads
 

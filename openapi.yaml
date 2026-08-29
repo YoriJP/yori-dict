@@ -135,7 +135,11 @@ paths:
     get:
       summary: Look up one term in an independent dictionary
       operationId: lookup
+      security:
+        - {}
+        - enrichmentBearer: []
       parameters:
+        - $ref: "#/components/parameters/RequestId"
         - name: q
           in: query
           required: true
@@ -178,7 +182,10 @@ paths:
         - name: lemma
           in: query
           required: false
-          description: Consumer-supplied lemma hint used only during authenticated enrichment.
+          description: >-
+            Consumer-supplied lemma hint. An ordinary English lookup retries this lemma
+            when the submitted surface has no stored match. Authenticated enrichment also
+            uses it during canonical lookup and disambiguation.
           schema:
             type: string
         - name: reading
@@ -245,6 +252,11 @@ paths:
     post:
       summary: Look up multiple terms in an independent dictionary
       operationId: batchLookup
+      security:
+        - {}
+        - enrichmentBearer: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
       requestBody:
         required: true
         content:
@@ -300,11 +312,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 components:
+  parameters:
+    RequestId:
+      name: X-Yori-Request-Id
+      in: header
+      required: false
+      description: >-
+        Caller-supplied trace id retained in structured lookup logs and private
+        enrichment attempt records. When omitted, the service generates one.
+      schema:
+        type: string
   securitySchemes:
     enrichmentBearer:
       type: http
       scheme: bearer
-      description: Required only when `enrich=true`.
+      description: >-
+        Optional for ordinary lookup and required when `enrich=true`. Supplying
+        a token by itself does not trigger enrichment.
   schemas:
     IndexResponse:
       type: object
@@ -450,10 +474,15 @@ components:
           minLength: 1
         lemma:
           type: string
+          description: >-
+            Consumer-supplied lemma hint. An ordinary English lookup retries this lemma
+            when `query` has no stored match; enrichment also uses it for disambiguation.
         reading:
           type: string
+          description: Japanese reading hint used only during authenticated enrichment.
         context:
           type: string
+          description: Sentence used only for enrichment eligibility and disambiguation.
     BatchLookupResponse:
       type: object
       required: [entries]
