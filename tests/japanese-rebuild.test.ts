@@ -120,7 +120,12 @@ test("a rebuild records the exact source Evidence missing from a retained langua
       id: "1410750",
       kanji: [{ text: "様", common: true, tags: [] }],
       kana: [{ text: "さま", common: true, tags: [], appliesToKanji: ["*"] }],
-      sense: [sense("appearance"), sense("manner"), sense("honorific title")]
+      sense: [
+        sense("state or appearance"),
+        sense("way or manner"),
+        sense("situation"),
+        sense("honorific title")
+      ]
     }]
   }));
   await writeFile(glossPath, JSON.stringify({
@@ -133,7 +138,7 @@ test("a rebuild records the exact source Evidence missing from a retained langua
   const result = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
 
   expect(result.coverageGaps).toEqual({
-    summary: { "zh-tw": { groups: 1, missingEvidenceIds: 2 } },
+    summary: { "zh-tw": { groups: 1, missingEvidenceIds: 3 } },
     details: [
       {
         entryId: "yori:e_jmdict_1410750",
@@ -146,6 +151,13 @@ test("a rebuild records the exact source Evidence missing from a retained langua
         entryId: "yori:e_jmdict_1410750",
         lang: "zh-tw",
         missingEvidenceId: "jmdict:1410750:3",
+        sourceVersion: "fixture-v1",
+        basis: "legacy-exact-sense-mapping"
+      },
+      {
+        entryId: "yori:e_jmdict_1410750",
+        lang: "zh-tw",
+        missingEvidenceId: "jmdict:1410750:4",
         sourceVersion: "fixture-v1",
         basis: "legacy-exact-sense-mapping"
       }
@@ -223,6 +235,14 @@ test("a rebuild retains accepted generated content and does not reorder imported
   // Examples carried inside retained groups are counted with the group; the
   // standalone count is for generated Examples reattached to imported Senses.
   expect(result.retained).toEqual({ entries: 1, groups: 3, examples: 1 });
+  // An absent group has no coverage claim, while an authored group without
+  // reconstructable Evidence remains readable as Unknown Coverage. Neither is
+  // recorded as a Proven Coverage Gap.
+  expect(result.coverage.de).toBeUndefined();
+  expect(result.coverageGaps.details.some((gap) => gap.lang === "de")).toBe(false);
+  expect(result.coverageGaps.details.some(
+    (gap) => gap.entryId === "yori:e_jmdict_1206730" && gap.lang === "zh-tw"
+  )).toBe(false);
 
   const reopened = openLookupDb(out);
   const generated = reopened.lookup("未知語", "en").item;
@@ -307,8 +327,13 @@ test("an accepted repair survives partial legacy rebuilds and reports only new s
 
   const identical = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
   const identicalLookup = openLookupDb(out);
-  expect(identicalLookup.lookup("様", "zh-tw").item?.senses[0]?.glosses[0]?.text)
-    .toBe("修復後的完整解釋");
+  const completeGroup = identicalLookup.lookup("様", "zh-tw").item;
+  expect(completeGroup?.senses).toHaveLength(1);
+  expect(completeGroup?.senses[0]?.glosses[0]?.text).toBe("修復後的完整解釋");
+  expect(completeGroup?.senses[0]?.evidenceIds).toEqual([
+    "jmdict:1410750:1",
+    "jmdict:1410750:2"
+  ]);
   identicalLookup.close();
   expect(identical.coverageGaps.summary["zh-tw"]).toBeUndefined();
 

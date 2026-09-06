@@ -131,9 +131,17 @@ export function openEnrichmentRepository(
     },
     coverageDecision(entryId, lang) {
       const missingEvidenceIds = db.query<{ missing_evidence_id: string }, [string, string]>(`
-        select missing_evidence_id from ja_explanation_group_gaps
-         where entry_id = ? and lang = ?
-         order by missing_evidence_id
+        select gap.missing_evidence_id
+          from ja_explanation_group_gaps gap
+          join ja_senses source_sense
+            on source_sense.entry_id = gap.entry_id
+           and source_sense.lang = 'en'
+           and source_sense.provenance = 'source'
+          join ja_sense_evidence source_evidence
+            on source_evidence.sense_id = source_sense.id
+           and source_evidence.evidence_id = gap.missing_evidence_id
+         where gap.entry_id = ? and gap.lang = ?
+         order by source_sense.position, source_evidence.position
       `).all(entryId, lang).map((row) => row.missing_evidence_id);
       if (missingEvidenceIds.length === 0) return { kind: "not-proven-partial" };
       const source = readJapaneseLookupItem(db, entryId, "en");

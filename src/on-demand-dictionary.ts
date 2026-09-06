@@ -475,7 +475,7 @@ export function createJapaneseOnDemandDictionary(options: {
     const running = entryInFlight.get(key);
     if (running) return running;
     const task = (existing && coverage.kind === "proven-partial"
-      ? repairPartialGroup(runtime, existing, request, coverage.sourceEvidence)
+      ? repairPartialGroup(runtime, existing, request)
       : existing
         ? completeEntryExamples(runtime, existing, request)
         : resolveMissing(request, runtime))
@@ -500,8 +500,7 @@ export function createJapaneseOnDemandDictionary(options: {
 function repairPartialGroup(
   options: RuntimeOptions,
   existing: PublicLookupItem,
-  request: ResolveRequest,
-  sourceEvidence: SourceEvidence[]
+  request: ResolveRequest
 ): Promise<PublicLookupItem | null> {
   return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, existing.word), async () => {
     const current = options.repository.findById?.(

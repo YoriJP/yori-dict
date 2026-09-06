@@ -133,6 +133,8 @@ The release manifest records the artifact names, checksums, source versions,
 licenses, exact per-language coverage, and the Japanese `coverageGaps` summary.
 Its `schemaVersion` names the table shape: `ja-3` and `en-2` are the current
 Japanese and English shapes.
+The [Japanese coverage-gap audit](docs/japanese-coverage-gap-audit.md) records
+source-version observations separately from release acceptance rules.
 
 Japanese written forms live in `ja_forms`, and senses in `ja_senses`, which
 names the explanation language:

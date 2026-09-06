@@ -1,15 +1,20 @@
 import type { Database } from "bun:sqlite";
 import { readLanguageCoverage, type LanguageCoverage } from "./canonical-store";
+import type { ApiLang } from "./types";
 
 export type { LanguageCoverage };
 
 export type ExplanationCoverageGap = {
   entryId: string;
-  lang: string;
+  lang: ApiLang;
   missingEvidenceId: string;
   sourceVersion: string;
-  basis: string;
+  basis: CoverageGapDerivationBasis;
 };
+
+export type CoverageGapDerivationBasis =
+  | "legacy-exact-sense-mapping"
+  | "accepted-authored-evidence";
 
 export type ExplanationCoverageGapReport = {
   summary: Record<string, { groups: number; missingEvidenceIds: number }>;
@@ -120,7 +125,7 @@ create table if not exists ja_explanation_group_gaps (
   lang text not null,
   missing_evidence_id text not null,
   source_version text not null,
-  basis text not null,
+  basis text not null check (basis in ('legacy-exact-sense-mapping', 'accepted-authored-evidence')),
   primary key (entry_id, lang, missing_evidence_id)
 );
 
@@ -160,11 +165,6 @@ create index if not exists ja_glosses_sense_idx on ja_glosses(sense_id);
 create index if not exists ja_examples_sense_idx on ja_examples(sense_id);
 create index if not exists ja_sense_evidence_sense_idx on ja_sense_evidence(sense_id, position);
 create index if not exists ja_group_gaps_entry_lang_idx on ja_explanation_group_gaps(entry_id, lang, missing_evidence_id);
-
-insert or ignore into ja_sense_evidence (sense_id, position, evidence_id, source_name)
-select id, 1, source_ref, coalesce(source_name, 'source')
-  from ja_senses
- where source_ref is not null;
 `;
 
 export function createJapaneseSchema(db: Database): void {
@@ -189,14 +189,21 @@ export function readCoverage(db: Database): Record<string, LanguageCoverage> {
 export function readExplanationCoverageGaps(db: Database): ExplanationCoverageGapReport {
   const details = db.query<{
     entry_id: string;
-    lang: string;
+    lang: ApiLang;
     missing_evidence_id: string;
     source_version: string;
-    basis: string;
+    basis: CoverageGapDerivationBasis;
   }, []>(`
-    select entry_id, lang, missing_evidence_id, source_version, basis
-      from ja_explanation_group_gaps
-     order by entry_id, lang, missing_evidence_id
+    select gap.entry_id, gap.lang, gap.missing_evidence_id, gap.source_version, gap.basis
+      from ja_explanation_group_gaps gap
+      join ja_senses source_sense
+        on source_sense.entry_id = gap.entry_id
+       and source_sense.lang = 'en'
+       and source_sense.provenance = 'source'
+      join ja_sense_evidence source_evidence
+        on source_evidence.sense_id = source_sense.id
+       and source_evidence.evidence_id = gap.missing_evidence_id
+     order by gap.entry_id, gap.lang, source_sense.position, source_evidence.position
   `).all().map((row) => ({
     entryId: row.entry_id,
     lang: row.lang,

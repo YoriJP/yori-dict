@@ -158,12 +158,39 @@ test("the lookup route keeps a proven-partial group model-free until authorized 
   expect((await publicResponse.json()).senses[0].glosses[0].text).toBe("舊的學校解釋");
   expect(calls).toHaveLength(0);
 
-  const enriched = await app.request(
+  const failingDictionary = createJapaneseOnDemandDictionary({
+    repository,
+    reviewPasses: 2,
+    modelGateway: {
+      async call() {
+        throw new ModelGatewayError("permanent", "provider unavailable");
+      }
+    }
+  });
+  const failingApp = createApp(lookup, {
+    onDemand: japaneseResolver(failingDictionary),
+    enrichmentToken: "secret"
+  });
+  const degraded = await failingApp.request(
     "/v1/lookup?q=%E5%AD%A6%E6%A0%A1&dictionary=ja&lang=zh-tw&enrich=true",
     { headers: { authorization: "Bearer secret" } }
   );
-  expect(enriched.status).toBe(200);
-  expect((await enriched.json()).senses[0].glosses[0].text).toBe("提供教育的機構");
+  expect(degraded.status).toBe(200);
+  expect((await degraded.json()).senses[0].glosses[0].text).toBe("舊的學校解釋");
+  const retryable = new Database(path, { readonly: true });
+  expect(retryable.query<{ count: number }, []>(
+    "select count(*) as count from ja_explanation_group_gaps where entry_id = 'yori:e_jmdict_1206730' and lang = 'zh-tw'"
+  ).get()?.count).toBe(1);
+  retryable.close();
+
+  const enrichedRequests = await Promise.all([1, 2].map(() => app.request(
+    "/v1/lookup?q=%E5%AD%A6%E6%A0%A1&dictionary=ja&lang=zh-tw&enrich=true",
+    { headers: { authorization: "Bearer secret" } }
+  )));
+  expect(enrichedRequests.map(({ status }) => status)).toEqual([200, 200]);
+  for (const response of enrichedRequests) {
+    expect((await response.json()).senses[0].glosses[0].text).toBe("提供教育的機構");
+  }
   expect(calls.map(({ role }) => role)).toEqual([
     "entry-author", "entry-review", "entry-review", "example-author", "example-review", "example-review"
   ]);

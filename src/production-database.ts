@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { downloadPinnedDataRelease } from "../scripts/download-data-release";
 import { createEnglishSchema } from "./english-schema";
-import { createJapaneseSchema, japaneseSchemaVersion } from "./japanese-schema";
+import { createJapaneseSchema } from "./japanese-schema";
 
 const migrationsFolder = resolve(import.meta.dir, "../drizzle");
 
@@ -15,11 +15,6 @@ export function migrateProductionDatabase(path: string): void {
   try {
     sqlite.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
     migrate(drizzle({ client: sqlite }), { migrationsFolder });
-    // Canonical dictionary schema upgrades are lightweight structure changes.
-    // Evidence classification remains an explicit rebuild/import operation.
-    createJapaneseSchema(sqlite);
-    sqlite.prepare("insert or replace into ja_metadata (key, value) values ('schemaVersion', ?)")
-      .run(japaneseSchemaVersion);
   } finally {
     sqlite.close();
   }
@@ -192,12 +187,18 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
   const incomingVersion = source.query<{ value: string }, []>(
     "select value from ja_metadata where key = 'dictDate'"
   ).get()?.value;
+  const incomingSchemaVersion = source.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'schemaVersion'"
+  ).get()?.value;
   source.close();
   if (!incomingVersion) throw new Error(`Japanese release has no dictDate: ${releasePath}`);
   const currentVersion = production.query<{ value: string }, []>(
     "select value from ja_metadata where key = 'dictDate'"
   ).get()?.value;
-  if (currentVersion === incomingVersion) {
+  const currentSchemaVersion = production.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'schemaVersion'"
+  ).get()?.value;
+  if (currentVersion === incomingVersion && currentSchemaVersion === incomingSchemaVersion) {
     production.close();
     return false;
   }

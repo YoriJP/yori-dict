@@ -149,20 +149,39 @@ test("production migrations are idempotent", async () => {
   const legacy = new Database(path);
   legacy.exec("drop table ja_sense_evidence; drop table ja_explanation_group_gaps;");
   legacy.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  legacy.prepare(
+    "delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)"
+  ).run();
   legacy.close();
   migrateProductionDatabase(path);
   migrateProductionDatabase(path);
   const migrated = new Database(path, { readonly: true });
   expect(migrated.query<{ value: string }, []>(
     "select value from ja_metadata where key = 'schemaVersion'"
-  ).get()?.value).toBe("ja-3");
+  ).get()?.value).toBe("ja-2");
   expect(migrated.query<{ count: number }, []>(
     "select count(*) as count from ja_sense_evidence"
-  ).get()?.count).toBeGreaterThan(0);
+  ).get()?.count).toBe(0);
   migrated.close();
   const lookup = openLookupDb(path);
   expect(lookup.lookup("学校", "en").item?.word).toBe("学校");
   lookup.close();
+});
+
+test("a same-date ja-3 release upgrades a ja-2 Japanese store", async () => {
+  const path = await productionDatabase();
+  const releasePath = await productionDatabase();
+  const production = new Database(path);
+  production.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  production.close();
+
+  expect(importJapaneseRelease(path, releasePath)).toBe(true);
+
+  const upgraded = new Database(path, { readonly: true });
+  expect(upgraded.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'schemaVersion'"
+  ).get()?.value).toBe("ja-3");
+  upgraded.close();
 });
 
 test("a Japanese source refresh preserves accepted generated content", async () => {

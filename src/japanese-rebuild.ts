@@ -461,19 +461,7 @@ function deriveExplanationCoverageGaps(db: Database, sourceVersion: string): voi
      order by sense.entry_id, sense.lang
   `).all();
   for (const group of groups) {
-    const expected = db.query<{ evidence_id: string }, [string]>(`
-      select distinct evidence.evidence_id as evidence_id
-        from ja_senses sense
-        join ja_sense_evidence evidence on evidence.sense_id = sense.id
-       where sense.entry_id = ? and sense.lang = 'en' and sense.provenance = 'source'
-       order by sense.position, evidence.position
-    `).all(group.entry_id).map((row) => row.evidence_id);
-    const covered = new Set(db.query<{ evidence_id: string }, [string, string]>(`
-      select distinct evidence.evidence_id as evidence_id
-        from ja_senses sense
-        join ja_sense_evidence evidence on evidence.sense_id = sense.id
-       where sense.entry_id = ? and sense.lang = ?
-    `).all(group.entry_id, group.lang).map((row) => row.evidence_id));
+    const { expected, covered } = readEvidenceCoverage(db, group.entry_id, group.lang);
     const legacy = db.query<{ found: number }, [string, string]>(`
       select 1 as found from ja_senses
        where entry_id = ? and lang = ? and generation_id like 'legacy:%'
@@ -812,20 +800,29 @@ function readEvidenceRows(
 }
 
 function groupHasProvenGap(db: Database, entryId: string, lang: string): boolean {
+  const { expected, covered } = readEvidenceCoverage(db, entryId, lang);
+  return covered.size > 0 && expected.some((evidenceId) => !covered.has(evidenceId));
+}
+
+function readEvidenceCoverage(
+  db: Database,
+  entryId: string,
+  lang: string
+): { expected: string[]; covered: Set<string> } {
   const expected = db.query<{ evidence_id: string }, [string]>(`
     select distinct evidence.evidence_id as evidence_id
       from ja_senses sense
       join ja_sense_evidence evidence on evidence.sense_id = sense.id
      where sense.entry_id = ? and sense.lang = 'en' and sense.provenance = 'source'
+     order by sense.position, evidence.position
   `).all(entryId).map((row) => row.evidence_id);
-  if (expected.length === 0) return false;
   const covered = new Set(db.query<{ evidence_id: string }, [string, string]>(`
     select distinct evidence.evidence_id as evidence_id
       from ja_senses sense
       join ja_sense_evidence evidence on evidence.sense_id = sense.id
      where sense.entry_id = ? and sense.lang = ?
   `).all(entryId, lang).map((row) => row.evidence_id));
-  return covered.size > 0 && expected.some((evidenceId) => !covered.has(evidenceId));
+  return { expected, covered };
 }
 
 function deleteExplanationGroup(db: Database, entryId: string, lang: string): void {

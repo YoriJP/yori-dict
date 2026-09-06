@@ -138,9 +138,8 @@ test("no release artifact mixes explanation languages", async () => {
     packs.set(lang, definitions);
   }
   expect(new Set(packs.get("en"))).not.toEqual(new Set(packs.get("zh-tw")));
-  // 食べる carries a variant written form, and each form gets its own row so a
-  // reader scanning the variant finds the entry too.
-  expect(packs.get("zh-tw")).toEqual(["未知詞", "吃", "吃"]);
+  // The language pack contains only its own two explanation groups.
+  expect(packs.get("zh-tw")).toEqual(["未知詞", "模糊詞"]);
 });
 
 test("a pack row carries the inflection class Yomitan validates deinflections against", async () => {
@@ -259,7 +258,7 @@ test("imported gloss language survives release into its own pack", async () => {
   expect(englishTerms.find((term) => term[0] === "学校")?.[5]).toEqual(["school"]);
 
   const taiwaneseTerms = JSON.parse(await packEntry(artifacts.yomitan["zh-tw"], "term_bank_1.json")) as unknown[][];
-  expect(taiwaneseTerms.find((term) => term[0] === "食べる")?.[5]).toEqual(["吃"]);
+  expect(taiwaneseTerms.find((term) => term[0] === "あいまい語")?.[5]).toEqual(["模糊詞"]);
 });
 
 test("a JMdict component EDRDG does not license never reaches a release", async () => {
@@ -328,7 +327,7 @@ async function release(): Promise<{ path: string; artifacts: JapaneseReleaseArti
   repository.close();
   lookup.close();
 
-  addLegacyTaiwaneseMeaning(path, "yori:s_jmdict_1358280_1", "吃");
+  addLegacyTaiwaneseMeaning(path, "yori:s_jmdict_2000006_1", "模糊詞");
 
   return {
     path,
@@ -395,11 +394,18 @@ function addLegacyTaiwaneseMeaning(path: string, baseSenseId: string, gloss: str
   db.prepare(
     "insert into ja_sense_evidence (sense_id, position, evidence_id, source_name) values (?, 1, ?, 'yori-legacy')"
   ).run(`${baseSenseId}:zh-tw`, baseSenseId.replace(/^yori:s_jmdict_/, "jmdict:").replace(/_(\d+)$/, ":$1"));
+  const match = /^yori:s_jmdict_(.+)_(\d+)$/.exec(baseSenseId);
+  if (!match) throw new Error(`Unexpected JMdict sense id: ${baseSenseId}`);
+  const [, sourceEntryId, sourcePositionText] = match;
+  const sourcePosition = Number(sourcePositionText);
   db.prepare(`
     insert into ja_explanation_group_gaps
       (entry_id, lang, missing_evidence_id, source_version, basis)
-    values ('yori:e_jmdict_1358280', 'zh-tw', 'jmdict:1358280:2', 'fixture', 'legacy-exact-sense-mapping')
-  `).run();
+    values (?, 'zh-tw', ?, 'fixture', 'legacy-exact-sense-mapping')
+  `).run(
+    `yori:e_jmdict_${sourceEntryId}`,
+    `jmdict:${sourceEntryId}:${sourcePosition + 1}`
+  );
   db.close();
 }
 
