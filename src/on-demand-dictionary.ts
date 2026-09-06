@@ -151,6 +151,14 @@ export type GenerationProvenance = {
   createdAt: string;
 };
 
+export type ExplanationCoverageDecision =
+  | {
+      kind: "proven-partial";
+      missingEvidenceIds: string[];
+      sourceEvidence: SourceEvidence[];
+    }
+  | { kind: "not-proven-partial" };
+
 /**
  * Japanese enrichment persistence is scoped to one explanation language.
  * `saveEntry` writes exactly one entry-language group, so a rejection or a
@@ -162,6 +170,7 @@ export type EnrichmentRepository = {
   findById?(id: string, lang: ApiLang, inflectionPath?: InflectionStep[]): PublicLookupItem | null;
   candidates?(query: string): CanonicalCandidate[];
   findSources(query: string, targetDictionary: TargetDictionary): SourceEvidence[];
+  coverageDecision(entryId: string, lang: ApiLang): ExplanationCoverageDecision;
   saveEntry(entry: PublicLookupItem, lang: ApiLang, generation?: GenerationProvenance): void;
   saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
@@ -453,12 +462,23 @@ export function createJapaneseOnDemandDictionary(options: {
         ? null
         : options.repository.find(request.query, request.targetDictionary, request.lang);
     if (invalidRequest(request)) return existing;
-    if (existing && existing.senses.every((sense) => hasJapaneseExamplePair(sense, request.lang))) return existing;
+    const coverage = existing
+      ? options.repository.coverageDecision(existing.id, request.lang)
+      : { kind: "not-proven-partial" as const };
+    if (
+      existing
+      && coverage.kind === "not-proven-partial"
+      && existing.senses.every((sense) => hasJapaneseExamplePair(sense, request.lang))
+    ) return existing;
 
     const key = `${effectiveMode(request.mode)}:${requestOutcomeKey(request)}`;
     const running = entryInFlight.get(key);
     if (running) return running;
-    const task = (existing ? completeEntryExamples(runtime, existing, request) : resolveMissing(request, runtime))
+    const task = (existing && coverage.kind === "proven-partial"
+      ? repairPartialGroup(runtime, existing, request, coverage.sourceEvidence)
+      : existing
+        ? completeEntryExamples(runtime, existing, request)
+        : resolveMissing(request, runtime))
       .finally(() => entryInFlight.delete(key));
     entryInFlight.set(key, task);
     return task;
@@ -475,6 +495,32 @@ export function createJapaneseOnDemandDictionary(options: {
       return run(request, () => resolveRanked(request, options.repository.candidates?.(request.query) ?? [], resolveCore));
     }
   };
+}
+
+function repairPartialGroup(
+  options: RuntimeOptions,
+  existing: PublicLookupItem,
+  request: ResolveRequest,
+  sourceEvidence: SourceEvidence[]
+): Promise<PublicLookupItem | null> {
+  return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, existing.word), async () => {
+    const current = options.repository.findById?.(
+      existing.id,
+      request.lang,
+      request.candidate?.inflectionPath
+    ) ?? existing;
+    const coverage = options.repository.coverageDecision(current.id, request.lang);
+    if (coverage.kind !== "proven-partial") return completeEntryExamples(options, current, request);
+    try {
+      return await authorEntry(request, options, current.word, coverage.sourceEvidence) ?? current;
+    } catch (error) {
+      if (
+        error instanceof ModelGatewayError
+        && (error.kind === "transient" || error.kind === "permanent")
+      ) return current;
+      throw error;
+    }
+  });
 }
 
 const stringArraySchema = { type: "array", items: { type: "string" } };

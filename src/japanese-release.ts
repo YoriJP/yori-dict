@@ -14,6 +14,7 @@ import { visitJapaneseEntries, type JapaneseEntryGroups } from "./db";
 import {
   japaneseCanonicalTables,
   japaneseSchemaVersion,
+  readExplanationCoverageGaps,
   readCoverage,
   type LanguageCoverage
 } from "./japanese-schema";
@@ -77,6 +78,9 @@ export async function buildJapaneseRelease(
 
   snapshotCanonicalDatabase(productionPath, artifacts.sqlite, japaneseCanonicalTables);
   const coverage = readCoverageFrom(artifacts.sqlite, "ja");
+  const releasedDb = new Database(artifacts.sqlite, { readonly: true });
+  const coverageGaps = readExplanationCoverageGaps(releasedDb);
+  releasedDb.close();
   for (const lang of Object.keys(coverage)) {
     artifacts.yomitan[lang] = join(options.outputDirectory, `yori-ja-${lang}.zip`);
     await rm(artifacts.yomitan[lang], { force: true });
@@ -155,6 +159,7 @@ export async function buildJapaneseRelease(
     jmdictSimplifiedVersion: metadata.jmdictSimplifiedVersion,
     entries,
     coverage,
+    coverageGaps: coverageGaps.summary,
     sources: japaneseSources(metadata)
   }, null, 2)}\n`);
   return artifacts;

@@ -31,7 +31,8 @@ console.log(JSON.stringify({
   sourcedExamples: result.sourcedExamples,
   legacyGlosses: result.legacyGlosses,
   legacyExamples: result.legacyExamples,
-  retained: result.retained
+  retained: result.retained,
+  coverageGaps: result.coverageGaps.summary
 }, null, 2));
 
 function readFlag(argv: string[], flag: string): string | null {

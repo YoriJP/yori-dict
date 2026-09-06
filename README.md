@@ -130,8 +130,9 @@ gunzip "yori-dict-${version}.sqlite.gz"
 ```
 
 The release manifest records the artifact names, checksums, source versions,
-licenses, and exact per-language coverage. Its `schemaVersion` names the table
-shape: `ja-2` and `en-2` are the current Japanese and English shapes.
+licenses, exact per-language coverage, and the Japanese `coverageGaps` summary.
+Its `schemaVersion` names the table shape: `ja-3` and `en-2` are the current
+Japanese and English shapes.
 
 Japanese written forms live in `ja_forms`, and senses in `ja_senses`, which
 names the explanation language:

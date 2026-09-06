@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { downloadPinnedDataRelease } from "../scripts/download-data-release";
 import { createEnglishSchema } from "./english-schema";
-import { createJapaneseSchema } from "./japanese-schema";
+import { createJapaneseSchema, japaneseSchemaVersion } from "./japanese-schema";
 
 const migrationsFolder = resolve(import.meta.dir, "../drizzle");
 
@@ -15,6 +15,11 @@ export function migrateProductionDatabase(path: string): void {
   try {
     sqlite.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
     migrate(drizzle({ client: sqlite }), { migrationsFolder });
+    // Canonical dictionary schema upgrades are lightweight structure changes.
+    // Evidence classification remains an explicit rebuild/import operation.
+    createJapaneseSchema(sqlite);
+    sqlite.prepare("insert or replace into ja_metadata (key, value) values ('schemaVersion', ?)")
+      .run(japaneseSchemaVersion);
   } finally {
     sqlite.close();
   }
@@ -240,6 +245,9 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           create temp table retained_ja_glosses as
             select gloss.* from ja_glosses gloss
             where gloss.sense_id in (select id from retained_ja_senses);
+          create temp table retained_ja_evidence as
+            select evidence.* from ja_sense_evidence evidence
+            where evidence.sense_id in (select id from retained_ja_senses);
           create temp table retained_ja_examples as
             select example.* from ja_examples example
             join ja_senses sense on sense.id = example.sense_id
@@ -253,6 +261,14 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           delete from ja_glosses where sense_id in (
             select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries)
+          );
+          delete from ja_sense_evidence where sense_id in (
+            select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
+            where entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries)
+          );
+          delete from ja_explanation_group_gaps where entry_id in (
+            select id from ja_entries where source <> 'generated'
+            union select id from promoted_ja_entries
           );
           delete from ja_senses where entry_id in (
             select id from ja_entries where source <> 'generated'
@@ -276,8 +292,47 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           insert or ignore into ja_forms select * from japanese_release.ja_forms;
           insert or ignore into ja_lookup_terms select * from japanese_release.ja_lookup_terms;
           insert or ignore into ja_senses select * from japanese_release.ja_senses;
+          insert or ignore into ja_sense_evidence select * from japanese_release.ja_sense_evidence;
           insert or ignore into ja_glosses select * from japanese_release.ja_glosses;
           insert or ignore into ja_examples select * from japanese_release.ja_examples;
+          insert or ignore into ja_explanation_group_gaps select * from japanese_release.ja_explanation_group_gaps;
+          -- A release group with exact missing Evidence is objectively partial.
+          -- An accepted retained repair replaces that group; complete or
+          -- Unknown Coverage release content remains authoritative.
+          create temp table retained_ja_replacements as
+            select distinct retained.entry_id as entry_id, retained.lang as lang
+              from retained_ja_senses retained
+              join ja_explanation_group_gaps gap
+                on gap.entry_id = retained.entry_id and gap.lang = retained.lang;
+          delete from ja_examples where sense_id in (
+            select sense.id from ja_senses sense join retained_ja_replacements replacement
+              on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang
+          );
+          delete from ja_glosses where sense_id in (
+            select sense.id from ja_senses sense join retained_ja_replacements replacement
+              on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang
+          );
+          delete from ja_sense_evidence where sense_id in (
+            select sense.id from ja_senses sense join retained_ja_replacements replacement
+              on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang
+          );
+          delete from ja_senses where exists (
+            select 1 from retained_ja_replacements replacement
+             where replacement.entry_id = ja_senses.entry_id and replacement.lang = ja_senses.lang
+          );
+          delete from ja_explanation_group_gaps where exists (
+            select 1 from retained_ja_replacements replacement
+             where replacement.entry_id = ja_explanation_group_gaps.entry_id
+               and replacement.lang = ja_explanation_group_gaps.lang
+          );
+          create temp table retained_ja_restored_groups as
+            select distinct retained.entry_id as entry_id, retained.lang as lang
+              from retained_ja_senses retained
+              join ja_entries entry on entry.id = retained.entry_id
+             where not exists (
+               select 1 from ja_senses existing
+                where existing.entry_id = retained.entry_id and existing.lang = retained.lang
+             );
           -- A retained group only returns to an entry the release still
           -- provides, and never displaces content the release itself explains
           -- in that language.
@@ -288,15 +343,46 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
               select 1 from ja_senses existing
                where existing.entry_id = retained.entry_id and existing.lang = retained.lang
             );
+          insert or ignore into ja_sense_evidence
+            select retained.* from retained_ja_evidence retained
+            join ja_senses sense on sense.id = retained.sense_id;
           insert or ignore into ja_glosses
             select retained.* from retained_ja_glosses retained
             join ja_senses sense on sense.id = retained.sense_id;
           insert or ignore into ja_examples
             select retained.* from retained_ja_examples retained
             join ja_senses sense on sense.id = retained.sense_id;
+          insert or ignore into ja_explanation_group_gaps
+            (entry_id, lang, missing_evidence_id, source_version, basis)
+            select replacement.entry_id, replacement.lang, expected.evidence_id,
+                   coalesce((select value from ja_metadata where key = 'jmdictSimplifiedVersion'), 'unknown'),
+                   'accepted-authored-evidence'
+              from retained_ja_restored_groups replacement
+              join ja_senses source_sense
+                on source_sense.entry_id = replacement.entry_id
+               and source_sense.lang = 'en'
+               and source_sense.provenance = 'source'
+              join ja_sense_evidence expected on expected.sense_id = source_sense.id
+             where not exists (
+               select 1 from ja_senses target_sense
+                 join ja_sense_evidence covered on covered.sense_id = target_sense.id
+                where target_sense.entry_id = replacement.entry_id
+                  and target_sense.lang = replacement.lang
+                  and covered.evidence_id = expected.evidence_id
+             )
+               and exists (
+                 select 1 from retained_ja_senses retained_sense
+                   join retained_ja_evidence retained_evidence
+                     on retained_evidence.sense_id = retained_sense.id
+                  where retained_sense.entry_id = replacement.entry_id
+                    and retained_sense.lang = replacement.lang
+               );
           drop table promoted_ja_entries;
+          drop table retained_ja_replacements;
+          drop table retained_ja_restored_groups;
           drop table retained_ja_senses;
           drop table retained_ja_glosses;
+          drop table retained_ja_evidence;
           drop table retained_ja_examples;
         `);
       }).immediate();

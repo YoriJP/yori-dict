@@ -20,6 +20,26 @@ _Avoid_: License check, compliance review
 The combined senses, labels, pronunciations, and examples supplied to generation from licensed source datasets. It establishes minimum coverage but is not text to translate mechanically.
 _Avoid_: Prompt context, source gloss
 
+**Expected Evidence**:
+The exact Source Evidence identifiers the current source policy says an Explanation Group must represent. It is an auditable inventory, not a required one-to-one Sense layout.
+_Avoid_: Expected sense count, translation slots
+
+**Covered Evidence**:
+The union of exact Evidence identifiers cited by the Senses in one Explanation Group. One Sense may cover several identifiers and several Senses may divide one source meaning more finely.
+_Avoid_: Matching senses, translated senses
+
+**Proven Coverage Gap**:
+The non-empty difference between Expected Evidence and Covered Evidence when both sets come from reliable exact mappings. It permits automatic repair because the omission is reproducible without judging wording or comparing Sense counts.
+_Avoid_: Thin language, fewer senses
+
+**Unknown Coverage**:
+An Explanation Group whose exact Evidence relationships cannot be reconstructed. It remains readable and may receive missing examples, but Yori Dict does not automatically replace it as partial.
+_Avoid_: Complete, incomplete
+
+**Repaired Explanation Group**:
+An accepted Source-Grounded replacement for a Proven Coverage Gap. It represents all Expected Evidence at the time it was accepted and retains those Evidence relationships across rebuild and import.
+_Avoid_: Backfill, translated group
+
 **Canonical Entry**:
 Yori Dict's clean representation of one lexical item, authored from source evidence and, when necessary, model knowledge. Imported source records remain intact underneath it.
 _Avoid_: Generated translation, merged source
@@ -47,7 +67,7 @@ The language a sense explains an entry in, stored on the sense rather than encod
 _Avoid_: Target language, gloss language, language pair
 
 **Explanation Group**:
-The complete meaning coverage and ordered senses through which one explanation language explains one entry. Groups for different explanation languages are independent and need not divide meaning in the same way; completeness does not promise that every sense already has an example.
+The meaning coverage and ordered senses through which one explanation language explains one entry. Groups for different explanation languages are independent and need not divide meaning in the same way. A group is current under the evidence audit when it represents all Expected Evidence; that does not promise permanent linguistic completeness or that every Sense already has an example.
 _Avoid_: Translation set, language version, parallel senses
 
 **Gloss**:

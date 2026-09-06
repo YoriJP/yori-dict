@@ -30,7 +30,7 @@ type OnDemandDictionary = {
 
 `lang` is the requested explanation language. It scopes the canonical entry key, the example key, and the in-flight deduplication key, so work for one language never blocks or answers for another. Japanese authors en, de, zh-tw, zh-cn, ko, and ja; English authors en, ja, and zh-tw. Each is an independent group written directly in that language; no language is produced by translating or character-converting another. Any other requested language resolves to `null` without a model call.
 
-The module returns existing and accepted generated content. `null` means the primary candidate was skipped, rejected, or could not be produced from acceptable content. Enrichment is exhaustive but best-effort: it attempts every missing example in the primary entry and every same-tier alternative, while preserving the original relevance order. Malformed or rejected examples receive one fresh candidate. If both candidates fail, the correct senses still return and the gap remains retryable. A provider failure while enriching one example or alternative is isolated from the other correct content; storage failures still fail the request because persisted state is uncertain.
+The module returns existing and accepted generated content. `null` means the primary candidate was skipped, rejected, or could not be produced from acceptable content. An existing Japanese Explanation Group with a Proven Coverage Gap is different: ordinary lookup returns it unchanged, while authenticated enrichment authors one complete replacement from the current Expected Evidence. Rejection, malformed output, deterministic refusal, or provider failure returns the existing group and leaves the gap retryable. Enrichment is otherwise exhaustive but best-effort: it attempts every missing example in the primary entry and every same-tier alternative, while preserving the original relevance order. Malformed or rejected examples receive one fresh candidate. If both candidates fail, the correct senses still return and the gap remains retryable. A provider failure while enriching one example or alternative is isolated from the other correct content; storage failures still fail the request because persisted state is uncertain.
 
 Build-time consumers may send `X-Yori-Request-Id`. Structured lookup logs and
 private model attempt records retain that trace id, so a Yori News vocabulary
@@ -60,7 +60,7 @@ Renaming or removing a response field breaks consumers silently: the reader gets
 3. Search the canonical dictionary and indexed licensed sources.
 4. If all miss, ask Luna for one canonical headword or `SKIP`, using the occurrence context for disambiguation. The proposal is then checked deterministically: it must be related to the query, and it must not itself be an inflection of an entry that already exists — Japanese by deinflecting the proposal, English by stripping it. A model asked about an unknown surface will propose the surface itself, and a word form is not a lexeme.
 5. When Luna changes the headword, repeat source discovery once before generating.
-6. Build a source-evidence bundle and ask Luna to author one complete entry-language group for the requested language. Source evidence is minimum coverage, not a literal translation template, and the author may divide senses the way that language's dictionaries do.
+6. Build a source-evidence bundle and ask Luna to author one complete entry-language group for the requested language. For a Proven Coverage Gap, reconstruct that complete bundle from canonical Japanese source-backed rows rather than relying on an external evidence path. Source evidence is minimum coverage, not a literal translation template, and the author may divide senses the way that language's dictionaries do.
 7. Run deterministic schema, script, provenance, label, and Taiwan-terminology checks. Japanese glosses must contain kana and must not be the normalized headword, reading, or either plus empty boilerplate. Substantive wording that mentions the headword reaches semantic review.
 8. Ask Gemini for a reject-only review that returns exactly `ACCEPT` or `REJECT`. Any other output fails closed.
 9. Repeat entry-language completion for every canonical entry in the winning relevance tier. Persist each accepted group independently without changing their ranking.
@@ -72,6 +72,7 @@ Renaming or removing a response field breaks consumers silently: the reader gets
 - `SKIP`, deterministic rejection, semantic rejection, and malformed content all end the attempt and produce nothing. None of them is recorded, so the next lookup for that word tries again.
 - A refusal is logged as `enrichment_refused` with the stage, headword, and the rule that refused it. That log line is the only record.
 - Authoring and review are atomic per entry and language, so work in one language never disturbs another language's accepted content.
+- A Proven Coverage Gap is cleared only after its complete replacement and every Evidence relationship commit together. Unknown Coverage is never automatically classified or replaced.
 - Transient provider failures follow the bounded Flex retry and on-demand fallback policy in ADR-0008. Model failures while completing one example or alternative do not discard other correct entries; storage failures remain fatal.
 - Concurrent requests for the same canonical headword or sense share one in-flight operation.
 - A failed or rejected candidate is observable but never becomes dictionary data.
@@ -82,7 +83,7 @@ A first start bootstraps a missing database from the release pinned in `data-rel
 
 `YORI_DB_PATH` selects the single persistent SQLite database. Drizzle migrations change its schema during startup; they never seed or replace content. `bun run db:import -- --japanese <sqlite>` and `--english <sqlite>` explicitly import refreshed source releases while preserving accepted generated content. `bun run japanese:release -- --version <version>` and `bun run english:release -- --version <version>` write complete canonical SQLite, JSONL, and Yomitan v3 snapshots. Publication remains independent by dictionary.
 
-The Japanese canonical store uses concise `ja_*` tables. `ja_senses` carries the explanation language, so an entry shares only identity and written forms while each language owns its senses, ordering, glosses, examples, and provenance. `bun run build:db` is a deliberate full rebuild: it writes a fresh file from the pinned JMdict and example inputs plus retained accepted generated and legacy content, and only replaces the previous database once it succeeds. A Japanese release publishes one canonical SQLite, one JSONL with sibling language groups under each entry, a manifest with per-language coverage and source versions, and one Yomitan pack per explanation language named `yori-ja-<lang>.zip`.
+The Japanese canonical store uses concise `ja_*` tables. `ja_senses` carries the explanation language, normalized Evidence rows preserve every exact Sense relationship, and gap rows store only Proven Coverage Gaps. Schema migration to `ja-3` creates and backfills that structure without auditing the whole dictionary; explicit rebuild or import performs classification. Accepted repairs survive rebuild and production import. Complete current imported content wins, proven-partial imported legacy content yields to an accepted repair, and source growth preserves the repaired group while recording only newly missing Evidence. `bun run build:db` is a deliberate full rebuild: it writes a fresh file from the pinned JMdict and example inputs plus retained accepted generated and legacy content, and only replaces the previous database once it succeeds. A Japanese release publishes one canonical SQLite, one JSONL with sibling language groups under each entry, a manifest with per-language coverage, a `coverageGaps` summary, and source versions, plus one Yomitan pack per explanation language named `yori-ja-<lang>.zip`.
 
 ## Runtime configuration
 
@@ -96,8 +97,9 @@ in code, where a reader can see what actually runs.
 - `YORI_DB_PATH` selects the canonical production SQLite database; Railway uses `/data/yori.sqlite`.
 - `YORI_JA_SOURCE_EVIDENCE_PATHS` is a comma-separated list of indexed source-evidence
   JSONL files for the source-grounded authoring in ADR-0006. Nothing publishes one yet, so
-  it is unset in production and authoring runs without source evidence. A path that does
-  not exist fails the start.
+  it is unset in production and ordinary missing-entry authoring runs without source evidence.
+  Proven Coverage Gap repair reconstructs its evidence from canonical SQLite and does not
+  depend on this setting. A configured path that does not exist fails the start.
 
 Model concurrency, circuit cooldown, attempt timeout, the author and reviewer models, and the English source
 version are pinned in code.

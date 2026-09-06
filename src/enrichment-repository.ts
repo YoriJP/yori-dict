@@ -56,6 +56,10 @@ export function openEnrichmentRepository(
     insert into ja_glosses (sense_id, position, text, source, review_status, type)
     values (?, ?, ?, ?, ?, ?)
   `);
+  const saveSenseEvidence = db.prepare(`
+    insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values (?, ?, ?, ?)
+  `);
   const clearGeneratedExamples = db.prepare(
     "delete from ja_examples where sense_id = ? and source = 'generated'"
   );
@@ -125,6 +129,37 @@ export function openEnrichmentRepository(
     findSources(query, targetDictionary) {
       return sourceLookup(query, targetDictionary);
     },
+    coverageDecision(entryId, lang) {
+      const missingEvidenceIds = db.query<{ missing_evidence_id: string }, [string, string]>(`
+        select missing_evidence_id from ja_explanation_group_gaps
+         where entry_id = ? and lang = ?
+         order by missing_evidence_id
+      `).all(entryId, lang).map((row) => row.missing_evidence_id);
+      if (missingEvidenceIds.length === 0) return { kind: "not-proven-partial" };
+      const source = readJapaneseLookupItem(db, entryId, "en");
+      if (!source) return { kind: "not-proven-partial" };
+      const senses = source.senses.flatMap((sense) => (sense.evidenceIds ?? []).map((evidenceId) => ({
+        evidenceId,
+        partOfSpeech: sense.partOfSpeech,
+        glosses: sense.glosses.map((gloss) => ({ lang: "en", text: gloss.text })),
+        ...(sense.pronunciations?.[0] ? { pronunciation: sense.pronunciations[0] } : {}),
+        ...([...(sense.misc ?? []), ...(sense.field ?? []), ...(sense.dialect ?? [])].length > 0
+          ? { labels: [...(sense.misc ?? []), ...(sense.field ?? []), ...(sense.dialect ?? [])] }
+          : {})
+      })));
+      if (senses.length === 0) return { kind: "not-proven-partial" };
+      return {
+        kind: "proven-partial",
+        missingEvidenceIds,
+        sourceEvidence: [{
+          source: senses[0]!.evidenceId.split(":")[0] ?? "source",
+          sourceEntryId: source.sourceId,
+          headword: source.word,
+          ...(source.reading ? { reading: source.reading } : {}),
+          senses
+        }]
+      };
+    },
     /**
      * Writes one entry-language group atomically. Only senses in `lang` are
      * replaced, so authoring or rejecting one language never disturbs another
@@ -137,6 +172,7 @@ export function openEnrichmentRepository(
           "select id from ja_senses where entry_id = ? and lang = ?"
         ).all(entry.id, lang).map((row) => row.id);
         for (const senseId of senseIds) {
+          db.prepare("delete from ja_sense_evidence where sense_id = ?").run(senseId);
           db.prepare("delete from ja_glosses where sense_id = ?").run(senseId);
           db.prepare("delete from ja_examples where sense_id = ?").run(senseId);
         }
@@ -165,6 +201,8 @@ export function openEnrichmentRepository(
         entry.senses.forEach((sense, index) => {
           saveJapaneseSense(entry.id, lang, sense, index + 1, generationRef);
         });
+        db.prepare("delete from ja_explanation_group_gaps where entry_id = ? and lang = ?")
+          .run(entry.id, lang);
       })();
     },
     saveExample(senseId, example, generation) {
@@ -245,6 +283,9 @@ export function openEnrichmentRepository(
       sense.evidenceIds?.[0] ?? null,
       generationRef
     );
+    (sense.evidenceIds ?? []).forEach((evidenceId, index) => {
+      saveSenseEvidence.run(sense.id, index + 1, evidenceId, evidenceId.split(":")[0] ?? "source");
+    });
     sense.glosses.forEach((gloss, index) => {
       saveGloss.run(
         sense.id,

@@ -207,6 +207,9 @@ async function evaluateProductionPath(
 }
 
 class EvaluationRepository implements EnrichmentRepository {
+  coverageDecision() {
+    return { kind: "not-proven-partial" as const };
+  }
   readonly attempts: AttemptRecord[] = [];
   private entry: PublicLookupItem | null = null;
 

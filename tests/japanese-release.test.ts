@@ -60,6 +60,7 @@ test("the Japanese release publishes sibling language groups, per-language packs
   expect(manifest.coverage.en).toEqual({ entries: 15, senses: 18, glosses: 21, examples: 2 });
   expect(manifest.coverage["zh-tw"]).toEqual({ entries: 2, senses: 2, glosses: 2, examples: 0 });
   expect(manifest.coverage.ja).toEqual({ entries: 1, senses: 1, glosses: 1, examples: 1 });
+  expect(manifest.coverageGaps).toEqual({ "zh-tw": { groups: 1, missingEvidenceIds: 1 } });
   expect(manifest.yomitan).toEqual({
     en: "yori-ja-en.zip",
     ja: "yori-ja-ja.zip",
@@ -391,6 +392,14 @@ function addLegacyTaiwaneseMeaning(path: string, baseSenseId: string, gloss: str
   db.prepare(
     "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, ?, 'generated', 'checked')"
   ).run(`${baseSenseId}:zh-tw`, gloss);
+  db.prepare(
+    "insert into ja_sense_evidence (sense_id, position, evidence_id, source_name) values (?, 1, ?, 'yori-legacy')"
+  ).run(`${baseSenseId}:zh-tw`, baseSenseId.replace(/^yori:s_jmdict_/, "jmdict:").replace(/_(\d+)$/, ":$1"));
+  db.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values ('yori:e_jmdict_1358280', 'zh-tw', 'jmdict:1358280:2', 'fixture', 'legacy-exact-sense-mapping')
+  `).run();
   db.close();
 }
 

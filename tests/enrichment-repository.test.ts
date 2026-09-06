@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { openEnrichmentRepository } from "../src/enrichment-repository";
+import { createEnglishSchema } from "../src/english-schema";
 import { importLegacyOverlays } from "../src/legacy-overlay-import";
 import { openLookupDb } from "../src/db";
 import { importJapaneseRelease, migrateProductionDatabase } from "../src/production-database";
@@ -86,10 +87,79 @@ test("each explanation language keeps its own accepted group", async () => {
   lookup.close();
 });
 
+test("a Japanese sense retains every Evidence relationship after reopening", async () => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const entry = englishGroup(generatedEntry());
+  entry.senses[0] = {
+    ...entry.senses[0]!,
+    provenance: "source",
+    evidenceIds: ["jmdict:1410750:1", "jmdict:1410750:2"]
+  };
+
+  repository.saveEntry(entry, "en", generation);
+  repository.close();
+  lookup.close();
+
+  const reopened = openLookupDb(path);
+  expect(reopened.lookup(entry.word, "en").item?.senses[0]?.evidenceIds).toEqual([
+    "jmdict:1410750:1",
+    "jmdict:1410750:2"
+  ]);
+  reopened.close();
+});
+
+test("replacing one language clears only its gaps and rolls back all rows on storage failure", async () => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const original = taiwaneseGroup(generatedEntry());
+  repository.saveEntry(original, "zh-tw", generation);
+  const db = new Database(path);
+  const addGap = db.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, ?, ?, 'fixture', 'accepted-authored-evidence')
+  `);
+  addGap.run(original.id, "zh-tw", "jmdict:test:1");
+  addGap.run(original.id, "en", "jmdict:test:2");
+  db.close();
+
+  const invalid = structuredClone(original);
+  invalid.senses = [invalid.senses[0]!, { ...invalid.senses[0]!, position: 2 }];
+  expect(() => repository.saveEntry(invalid, "zh-tw", generation)).toThrow();
+  expect(repository.find(original.word, "ja", "zh-tw")?.senses[0]?.glosses[0]?.text).toBe("未知詞");
+
+  const replacement = structuredClone(original);
+  replacement.senses[0]!.glosses[0]!.text = "新的未知詞";
+  repository.saveEntry(replacement, "zh-tw", generation);
+  repository.close();
+  lookup.close();
+
+  const verified = new Database(path, { readonly: true });
+  expect(verified.query<{ lang: string }, [string]>(`
+    select lang from ja_explanation_group_gaps where entry_id = ? order by lang
+  `).all(original.id)).toEqual([{ lang: "en" }]);
+  verified.close();
+});
+
 test("production migrations are idempotent", async () => {
   const path = await productionDatabase();
+  const legacy = new Database(path);
+  legacy.exec("drop table ja_sense_evidence; drop table ja_explanation_group_gaps;");
+  legacy.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  legacy.close();
   migrateProductionDatabase(path);
   migrateProductionDatabase(path);
+  const migrated = new Database(path, { readonly: true });
+  expect(migrated.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'schemaVersion'"
+  ).get()?.value).toBe("ja-3");
+  expect(migrated.query<{ count: number }, []>(
+    "select count(*) as count from ja_sense_evidence"
+  ).get()?.count).toBeGreaterThan(0);
+  migrated.close();
   const lookup = openLookupDb(path);
   expect(lookup.lookup("学校", "en").item?.word).toBe("学校");
   lookup.close();
@@ -142,6 +212,166 @@ test("a Japanese source refresh preserves accepted generated content", async () 
   expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
   expect(taiwanese?.senses[0].provenance).toBe("generated");
   refreshedLookup.close();
+});
+
+test("a production import keeps an accepted repair over proven-partial release content", async () => {
+  const path = await productionDatabase();
+  const entryId = "yori:e_jmdict_1206730";
+  const sourceSenseId = "yori:s_jmdict_1206730_1:en";
+  const firstEvidence = "jmdict:1206730:1";
+  const secondEvidence = "jmdict:1206730:2";
+  const thirdEvidence = "jmdict:1206730:3";
+  const prepareExpectedEvidence = (db: Database, evidenceIds: string[]) => {
+    const insert = db.prepare(`
+      insert or ignore into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+      values (?, ?, ?, 'jmdict')
+    `);
+    evidenceIds.forEach((evidenceId, index) => insert.run(sourceSenseId, index + 2, evidenceId));
+  };
+  const production = new Database(path);
+  createEnglishSchema(production);
+  production.prepare("insert or replace into en_metadata (key, value) values ('dictionaryVersion', 'english-stable')")
+    .run();
+  prepareExpectedEvidence(production, [secondEvidence]);
+  production.close();
+
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const english = repository.find("学校", "ja", "en")!;
+  repository.saveEntry({
+    ...english,
+    senses: [{
+      ...english.senses[0]!,
+      id: "yori:s_repaired_school:zh-tw:1",
+      glosses: [{ lang: "zh-tw", text: "修復後的學校解釋", source: "generated", reviewStatus: "checked" }],
+      provenance: "source",
+      evidenceIds: [firstEvidence, secondEvidence]
+    }]
+  }, "zh-tw", generation);
+  repository.close();
+  lookup.close();
+
+  const next = join(mkdtempSync(join(tmpdir(), "yori-partial-release-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${next}`.quiet();
+  const release = new Database(next);
+  prepareExpectedEvidence(release, [secondEvidence, thirdEvidence]);
+  const source = release.query<Record<string, unknown>, [string]>(
+    "select * from ja_senses where id = ?"
+  ).get(sourceSenseId)!;
+  const partialSenseId = "yori:s_jmdict_1206730_1:zh-tw";
+  const partial: Record<string, unknown> = {
+    ...source,
+    id: partialSenseId,
+    lang: "zh-tw",
+    provenance: "generated",
+    source_name: "yori-legacy",
+    source_ref: "yori:s_jmdict_1206730_1",
+    generation_id: "legacy:test"
+  };
+  release.prepare(`
+    insert into ja_generations
+      (id, model, provider, reasoning_effort, prompt_version, service_tier, review_outcome, created_at)
+    values ('legacy:test', 'legacy', 'unrecorded', 'unrecorded', 'legacy', null, 'accepted', 'legacy')
+  `).run();
+  const columns = Object.keys(partial);
+  release.prepare(`insert into ja_senses (${columns.join(", ")}) values (${columns.map(() => "?").join(", ")})`)
+    .run(...columns.map((column) => partial[column] as never));
+  release.prepare(
+    "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, '舊的部分解釋', 'generated', 'checked')"
+  ).run(partialSenseId);
+  release.prepare(
+    "insert into ja_sense_evidence (sense_id, position, evidence_id, source_name) values (?, 1, ?, 'yori-legacy')"
+  ).run(partialSenseId, firstEvidence);
+  release.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, 'zh-tw', ?, 'next', 'legacy-exact-sense-mapping')
+  `).run(entryId, secondEvidence);
+  release.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, 'zh-tw', ?, 'next', 'legacy-exact-sense-mapping')
+  `).run(entryId, thirdEvidence);
+  release.prepare("update ja_metadata set value = 'next' where key = 'dictDate'").run();
+  release.close();
+
+  expect(importJapaneseRelease(path, next)).toBe(true);
+
+  const refreshed = openLookupDb(path);
+  expect(refreshed.lookup("学校", "zh-tw").item?.senses[0]?.glosses[0]?.text)
+    .toBe("修復後的學校解釋");
+  expect(refreshed.lookup("学校", "zh-tw").item?.senses[0]?.evidenceIds)
+    .toEqual([firstEvidence, secondEvidence]);
+  refreshed.close();
+  const verified = new Database(path, { readonly: true });
+  expect(verified.query<{ missing_evidence_id: string }, []>(`
+    select missing_evidence_id from ja_explanation_group_gaps
+     where entry_id = 'yori:e_jmdict_1206730' and lang = 'zh-tw'
+     order by missing_evidence_id
+  `).all()).toEqual([{ missing_evidence_id: thirdEvidence }]);
+  verified.close();
+
+  const completeRelease = new Database(next);
+  completeRelease.prepare("delete from ja_explanation_group_gaps where entry_id = ? and lang = 'zh-tw'")
+    .run(entryId);
+  completeRelease.prepare("update ja_glosses set text = '完整發布解釋一' where sense_id = ?")
+    .run(partialSenseId);
+  for (const [position, evidenceId, gloss] of [
+    [2, secondEvidence, "完整發布解釋二"],
+    [3, thirdEvidence, "完整發布解釋三"]
+  ] as const) {
+    const senseId = `yori:s_jmdict_1206730_${position}:zh-tw`;
+    const row: Record<string, unknown> = { ...partial, id: senseId, position, source_ref: evidenceId };
+    const rowColumns = Object.keys(row);
+    completeRelease.prepare(
+      `insert into ja_senses (${rowColumns.join(", ")}) values (${rowColumns.map(() => "?").join(", ")})`
+    ).run(...rowColumns.map((column) => row[column] as never));
+    completeRelease.prepare(
+      "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, ?, 'generated', 'checked')"
+    ).run(senseId, gloss);
+    completeRelease.prepare(
+      "insert into ja_sense_evidence (sense_id, position, evidence_id, source_name) values (?, 1, ?, 'yori-legacy')"
+    ).run(senseId, evidenceId);
+  }
+  completeRelease.prepare("update ja_metadata set value = 'complete' where key = 'dictDate'").run();
+  completeRelease.close();
+
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const authoritative = openLookupDb(path);
+  expect(authoritative.lookup("学校", "zh-tw").item?.senses.map((sense) => sense.glosses[0]?.text))
+    .toEqual(["完整發布解釋一", "完整發布解釋二", "完整發布解釋三"]);
+  authoritative.close();
+  const englishDb = new Database(path, { readonly: true });
+  expect(englishDb.query<{ value: string }, []>(
+    "select value from en_metadata where key = 'dictionaryVersion'"
+  ).get()?.value).toBe("english-stable");
+  englishDb.close();
+});
+
+test("a failed Japanese production import rolls back the existing dictionary", async () => {
+  const path = await productionDatabase();
+  const before = new Database(path, { readonly: true });
+  const previousVersion = before.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'dictDate'"
+  ).get()?.value;
+  before.close();
+  const next = join(mkdtempSync(join(tmpdir(), "yori-broken-release-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${next}`.quiet();
+  const broken = new Database(next);
+  broken.prepare("update ja_metadata set value = 'broken-next' where key = 'dictDate'").run();
+  broken.exec("drop table ja_glosses");
+  broken.close();
+
+  expect(() => importJapaneseRelease(path, next)).toThrow();
+
+  const lookup = openLookupDb(path);
+  expect(lookup.lookup("学校", "en").item?.word).toBe("学校");
+  lookup.close();
+  const after = new Database(path, { readonly: true });
+  expect(after.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'dictDate'"
+  ).get()?.value).toBe(previousVersion);
+  after.close();
 });
 
 test("a generated example is appended after the imported examples of its sense", async () => {

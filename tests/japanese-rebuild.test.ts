@@ -102,6 +102,57 @@ test("legacy content becomes canonical only through an exact sense identifier", 
   db.close();
 });
 
+test("a rebuild records the exact source Evidence missing from a retained language group", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-gaps-"));
+  const input = join(root, "jmdict.json");
+  const glossPath = join(root, "zh-tw.jsonl");
+  const sense = (text: string) => ({
+    partOfSpeech: ["n"],
+    appliesToKanji: ["*"],
+    appliesToKana: ["*"],
+    related: [], antonym: [], field: [], dialect: [], misc: [], info: [], languageSource: [],
+    gloss: [{ lang: "eng", gender: null, type: null, text }]
+  });
+  await writeFile(input, JSON.stringify({
+    version: "fixture-v1",
+    dictDate: "2026-09-06",
+    words: [{
+      id: "1410750",
+      kanji: [{ text: "様", common: true, tags: [] }],
+      kana: [{ text: "さま", common: true, tags: [], appliesToKanji: ["*"] }],
+      sense: [sense("appearance"), sense("manner"), sense("honorific title")]
+    }]
+  }));
+  await writeFile(glossPath, JSON.stringify({
+    senseId: "yori:s_jmdict_1410750_1",
+    lang: "zh-tw",
+    glosses: ["樣子"]
+  }));
+
+  const out = join(root, "yori.sqlite");
+  const result = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+
+  expect(result.coverageGaps).toEqual({
+    summary: { "zh-tw": { groups: 1, missingEvidenceIds: 2 } },
+    details: [
+      {
+        entryId: "yori:e_jmdict_1410750",
+        lang: "zh-tw",
+        missingEvidenceId: "jmdict:1410750:2",
+        sourceVersion: "fixture-v1",
+        basis: "legacy-exact-sense-mapping"
+      },
+      {
+        entryId: "yori:e_jmdict_1410750",
+        lang: "zh-tw",
+        missingEvidenceId: "jmdict:1410750:3",
+        sourceVersion: "fixture-v1",
+        basis: "legacy-exact-sense-mapping"
+      }
+    ]
+  });
+});
+
 test("a rebuild retains accepted generated content and does not reorder imported senses", async () => {
   const out = join(mkdtempSync(join(tmpdir(), "yori-ja-retain-")), "yori.sqlite");
   await rebuildJapaneseDictionary({ input: "fixtures/jmdict-sample.json", out });
@@ -209,6 +260,79 @@ test("a rebuild retains accepted generated content and does not reorder imported
     `).get()?.count).toBe(0);
   }
   db.close();
+});
+
+test("an accepted repair survives partial legacy rebuilds and reports only new source Evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-repaired-retain-"));
+  const input = join(root, "jmdict.json");
+  const glossPath = join(root, "zh-tw.jsonl");
+  const out = join(root, "yori.sqlite");
+  const sourceSense = (text: string) => ({
+    partOfSpeech: ["n"], appliesToKanji: ["*"], appliesToKana: ["*"],
+    related: [], antonym: [], field: [], dialect: [], misc: [], info: [], languageSource: [],
+    gloss: [{ lang: "eng", gender: null, type: null, text }]
+  });
+  const writeSource = async (version: string, glosses: string[]) => writeFile(input, JSON.stringify({
+    version,
+    dictDate: version,
+    words: [{
+      id: "1410750",
+      kanji: [{ text: "様", common: true, tags: [] }],
+      kana: [{ text: "さま", common: true, tags: [], appliesToKanji: ["*"] }],
+      sense: glosses.map(sourceSense)
+    }]
+  }));
+  await writeSource("fixture-v1", ["appearance", "manner"]);
+  await writeFile(glossPath, JSON.stringify({
+    senseId: "yori:s_jmdict_1410750_1", lang: "zh-tw", glosses: ["舊的部分解釋"]
+  }));
+  await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  migrateProductionDatabase(out);
+
+  const lookup = openLookupDb(out);
+  const repository = openEnrichmentRepository(out, lookup);
+  const partial = repository.find("様", "ja", "zh-tw")!;
+  repository.saveEntry({
+    ...partial,
+    senses: [{
+      ...partial.senses[0]!,
+      id: "yori:s_repaired_1410750:zh-tw:1",
+      glosses: [{ lang: "zh-tw", text: "修復後的完整解釋", source: "generated", reviewStatus: "checked" }],
+      evidenceIds: ["jmdict:1410750:1", "jmdict:1410750:2"],
+      provenance: "source"
+    }]
+  }, "zh-tw", generation);
+  repository.close();
+  lookup.close();
+
+  const identical = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  const identicalLookup = openLookupDb(out);
+  expect(identicalLookup.lookup("様", "zh-tw").item?.senses[0]?.glosses[0]?.text)
+    .toBe("修復後的完整解釋");
+  identicalLookup.close();
+  expect(identical.coverageGaps.summary["zh-tw"]).toBeUndefined();
+
+  await writeSource("fixture-v2", ["appearance", "manner", "honorific title"]);
+  const grown = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  const reopened = openLookupDb(out);
+  expect(reopened.lookup("様", "zh-tw").item?.senses[0]?.glosses[0]?.text)
+    .toBe("修復後的完整解釋");
+  reopened.close();
+  expect(grown.coverageGaps.details.map((gap) => gap.missingEvidenceId)).toEqual([
+    "jmdict:1410750:3"
+  ]);
+
+  await writeFile(glossPath, ["新的樣子", "新的方式", "新的敬稱"].map((gloss, index) => JSON.stringify({
+    senseId: `yori:s_jmdict_1410750_${index + 1}`,
+    lang: "zh-tw",
+    glosses: [gloss]
+  })).join("\n"));
+  const completeImport = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  const completeLookup = openLookupDb(out);
+  expect(completeLookup.lookup("様", "zh-tw").item?.senses.map((sense) => sense.glosses[0]?.text))
+    .toEqual(["新的樣子", "新的方式", "新的敬稱"]);
+  completeLookup.close();
+  expect(completeImport.coverageGaps.summary["zh-tw"]).toBeUndefined();
 });
 
 test("a failed rebuild leaves the previous database usable", async () => {
