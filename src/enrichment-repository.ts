@@ -60,6 +60,9 @@ export function openEnrichmentRepository(
     insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
     values (?, ?, ?, ?)
   `);
+  const currentJapaneseSourceVersion = db.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
+  ).get()?.value ?? "unknown";
   const clearGeneratedExamples = db.prepare(
     "delete from ja_examples where sense_id = ? and source = 'generated'"
   );
@@ -140,6 +143,7 @@ export function openEnrichmentRepository(
           join ja_sense_evidence source_evidence
             on source_evidence.sense_id = source_sense.id
            and source_evidence.evidence_id = gap.missing_evidence_id
+           and source_sense.source_version = gap.source_version
          where gap.entry_id = ? and gap.lang = ?
          order by source_sense.position, source_evidence.position
       `).all(entryId, lang).map((row) => row.missing_evidence_id);
@@ -291,12 +295,17 @@ export function openEnrichmentRepository(
       JSON.stringify(sense.pragmaticFunctions ?? []),
       provenance,
       provenance === "generated" ? "generated" : sense.evidenceIds?.[0]?.split(":")[0] ?? "source",
-      null,
+      sense.evidenceIds?.length ? currentJapaneseSourceVersion : null,
       sense.evidenceIds?.[0] ?? null,
       generationRef
     );
     (sense.evidenceIds ?? []).forEach((evidenceId, index) => {
-      saveSenseEvidence.run(sense.id, index + 1, evidenceId, evidenceId.split(":")[0] ?? "source");
+      saveSenseEvidence.run(
+        sense.id,
+        index + 1,
+        evidenceId,
+        evidenceId.split(":")[0] ?? "source"
+      );
     });
     sense.glosses.forEach((gloss, index) => {
       saveGloss.run(

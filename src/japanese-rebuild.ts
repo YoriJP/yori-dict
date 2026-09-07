@@ -424,7 +424,12 @@ function importLegacyGlosses(
         row.senseId,
         generationId
       );
-      insertEvidence.run(senseId, 1, row.senseId.replace(/^yori:s_jmdict_/, "jmdict:").replace(/_(\d+)$/, ":$1"), row.source ?? "yori-legacy");
+      insertEvidence.run(
+        senseId,
+        1,
+        row.senseId.replace(/^yori:s_jmdict_/, "jmdict:").replace(/_(\d+)$/, ":$1"),
+        row.source ?? "yori-legacy"
+      );
       imported.byLang.set(lang, senseId);
       let glossPosition = 0;
       for (const gloss of row.glosses) {
@@ -469,8 +474,10 @@ function deriveExplanationCoverageGaps(db: Database, sourceVersion: string): voi
        limit 1
     `).get(group.entry_id, group.lang);
     const basis = legacy ? "legacy-exact-sense-mapping" : "accepted-authored-evidence";
-    for (const evidenceId of expected) {
-      if (!covered.has(evidenceId)) insert.run(group.entry_id, group.lang, evidenceId, sourceVersion, basis);
+    for (const evidence of expected) {
+      if (!covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))) {
+        insert.run(group.entry_id, group.lang, evidence.evidenceId, evidence.sourceVersion, basis);
+      }
     }
   }
 }
@@ -564,9 +571,9 @@ function readRetained(path: string): Retained {
                estimated_level as estimatedLevel
           from ja_entries where id = ?
       `).get(entryId)!;
-      const senses = db.query<Record<string, unknown>, [string]>(
+      const senses = versionRetainedSenses(db, db.query<Record<string, unknown>, [string]>(
         "select * from ja_senses where entry_id = ? order by lang, position"
-      ).all(entryId);
+      ).all(entryId));
       const senseIds = senses.map((sense) => String(sense.id));
       return {
         entry,
@@ -605,9 +612,9 @@ function readRetained(path: string): Retained {
        group by sense.entry_id, sense.lang
        order by sense.entry_id, sense.lang
     `).all().map<RetainedGroup>(({ entry_id: entryId, lang }) => {
-      const senses = db.query<Record<string, unknown>, [string, string]>(
+      const senses = versionRetainedSenses(db, db.query<Record<string, unknown>, [string, string]>(
         "select * from ja_senses where entry_id = ? and lang = ? order by position"
-      ).all(entryId, lang);
+      ).all(entryId, lang));
       const senseIds = senses.map((sense) => String(sense.id));
       return {
         entryId,
@@ -710,7 +717,10 @@ function restoreRetained(
       const incoming = db.query<{ id: string }, [string, string]>(
         "select id from ja_senses where entry_id = ? and lang = ? limit 1"
       ).get(group.entryId, group.lang);
-      if (incoming && !groupHasProvenGap(db, group.entryId, group.lang)) continue;
+      if (incoming && (
+        !groupHasProvenGap(db, group.entryId, group.lang)
+        || !retainedGroupHasCurrentEvidence(db, group)
+      )) continue;
       if (incoming) deleteExplanationGroup(db, group.entryId, group.lang);
       for (const generation of group.generations) insertRow(db, "ja_generations", generation, true);
       for (const sense of group.senses) insertRow(db, "ja_senses", sense, false);
@@ -803,27 +813,59 @@ function readEvidenceRows(
 
 function groupHasProvenGap(db: Database, entryId: string, lang: string): boolean {
   const { expected, covered } = readEvidenceCoverage(db, entryId, lang);
-  return covered.size > 0 && expected.some((evidenceId) => !covered.has(evidenceId));
+  return covered.size > 0 && expected.some(
+    (evidence) => !covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))
+  );
+}
+
+function retainedGroupHasCurrentEvidence(db: Database, group: RetainedGroup): boolean {
+  const sourceVersion = readSourceVersion(db);
+  const evidenceSenseIds = new Set(group.evidence.map((evidence) => String(evidence.sense_id)));
+  return group.senses.some(
+    (sense) => evidenceSenseIds.has(String(sense.id)) && sense.source_version === sourceVersion
+  );
+}
+
+function versionRetainedSenses(
+  db: Database,
+  senses: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const sourceVersion = readSourceVersion(db);
+  return senses.map((sense) => ({
+    ...sense,
+    source_version: typeof sense.source_version === "string" ? sense.source_version : sourceVersion
+  }));
+}
+
+function readSourceVersion(db: Database): string {
+  return db.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
+  ).get()?.value ?? "unknown";
+}
+
+function evidenceKey(evidenceId: string, sourceVersion: string): string {
+  return `${sourceVersion}\u0000${evidenceId}`;
 }
 
 function readEvidenceCoverage(
   db: Database,
   entryId: string,
   lang: string
-): { expected: string[]; covered: Set<string> } {
-  const expected = db.query<{ evidence_id: string }, [string]>(`
-    select distinct evidence.evidence_id as evidence_id
+): { expected: Array<{ evidenceId: string; sourceVersion: string }>; covered: Set<string> } {
+  const expected = db.query<{ evidence_id: string; source_version: string }, [string]>(`
+    select distinct evidence.evidence_id as evidence_id, sense.source_version as source_version
       from ja_senses sense
       join ja_sense_evidence evidence on evidence.sense_id = sense.id
      where sense.entry_id = ? and sense.lang = 'en' and sense.provenance = 'source'
      order by sense.position, evidence.position
-  `).all(entryId).map((row) => row.evidence_id);
-  const covered = new Set(db.query<{ evidence_id: string }, [string, string]>(`
-    select distinct evidence.evidence_id as evidence_id
+  `).all(entryId).map((row) => ({ evidenceId: row.evidence_id, sourceVersion: row.source_version }));
+  const covered = new Set(db.query<{ evidence_id: string; source_version: string }, [string, string]>(`
+    select distinct evidence.evidence_id as evidence_id, sense.source_version as source_version
       from ja_senses sense
       join ja_sense_evidence evidence on evidence.sense_id = sense.id
      where sense.entry_id = ? and sense.lang = ?
-  `).all(entryId, lang).map((row) => row.evidence_id));
+       and sense.source_version is not null
+  `).all(entryId, lang).map((row) => evidenceKey(row.evidence_id, row.source_version)));
   return { expected, covered };
 }
 

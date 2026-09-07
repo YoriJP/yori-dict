@@ -401,10 +401,11 @@ function addLegacyTaiwaneseMeaning(path: string, baseSenseId: string, gloss: str
   db.prepare(`
     insert into ja_explanation_group_gaps
       (entry_id, lang, missing_evidence_id, source_version, basis)
-    values (?, 'zh-tw', ?, 'fixture', 'legacy-exact-sense-mapping')
+    values (?, 'zh-tw', ?, ?, 'legacy-exact-sense-mapping')
   `).run(
     `yori:e_jmdict_${sourceEntryId}`,
-    `jmdict:${sourceEntryId}:${sourcePosition + 1}`
+    `jmdict:${sourceEntryId}:${sourcePosition + 1}`,
+    String(source.source_version)
   );
   db.close();
 }

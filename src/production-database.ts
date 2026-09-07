@@ -249,6 +249,16 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           create temp table retained_ja_evidence as
             select evidence.* from ja_sense_evidence evidence
             where evidence.sense_id in (select id from retained_ja_senses);
+          -- Evidence IDs are ordinal within one JMdict source version. Capture
+          -- the installed version on migrated authored senses before metadata
+          -- is replaced, so later comparisons cannot confuse two inventories.
+          update retained_ja_senses
+             set source_version = coalesce(
+               source_version,
+               (select value from ja_metadata where key = 'jmdictSimplifiedVersion'),
+               'unknown'
+             )
+           where source_ref is not null or id in (select sense_id from retained_ja_evidence);
           -- A structure-only ja-3 migration leaves this table empty for
           -- pre-existing ja-2 senses. Recover each exact legacy reference here,
           -- during the explicit content import, and normalize it to Evidence ID.
@@ -332,6 +342,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
                    on retained_evidence.sense_id = retained_sense.id
                 where retained_sense.entry_id = retained.entry_id
                   and retained_sense.lang = retained.lang
+                  and retained_sense.source_version = gap.source_version
              );
           delete from ja_examples where sense_id in (
             select sense.id from ja_senses sense join retained_ja_replacements replacement
@@ -398,6 +409,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
                 where target_sense.entry_id = replacement.entry_id
                   and target_sense.lang = replacement.lang
                   and covered.evidence_id = expected.evidence_id
+                  and target_sense.source_version = source_sense.source_version
              )
                and exists (
                  select 1 from retained_ja_senses retained_sense
@@ -405,6 +417,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
                      on retained_evidence.sense_id = retained_sense.id
                   where retained_sense.entry_id = replacement.entry_id
                     and retained_sense.lang = replacement.lang
+                    and retained_sense.source_version = source_sense.source_version
                );
           drop table promoted_ja_entries;
           drop table retained_ja_replacements;

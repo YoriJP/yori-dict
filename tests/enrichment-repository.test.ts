@@ -304,13 +304,13 @@ test("a production import keeps an accepted repair over proven-partial release c
   release.prepare(`
     insert into ja_explanation_group_gaps
       (entry_id, lang, missing_evidence_id, source_version, basis)
-    values (?, 'zh-tw', ?, 'next', 'legacy-exact-sense-mapping')
-  `).run(entryId, secondEvidence);
+    values (?, 'zh-tw', ?, ?, 'legacy-exact-sense-mapping')
+  `).run(entryId, secondEvidence, String(source.source_version));
   release.prepare(`
     insert into ja_explanation_group_gaps
       (entry_id, lang, missing_evidence_id, source_version, basis)
-    values (?, 'zh-tw', ?, 'next', 'legacy-exact-sense-mapping')
-  `).run(entryId, thirdEvidence);
+    values (?, 'zh-tw', ?, ?, 'legacy-exact-sense-mapping')
+  `).run(entryId, thirdEvidence, String(source.source_version));
   release.prepare("update ja_metadata set value = 'next' where key = 'dictDate'").run();
   release.close();
 
@@ -329,6 +329,30 @@ test("a production import keeps an accepted repair over proven-partial release c
      order by missing_evidence_id
   `).all()).toEqual([{ missing_evidence_id: thirdEvidence }]);
   verified.close();
+
+  // The ordinal identifiers belong to the source inventory that assigned
+  // them. Once that inventory changes, the old accepted repair cannot claim
+  // coverage of the release's newly numbered senses.
+  const versionedRelease = new Database(next);
+  versionedRelease.prepare("update ja_senses set source_version = 'fixture-v2'").run();
+  versionedRelease.prepare(`
+    update ja_explanation_group_gaps
+       set source_version = 'fixture-v2'
+     where entry_id = ? and lang = 'zh-tw'
+  `).run(entryId);
+  versionedRelease.prepare("update ja_glosses set text = '新版部分解釋' where sense_id = ?")
+    .run(partialSenseId);
+  versionedRelease.prepare("update ja_metadata set value = 'next-v2' where key = 'dictDate'").run();
+  versionedRelease.prepare(
+    "update ja_metadata set value = 'fixture-v2' where key = 'jmdictSimplifiedVersion'"
+  ).run();
+  versionedRelease.close();
+
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const versioned = openLookupDb(path);
+  expect(versioned.lookup("学校", "zh-tw").item?.senses[0]?.glosses[0]?.text)
+    .toBe("新版部分解釋");
+  versioned.close();
 
   const completeRelease = new Database(next);
   completeRelease.prepare("delete from ja_explanation_group_gaps where entry_id = ? and lang = 'zh-tw'")
@@ -442,8 +466,8 @@ test("a production import recovers retained legacy source_ref Evidence before re
   release.prepare(`
     insert into ja_explanation_group_gaps
       (entry_id, lang, missing_evidence_id, source_version, basis)
-    values (?, 'zh-tw', ?, 'next', 'legacy-exact-sense-mapping')
-  `).run(entryId, secondEvidence);
+    values (?, 'zh-tw', ?, ?, 'legacy-exact-sense-mapping')
+  `).run(entryId, secondEvidence, String(source.source_version));
   release.prepare("update ja_metadata set value = 'next' where key = 'dictDate'").run();
   release.close();
 

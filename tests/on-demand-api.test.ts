@@ -122,8 +122,8 @@ test("the lookup route keeps a proven-partial group model-free until authorized 
   db.prepare(`
     insert into ja_explanation_group_gaps
       (entry_id, lang, missing_evidence_id, source_version, basis)
-    values (?, 'zh-tw', 'jmdict:1206730:2', 'fixture', 'legacy-exact-sense-mapping')
-  `).run(entryId);
+    values (?, 'zh-tw', 'jmdict:1206730:2', ?, 'legacy-exact-sense-mapping')
+  `).run(entryId, String(source.source_version));
   db.close();
 
   const lookup = openLookupDb(path);

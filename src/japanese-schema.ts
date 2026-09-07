@@ -209,6 +209,7 @@ export function readExplanationCoverageGaps(db: Database): ExplanationCoverageGa
       join ja_sense_evidence source_evidence
         on source_evidence.sense_id = source_sense.id
        and source_evidence.evidence_id = gap.missing_evidence_id
+       and source_sense.source_version = gap.source_version
      order by gap.entry_id, gap.lang, source_sense.position, source_evidence.position
   `).all().map((row) => ({
     entryId: row.entry_id,

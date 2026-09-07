@@ -210,6 +210,57 @@ test("a rebuild recovers legacy source_ref Evidence after a structure-only migra
   rebuilt.close();
 });
 
+test("an evidence-free retained group cannot displace a newly proven partial group", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-unknown-retain-"));
+  const input = join(root, "jmdict.json");
+  const glossPath = join(root, "zh-tw.jsonl");
+  const out = join(root, "yori.sqlite");
+  const sense = (text: string) => ({
+    partOfSpeech: ["n"], appliesToKanji: ["*"], appliesToKana: ["*"],
+    related: [], antonym: [], field: [], dialect: [], misc: [], info: [], languageSource: [],
+    gloss: [{ lang: "eng", gender: null, type: null, text }]
+  });
+  await writeFile(input, JSON.stringify({
+    version: "fixture-v1",
+    dictDate: "fixture-v1",
+    words: [{
+      id: "1410750",
+      kanji: [{ text: "様", common: true, tags: [] }],
+      kana: [{ text: "さま", common: true, tags: [], appliesToKanji: ["*"] }],
+      sense: [sense("appearance"), sense("manner")]
+    }]
+  }));
+  await rebuildJapaneseDictionary({ input, out });
+  migrateProductionDatabase(out);
+
+  const lookup = openLookupDb(out);
+  const repository = openEnrichmentRepository(out, lookup);
+  const imported = repository.find("様", "ja", "en")!;
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      ...imported.senses[0]!,
+      id: "yori:s_unknown_1410750:zh-tw:1",
+      glosses: [{ lang: "zh-tw", text: "沒有來源證據的解釋", source: "generated", reviewStatus: "checked" }],
+      evidenceIds: [],
+      provenance: "generated"
+    }]
+  }, "zh-tw", generation);
+  repository.close();
+  lookup.close();
+
+  await writeFile(glossPath, JSON.stringify({
+    senseId: "yori:s_jmdict_1410750_1", lang: "zh-tw", glosses: ["樣子"]
+  }));
+  const rebuilt = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  const reopened = openLookupDb(out);
+  expect(reopened.lookup("様", "zh-tw").item?.senses[0]?.glosses[0]?.text).toBe("樣子");
+  reopened.close();
+  expect(rebuilt.coverageGaps.details.map((gap) => gap.missingEvidenceId)).toEqual([
+    "jmdict:1410750:2"
+  ]);
+});
+
 test("a rebuild retains accepted generated content and does not reorder imported senses", async () => {
   const out = join(mkdtempSync(join(tmpdir(), "yori-ja-retain-")), "yori.sqlite");
   await rebuildJapaneseDictionary({ input: "fixtures/jmdict-sample.json", out });
@@ -327,7 +378,7 @@ test("a rebuild retains accepted generated content and does not reorder imported
   db.close();
 });
 
-test("an accepted repair survives partial legacy rebuilds and reports only new source Evidence", async () => {
+test("an accepted repair survives same-version rebuilds but not a new ordinal inventory", async () => {
   const root = mkdtempSync(join(tmpdir(), "yori-ja-repaired-retain-"));
   const input = join(root, "jmdict.json");
   const glossPath = join(root, "zh-tw.jsonl");
@@ -386,9 +437,10 @@ test("an accepted repair survives partial legacy rebuilds and reports only new s
   const grown = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
   const reopened = openLookupDb(out);
   expect(reopened.lookup("様", "zh-tw").item?.senses[0]?.glosses[0]?.text)
-    .toBe("修復後的完整解釋");
+    .toBe("舊的部分解釋");
   reopened.close();
   expect(grown.coverageGaps.details.map((gap) => gap.missingEvidenceId)).toEqual([
+    "jmdict:1410750:2",
     "jmdict:1410750:3"
   ]);
 
@@ -403,6 +455,63 @@ test("an accepted repair survives partial legacy rebuilds and reports only new s
     .toEqual(["新的樣子", "新的方式", "新的敬稱"]);
   completeLookup.close();
   expect(completeImport.coverageGaps.summary["zh-tw"]).toBeUndefined();
+});
+
+test("retained ordinal Evidence does not cover a different sense in a newer source version", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-versioned-evidence-"));
+  const input = join(root, "jmdict.json");
+  const glossPath = join(root, "zh-tw.jsonl");
+  const out = join(root, "yori.sqlite");
+  const sourceSense = (text: string) => ({
+    partOfSpeech: ["n"], appliesToKanji: ["*"], appliesToKana: ["*"],
+    related: [], antonym: [], field: [], dialect: [], misc: [], info: [], languageSource: [],
+    gloss: [{ lang: "eng", gender: null, type: null, text }]
+  });
+  const writeSource = async (version: string, glosses: string[]) => writeFile(input, JSON.stringify({
+    version,
+    dictDate: version,
+    words: [{
+      id: "1410750",
+      kanji: [{ text: "様", common: true, tags: [] }],
+      kana: [{ text: "さま", common: true, tags: [], appliesToKanji: ["*"] }],
+      sense: glosses.map(sourceSense)
+    }]
+  }));
+
+  await writeSource("fixture-v1", ["appearance", "manner"]);
+  await writeFile(glossPath, JSON.stringify({
+    senseId: "yori:s_jmdict_1410750_1", lang: "zh-tw", glosses: ["舊的部分解釋"]
+  }));
+  await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  migrateProductionDatabase(out);
+
+  const lookup = openLookupDb(out);
+  const repository = openEnrichmentRepository(out, lookup);
+  const partial = repository.find("様", "ja", "zh-tw")!;
+  repository.saveEntry({
+    ...partial,
+    senses: [{
+      ...partial.senses[0]!,
+      id: "yori:s_repaired_versioned_1410750:zh-tw:1",
+      glosses: [{ lang: "zh-tw", text: "舊版本的完整解釋", source: "generated", reviewStatus: "checked" }],
+      evidenceIds: ["jmdict:1410750:1", "jmdict:1410750:2"],
+      provenance: "source"
+    }]
+  }, "zh-tw", generation);
+  repository.close();
+  lookup.close();
+
+  // The new source inserts a different sense at position 1. Old ordinal IDs
+  // must not claim that this new inventory has already been covered.
+  await writeSource("fixture-v2", ["condition", "appearance", "manner"]);
+  const rebuilt = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  expect(rebuilt.coverageGaps.details.map((gap) => gap.missingEvidenceId)).toEqual([
+    "jmdict:1410750:2",
+    "jmdict:1410750:3"
+  ]);
+  const reopened = openLookupDb(out);
+  expect(reopened.lookup("様", "zh-tw").item?.senses[0]?.glosses[0]?.text).toBe("舊的部分解釋");
+  reopened.close();
 });
 
 test("a failed rebuild leaves the previous database usable", async () => {
