@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   createJapaneseOnDemandDictionary,
   createModelCallGate,
+  JapaneseEvidenceSnapshotChangedError,
   sameTierBackoffMs,
   type EnrichmentRepository,
   type ExplanationCoverageDecision,
@@ -95,6 +96,7 @@ test("authorized lookup replaces a proven-partial Explanation Group from complet
     coverage: [[`${partial.id}:zh-tw`, {
       kind: "proven-partial",
       missingEvidenceIds: ["jmdict:1410750:2"],
+      sourceVersion: "fixture-v1",
       sourceEvidence
     }]]
   });
@@ -123,6 +125,7 @@ test("authorized lookup replaces a proven-partial Explanation Group from complet
 
   expect(repaired?.senses[0]?.evidenceIds).toEqual(["jmdict:1410750:1", "jmdict:1410750:2"]);
   expect(concurrent).toEqual(repaired);
+  expect(repository.savedSourceVersions).toEqual(["fixture-v1"]);
   expect(readAgain).toEqual(repaired);
   expect(gateway.calls.map(({ role }) => role)).toEqual([
     "entry-author", "entry-review", "example-author", "example-review"
@@ -160,6 +163,7 @@ test("recoverable partial-group repair failures preserve the original group and 
     const decision: ExplanationCoverageDecision = {
       kind: "proven-partial",
       missingEvidenceIds: ["jmdict:1206730:2"],
+      sourceVersion: "fixture-v1",
       sourceEvidence: evidence
     };
     const repository = new MemoryRepository({
@@ -190,7 +194,10 @@ test("a storage failure during partial-group replacement remains fatal", async (
   const repository = new MemoryRepository({
     released: [["学校", original]],
     coverage: [[`${original.id}:en`, {
-      kind: "proven-partial", missingEvidenceIds: ["jmdict:1206730:2"], sourceEvidence
+      kind: "proven-partial",
+      missingEvidenceIds: ["jmdict:1206730:2"],
+      sourceVersion: "fixture-v1",
+      sourceEvidence
     }]],
     saveError: new Error("disk full")
   });
@@ -208,6 +215,45 @@ test("a storage failure during partial-group replacement remains fatal", async (
 
   await expect(createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
     .resolve(request("学校"))).rejects.toThrow("disk full");
+});
+
+test("an Evidence inventory refresh makes an in-flight repair safely retryable", async () => {
+  const original = existingEntry();
+  original.senses[0]!.evidenceIds = ["jmdict:1206730:1"];
+  const sourceEvidence: SourceEvidence[] = [{
+    source: "jmdict", sourceEntryId: "1206730", headword: "学校", reading: "がっこう",
+    senses: [
+      { evidenceId: "jmdict:1206730:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school" }] },
+      { evidenceId: "jmdict:1206730:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school system" }] }
+    ]
+  }];
+  const repository = new MemoryRepository({
+    released: [["学校", original]],
+    coverage: [[`${original.id}:en`, {
+      kind: "proven-partial",
+      missingEvidenceIds: ["jmdict:1206730:2"],
+      sourceVersion: "fixture-v1",
+      sourceEvidence
+    }]],
+    saveError: new JapaneseEvidenceSnapshotChangedError("fixture-v1", "fixture-v2")
+  });
+  const gateway = new ScriptedGateway([
+    authoredEntry({
+      headword: "学校",
+      reading: "がっこう",
+      partOfSpeech: ["n"],
+      evidenceId: "jmdict:1206730:1",
+      glosses: ["school"]
+    }).replace('"jmdict:1206730:1"', '"jmdict:1206730:1","jmdict:1206730:2"'),
+    reviewForPrompt
+  ]);
+
+  const result = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolve(request("学校"));
+
+  expect(result).toEqual(original);
+  expect(repository.entries.size).toBe(0);
+  expect(repository.savedSourceVersions).toEqual(["fixture-v1"]);
 });
 
 test("one accepting review cannot persist an example when unanimous review is required", async () => {
@@ -1350,6 +1396,7 @@ function exampleFor(headword: string, translation?: string): string {
 class MemoryRepository implements EnrichmentRepository {
   readonly lookups: Array<[string, string]> = [];
   readonly attempts: unknown[] = [];
+  readonly savedSourceVersions: Array<string | undefined> = [];
   readonly entries = new Map<string, PublicLookupItem>();
   readonly examples = new Map<string, PublicLookupItem["senses"][number]["examples"]>();
   private readonly released: Map<string, PublicLookupItem>;
@@ -1409,7 +1456,13 @@ class MemoryRepository implements EnrichmentRepository {
     return this.coverage.get(`${entryId}:${lang}`) ?? { kind: "not-proven-partial" };
   }
 
-  saveEntry(entry: PublicLookupItem, lang = "en") {
+  saveEntry(
+    entry: PublicLookupItem,
+    lang = "en",
+    _generation?: unknown,
+    expectedSourceVersion?: string
+  ) {
+    this.savedSourceVersions.push(expectedSourceVersion);
     if (this.saveError) throw this.saveError;
     this.entries.set(entry.word, entry);
     this.coverage.delete(`${entry.id}:${lang}`);

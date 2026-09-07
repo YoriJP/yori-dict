@@ -157,8 +157,18 @@ export type ExplanationCoverageDecision =
       kind: "proven-partial";
       missingEvidenceIds: string[];
       sourceEvidence: SourceEvidence[];
+      sourceVersion: string;
     }
   | { kind: "not-proven-partial" };
+
+export class JapaneseEvidenceSnapshotChangedError extends Error {
+  constructor(expectedSourceVersion: string, currentSourceVersion: string) {
+    super(
+      `Japanese Evidence inventory changed from ${expectedSourceVersion} to ${currentSourceVersion}`
+    );
+    this.name = "JapaneseEvidenceSnapshotChangedError";
+  }
+}
 
 /**
  * Japanese enrichment persistence is scoped to one explanation language.
@@ -172,7 +182,12 @@ export type EnrichmentRepository = {
   candidates?(query: string): CanonicalCandidate[];
   findSources(query: string, targetDictionary: TargetDictionary): SourceEvidence[];
   coverageDecision(entryId: string, lang: ApiLang): ExplanationCoverageDecision;
-  saveEntry(entry: PublicLookupItem, lang: ApiLang, generation?: GenerationProvenance): void;
+  saveEntry(
+    entry: PublicLookupItem,
+    lang: ApiLang,
+    generation?: GenerationProvenance,
+    expectedSourceVersion?: string
+  ): void;
   saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
   labelVocabulary(): LabelVocabulary;
@@ -512,8 +527,21 @@ function repairPartialGroup(
     const coverage = options.repository.coverageDecision(current.id, request.lang);
     if (coverage.kind !== "proven-partial") return completeEntryExamples(options, current, request);
     try {
-      return await authorEntry(request, options, current.word, coverage.sourceEvidence) ?? current;
+      return await authorEntry(
+        request,
+        options,
+        current.word,
+        coverage.sourceEvidence,
+        coverage.sourceVersion
+      ) ?? current;
     } catch (error) {
+      if (error instanceof JapaneseEvidenceSnapshotChangedError) {
+        return options.repository.findById?.(
+          existing.id,
+          request.lang,
+          request.candidate?.inflectionPath
+        ) ?? current;
+      }
       if (
         error instanceof ModelGatewayError
         && (error.kind === "transient" || error.kind === "permanent")
@@ -752,7 +780,8 @@ async function authorEntry(
   request: ResolveRequest,
   options: RuntimeOptions,
   headword: string,
-  evidence: SourceEvidence[]
+  evidence: SourceEvidence[],
+  expectedSourceVersion?: string
 ): Promise<PublicLookupItem | null> {
   // An entry shares one identity across explanation languages. When the
   // dictionary already knows this headword, the authored group joins that
@@ -803,7 +832,12 @@ async function authorEntry(
   // One author request produced one complete entry-language group and every
   // configured review pass accepted it, so the group is persisted atomically for this
   // language alone.
-  options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
+  options.repository.saveEntry(
+    entry,
+    request.lang,
+    acceptedGeneration(authored.attempt),
+    expectedSourceVersion
+  );
   // Read the group back so an authored language group on an existing entry
   // answers with that entry's own identity, written forms, and source facts
   // rather than the candidate's placeholder ones.

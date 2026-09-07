@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { readJapaneseLookupItem, type LookupDb } from "./db";
 import { createJapaneseSchema } from "./japanese-schema";
 import { apiLanguages } from "./lang";
+import { JapaneseEvidenceSnapshotChangedError } from "./on-demand-dictionary";
 import type {
   AttemptRecord,
   EnrichmentRepository,
@@ -130,8 +131,11 @@ export function openEnrichmentRepository(
       return sourceLookup(query, targetDictionary);
     },
     coverageDecision(entryId, lang) {
-      const missingEvidenceIds = db.query<{ missing_evidence_id: string }, [string, string]>(`
-        select gap.missing_evidence_id
+      const gaps = db.query<{
+        missing_evidence_id: string;
+        source_version: string;
+      }, [string, string]>(`
+        select gap.missing_evidence_id, gap.source_version
           from ja_explanation_group_gaps gap
           join ja_senses source_sense
             on source_sense.entry_id = gap.entry_id
@@ -143,8 +147,12 @@ export function openEnrichmentRepository(
            and source_sense.source_version = gap.source_version
          where gap.entry_id = ? and gap.lang = ?
          order by source_sense.position, source_evidence.position
-      `).all(entryId, lang).map((row) => row.missing_evidence_id);
-      if (missingEvidenceIds.length === 0) return { kind: "not-proven-partial" };
+      `).all(entryId, lang);
+      if (gaps.length === 0) return { kind: "not-proven-partial" };
+      const sourceVersions = new Set(gaps.map((row) => row.source_version));
+      if (sourceVersions.size !== 1) return { kind: "not-proven-partial" };
+      const sourceVersion = gaps[0]!.source_version;
+      const missingEvidenceIds = gaps.map((row) => row.missing_evidence_id);
       const source = readJapaneseLookupItem(db, entryId, "en");
       if (!source) return { kind: "not-proven-partial" };
       const senses = source.senses.flatMap((sense) => (sense.evidenceIds ?? []).map((evidenceId) => ({
@@ -164,6 +172,7 @@ export function openEnrichmentRepository(
       return {
         kind: "proven-partial",
         missingEvidenceIds,
+        sourceVersion,
         sourceEvidence: [{
           source: senses[0]!.evidenceId.split(":")[0] ?? "source",
           sourceEntryId: source.sourceId,
@@ -178,12 +187,21 @@ export function openEnrichmentRepository(
      * replaced, so authoring or rejecting one language never disturbs another
      * language's accepted content for the same entry.
      */
-    saveEntry(entry, lang, generation) {
+    saveEntry(entry, lang, generation, expectedSourceVersion) {
       db.transaction(() => {
         const generationRef = recordGeneration(generation);
         const currentJapaneseSourceVersion = db.query<{ value: string }, []>(
           "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
         ).get()?.value ?? "unknown";
+        if (
+          expectedSourceVersion !== undefined
+          && currentJapaneseSourceVersion !== expectedSourceVersion
+        ) {
+          throw new JapaneseEvidenceSnapshotChangedError(
+            expectedSourceVersion,
+            currentJapaneseSourceVersion
+          );
+        }
         const senseIds = db.query<{ id: string }, [string, string]>(
           "select id from ja_senses where entry_id = ? and lang = ?"
         ).all(entry.id, lang).map((row) => row.id);

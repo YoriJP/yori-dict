@@ -322,6 +322,77 @@ test("an open repository stamps repairs with the source version imported at runt
   verified.close();
 });
 
+test("a Japanese repair cannot clear gaps from a newer Evidence inventory", async () => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const imported = repository.find("学校", "ja", "en")!;
+  const entryId = imported.id;
+  const firstEvidence = "jmdict:1206730:1";
+  const secondEvidence = "jmdict:1206730:2";
+  const partial = {
+    ...imported,
+    senses: [{
+      ...imported.senses[0]!,
+      id: "yori:s_stale_repair_school:zh-tw:1",
+      glosses: [{ lang: "zh-tw" as const, text: "舊的部分解釋", source: "generated" as const, reviewStatus: "checked" as const }],
+      provenance: "source" as const,
+      evidenceIds: [firstEvidence]
+    }]
+  };
+  repository.saveEntry(partial, "zh-tw", generation);
+
+  const before = new Database(path);
+  const oldVersion = before.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
+  ).get()!.value;
+  before.prepare(`
+    insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values ('yori:s_jmdict_1206730_1:en', 2, ?, 'jmdict')
+  `).run(secondEvidence);
+  before.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, 'zh-tw', ?, ?, 'accepted-authored-evidence')
+  `).run(entryId, secondEvidence, oldVersion);
+  before.close();
+  const decision = repository.coverageDecision(entryId, "zh-tw");
+  expect(decision).toMatchObject({ kind: "proven-partial", sourceVersion: oldVersion });
+
+  const nextVersion = `${oldVersion}-next`;
+  const refreshed = new Database(path);
+  refreshed.prepare(
+    "update ja_metadata set value = ? where key = 'jmdictSimplifiedVersion'"
+  ).run(nextVersion);
+  refreshed.prepare(
+    "update ja_senses set source_version = ? where entry_id = ? and lang = 'en'"
+  ).run(nextVersion, entryId);
+  refreshed.prepare(
+    "update ja_explanation_group_gaps set source_version = ? where entry_id = ? and lang = 'zh-tw'"
+  ).run(nextVersion, entryId);
+  refreshed.close();
+
+  const repaired = structuredClone(partial);
+  repaired.senses[0]!.glosses[0]!.text = "古い Evidence から作った完全な説明";
+  repaired.senses[0]!.evidenceIds = [firstEvidence, secondEvidence];
+  expect(() => repository.saveEntry(repaired, "zh-tw", generation, oldVersion))
+    .toThrow("Japanese Evidence inventory changed");
+
+  const verified = new Database(path, { readonly: true });
+  expect(verified.query<{ text: string }, []>(`
+    select gloss.text from ja_glosses gloss
+      join ja_senses sense on sense.id = gloss.sense_id
+     where sense.entry_id = '${entryId}' and sense.lang = 'zh-tw'
+  `).get()?.text).toBe("舊的部分解釋");
+  expect(verified.query<{ source_version: string }, []>(`
+    select source_version from ja_explanation_group_gaps
+     where entry_id = '${entryId}' and lang = 'zh-tw'
+  `).get()?.source_version).toBe(nextVersion);
+  verified.close();
+  repository.close();
+  lookup.close();
+});
+
 test("a production import keeps an accepted repair over proven-partial release content", async () => {
   const path = await productionDatabase();
   const entryId = "yori:e_jmdict_1206730";
