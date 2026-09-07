@@ -1228,6 +1228,7 @@ function parseAuthoredEntry(
     if (unknownPos) throw new Error(`Unknown part of speech: ${unknownPos}`);
     if (sense.provenance !== "source" && sense.provenance !== "generated") throw new Error("Invalid provenance");
     const evidenceIds = requiredStringList(sense.evidenceIds);
+    if (new Set(evidenceIds).size !== evidenceIds.length) throw new Error("Duplicate source evidence");
     if (sense.provenance === "source" && evidenceIds.length === 0) throw new Error("Source sense has no evidence");
     if (sense.provenance === "generated" && evidenceIds.length > 0) throw new Error("Generated sense claims source evidence");
     for (const evidenceId of evidenceIds) {

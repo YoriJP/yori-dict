@@ -97,6 +97,20 @@ test("a Japanese release refuses an unclassified migrated database", async () =>
   })).rejects.toThrow("ja-2");
 });
 
+test("a Japanese release refuses a snapshot without a JMdict inventory version", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-unversioned-release-"));
+  const path = join(root, "production.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  const unversioned = new Database(path);
+  unversioned.prepare("delete from ja_metadata where key = 'jmdictSimplifiedVersion'").run();
+  unversioned.close();
+
+  await expect(buildJapaneseRelease(path, {
+    outputDirectory: join(root, "release"),
+    version: "test"
+  })).rejects.toThrow("JMdict inventory version");
+});
+
 test("no release artifact mixes explanation languages", async () => {
   const { artifacts } = await release();
   const released = new Database(artifacts.sqlite, { readonly: true });

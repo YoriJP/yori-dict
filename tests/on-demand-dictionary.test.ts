@@ -190,6 +190,47 @@ test("recoverable partial-group repair failures preserve the original group and 
   }
 });
 
+test("duplicate Evidence IDs are a recoverable malformed partial-group repair", async () => {
+  const original = existingEntry();
+  original.senses[0]!.evidenceIds = ["jmdict:1206730:1"];
+  const sourceEvidence: SourceEvidence[] = [{
+    source: "jmdict", sourceEntryId: "1206730", headword: "学校", reading: "がっこう",
+    senses: [
+      { evidenceId: "jmdict:1206730:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school" }] },
+      { evidenceId: "jmdict:1206730:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school system" }] }
+    ]
+  }];
+  const decision: ExplanationCoverageDecision = {
+    kind: "proven-partial",
+    missingEvidenceIds: ["jmdict:1206730:2"],
+    evidenceSnapshot: fixtureEvidenceSnapshot,
+    sourceEvidence
+  };
+  const repository = new MemoryRepository({
+    released: [["学校", original]],
+    coverage: [[`${original.id}:en`, decision]]
+  });
+  const duplicateEvidence = JSON.stringify({
+    headword: "学校", reading: "がっこう",
+    senses: [{
+      partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
+      pragmaticFunctions: [], glosses: ["school"],
+      evidenceIds: ["jmdict:1206730:1", "jmdict:1206730:2", "jmdict:1206730:2"],
+      provenance: "source"
+    }]
+  });
+
+  const gateway = new ScriptedGateway([duplicateEvidence]);
+  const result = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolve(request("学校"));
+
+  expect(result).toEqual(original);
+  expect(repository.coverageDecision(original.id, "en")).toEqual(decision);
+  expect(repository.entries.size).toBe(0);
+  expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
+  expect(repository.attempts).toContainEqual(expect.objectContaining({ outcome: "malformed" }));
+});
+
 test("a storage failure during partial-group replacement remains fatal", async () => {
   const original = existingEntry();
   original.senses[0]!.evidenceIds = ["jmdict:1206730:1"];

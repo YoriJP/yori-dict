@@ -52,6 +52,12 @@ export function assertPublishableJapaneseEvidenceSnapshot(
       + "Run an explicit Japanese rebuild or import before publishing."
     );
   }
+  if (!snapshot.jmdictSimplifiedVersion) {
+    throw new Error(
+      "Japanese release requires a JMdict inventory version. "
+      + "Rebuild from a versioned JMdict source before publishing."
+    );
+  }
 }
 
 export class JapaneseEvidenceSnapshotChangedError extends Error {

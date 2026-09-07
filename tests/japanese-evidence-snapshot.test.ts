@@ -50,6 +50,8 @@ test("publication and transactional repair checks use the same complete snapshot
   expect(() => assertPublishableJapaneseEvidenceSnapshot(current)).not.toThrow();
   expect(() => assertPublishableJapaneseEvidenceSnapshot({ ...current, schemaVersion: "ja-2" }))
     .toThrow("Japanese release requires classified schema ja-3");
+  expect(() => assertPublishableJapaneseEvidenceSnapshot({ ...current, jmdictSimplifiedVersion: null }))
+    .toThrow("Japanese release requires a JMdict inventory version");
 
   const db = new Database(":memory:");
   createJapaneseSchema(db);
