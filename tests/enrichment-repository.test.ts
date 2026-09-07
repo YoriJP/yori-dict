@@ -185,6 +185,33 @@ test("a same-date ja-3 release upgrades a ja-2 Japanese store", async () => {
   upgraded.close();
 });
 
+test("a Japanese import rejects a structure-only migrated release before changing production", async () => {
+  const path = await productionDatabase();
+  const releasePath = await productionDatabase();
+  const before = new Database(path, { readonly: true });
+  const expectedSnapshot = readJapaneseEvidenceSnapshot(before);
+  const expectedEvidenceCount = before.query<{ count: number }, []>(
+    "select count(*) as count from ja_sense_evidence"
+  ).get()!.count;
+  before.close();
+
+  const legacy = new Database(releasePath);
+  legacy.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  legacy.prepare("update ja_metadata set value = 'legacy-next' where key = 'dictDate'").run();
+  legacy.exec("delete from ja_sense_evidence; delete from ja_explanation_group_gaps;");
+  legacy.close();
+
+  expect(() => importJapaneseRelease(path, releasePath))
+    .toThrow("Japanese release requires classified schema ja-3");
+
+  const after = new Database(path, { readonly: true });
+  expect(readJapaneseEvidenceSnapshot(after)).toEqual(expectedSnapshot);
+  expect(after.query<{ count: number }, []>(
+    "select count(*) as count from ja_sense_evidence"
+  ).get()!.count).toBe(expectedEvidenceCount);
+  after.close();
+});
+
 test("a Japanese source refresh preserves accepted generated content", async () => {
   const path = await productionDatabase();
   const lookup = openLookupDb(path);

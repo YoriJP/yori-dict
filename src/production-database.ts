@@ -6,6 +6,7 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { downloadPinnedDataRelease } from "../scripts/download-data-release";
 import { createEnglishSchema } from "./english-schema";
 import {
+  assertPublishableJapaneseEvidenceSnapshot,
   assertJapaneseEvidenceSnapshotCurrent,
   readJapaneseEvidenceSnapshot,
   sameJapaneseEvidenceSnapshot
@@ -185,15 +186,21 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
  * examples on imported senses are retained with their provenance.
  */
 export function importJapaneseRelease(path: string, releasePath: string): boolean {
-  const production = new Database(path);
-  production.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
-  createJapaneseSchema(production);
   const source = new Database(releasePath, { readonly: true });
-  const incomingSnapshot = readJapaneseEvidenceSnapshot(source);
-  source.close();
+  const incomingSnapshot = (() => {
+    try {
+      return readJapaneseEvidenceSnapshot(source);
+    } finally {
+      source.close();
+    }
+  })();
+  assertPublishableJapaneseEvidenceSnapshot(incomingSnapshot);
   if (!incomingSnapshot.dictDate) {
     throw new Error(`Japanese release has no dictDate: ${releasePath}`);
   }
+  const production = new Database(path);
+  production.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
+  createJapaneseSchema(production);
   const currentSnapshot = readJapaneseEvidenceSnapshot(production);
   if (sameJapaneseEvidenceSnapshot(currentSnapshot, incomingSnapshot)) {
     production.close();

@@ -28,3 +28,22 @@ test("licensed source evidence is indexed by headword and reading without mutati
   expect(index.lookup("missing", "ja")).toEqual([]);
   expect(index.lookup("未知語", "en")).toEqual([]);
 });
+
+test("source evidence rejects malformed form restrictions", async () => {
+  const path = join(mkdtempSync(join(tmpdir(), "yori-source-")), "source.jsonl");
+  const evidence = {
+    source: "licensed-test-dictionary",
+    sourceEntryId: "42",
+    headword: "学校",
+    reading: "がっこう",
+    senses: [{
+      evidenceId: "licensed-test-dictionary:42:1",
+      partOfSpeech: ["n"],
+      appliesTo: { kanji: "学校", kana: ["がっこう"] },
+      glosses: [{ lang: "en", text: "school" }]
+    }]
+  };
+  await Bun.write(path, `${JSON.stringify(evidence)}\n`);
+
+  await expect(openSourceEvidenceIndex([path])).rejects.toThrow("appliesTo is invalid");
+});
