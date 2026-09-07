@@ -233,6 +233,43 @@ test("a Japanese source refresh preserves accepted generated content", async () 
   refreshedLookup.close();
 });
 
+test("an open repository stamps repairs with the source version imported at runtime", async () => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+
+  const next = await productionDatabase();
+  const release = new Database(next);
+  release.prepare("update ja_metadata set value = 'next' where key = 'dictDate'").run();
+  release.prepare(
+    "update ja_metadata set value = 'fixture-v2' where key = 'jmdictSimplifiedVersion'"
+  ).run();
+  release.prepare("update ja_senses set source_version = 'fixture-v2'").run();
+  release.close();
+  expect(importJapaneseRelease(path, next)).toBe(true);
+
+  const imported = repository.find("学校", "ja", "en")!;
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      ...imported.senses[0]!,
+      id: "yori:s_runtime_version_school:zh-tw:1",
+      glosses: [{ lang: "zh-tw", text: "執行期間修復", source: "generated", reviewStatus: "checked" }],
+      provenance: "source",
+      evidenceIds: ["jmdict:1206730:1"]
+    }]
+  }, "zh-tw", generation);
+  repository.close();
+  lookup.close();
+
+  const verified = new Database(path, { readonly: true });
+  expect(verified.query<{ source_version: string }, []>(`
+    select source_version from ja_senses
+     where id = 'yori:s_runtime_version_school:zh-tw:1'
+  `).get()?.source_version).toBe("fixture-v2");
+  verified.close();
+});
+
 test("a production import keeps an accepted repair over proven-partial release content", async () => {
   const path = await productionDatabase();
   const entryId = "yori:e_jmdict_1206730";

@@ -60,9 +60,6 @@ export function openEnrichmentRepository(
     insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
     values (?, ?, ?, ?)
   `);
-  const currentJapaneseSourceVersion = db.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
-  ).get()?.value ?? "unknown";
   const clearGeneratedExamples = db.prepare(
     "delete from ja_examples where sense_id = ? and source = 'generated'"
   );
@@ -184,6 +181,9 @@ export function openEnrichmentRepository(
     saveEntry(entry, lang, generation) {
       db.transaction(() => {
         const generationRef = recordGeneration(generation);
+        const currentJapaneseSourceVersion = db.query<{ value: string }, []>(
+          "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
+        ).get()?.value ?? "unknown";
         const senseIds = db.query<{ id: string }, [string, string]>(
           "select id from ja_senses where entry_id = ? and lang = ?"
         ).all(entry.id, lang).map((row) => row.id);
@@ -215,7 +215,14 @@ export function openEnrichmentRepository(
           }
         }
         entry.senses.forEach((sense, index) => {
-          saveJapaneseSense(entry.id, lang, sense, index + 1, generationRef);
+          saveJapaneseSense(
+            entry.id,
+            lang,
+            sense,
+            index + 1,
+            generationRef,
+            currentJapaneseSourceVersion
+          );
         });
         db.prepare("delete from ja_explanation_group_gaps where entry_id = ? and lang = ?")
           .run(entry.id, lang);
@@ -273,7 +280,8 @@ export function openEnrichmentRepository(
     lang: ApiLang,
     sense: PublicSense,
     position: number,
-    generationRef: string | null
+    generationRef: string | null,
+    currentJapaneseSourceVersion: string
   ): void {
     const provenance = sense.provenance ?? "generated";
     saveSense.run(
