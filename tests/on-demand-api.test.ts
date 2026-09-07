@@ -89,6 +89,11 @@ test("the lookup route keeps a proven-partial group model-free until authorized 
     insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
     values (?, 2, 'jmdict:1206730:2', 'jmdict')
   `).run(englishSenseId);
+  db.prepare(`
+    update ja_senses
+       set applies_to_kanji = '["学校"]', applies_to_kana = '["がっこう"]'
+     where id = ?
+  `).run(englishSenseId);
   const source = db.query<Record<string, unknown>, [string]>("select * from ja_senses where id = ?")
     .get(englishSenseId)!;
   const target: Record<string, unknown> = {
@@ -189,7 +194,9 @@ test("the lookup route keeps a proven-partial group model-free until authorized 
   )));
   expect(enrichedRequests.map(({ status }) => status)).toEqual([200, 200]);
   for (const response of enrichedRequests) {
-    expect((await response.json()).senses[0].glosses[0].text).toBe("提供教育的機構");
+    const repaired = await response.json();
+    expect(repaired.senses[0].glosses[0].text).toBe("提供教育的機構");
+    expect(repaired.senses[0].appliesTo).toEqual({ kanji: ["学校"], kana: ["がっこう"] });
   }
   expect(calls.map(({ role }) => role)).toEqual([
     "entry-author", "entry-review", "entry-review", "example-author", "example-review", "example-review"

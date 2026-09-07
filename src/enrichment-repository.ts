@@ -150,6 +150,10 @@ export function openEnrichmentRepository(
         evidenceId,
         partOfSpeech: sense.partOfSpeech,
         glosses: sense.glosses.map((gloss) => ({ lang: "en", text: gloss.text })),
+        appliesTo: {
+          kanji: [...sense.appliesTo.kanji],
+          kana: [...sense.appliesTo.kana]
+        },
         ...(sense.pronunciations?.[0] ? { pronunciation: sense.pronunciations[0] } : {}),
         ...([...(sense.misc ?? []), ...(sense.field ?? []), ...(sense.dialect ?? [])].length > 0
           ? { labels: [...(sense.misc ?? []), ...(sense.field ?? []), ...(sense.dialect ?? [])] }

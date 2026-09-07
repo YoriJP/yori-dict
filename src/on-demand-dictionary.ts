@@ -52,6 +52,7 @@ export type SourceEvidence = {
     evidenceId: string;
     partOfSpeech: string[];
     glosses: Array<{ lang: string; text: string }>;
+    appliesTo?: { kanji: string[]; kana: string[] };
     labels?: string[];
     pronunciation?: string;
   }>;
@@ -1202,6 +1203,7 @@ function parseAuthoredEntry(
       if (!knownEvidence.has(evidenceId)) throw new Error("Unknown source evidence");
       usedEvidence.add(evidenceId);
     }
+    const appliesTo = sourceFormRestrictions(evidenceIds, knownEvidence);
     const glosses = parseGlosses(sense.glosses, lang, [expectedHeadword, value.reading]);
     const misc = requiredStringList(sense.registers);
     const field = requiredStringList(sense.domains);
@@ -1240,7 +1242,7 @@ function parseAuthoredEntry(
     return {
       id: stableId("sense", `${entryId}:${lang}:${index + 1}`),
       position: index + 1,
-      appliesTo: { kanji: ["*"], kana: ["*"] },
+      appliesTo,
       partOfSpeech,
       ...(misc.length ? { misc } : {}),
       ...(field.length ? { field } : {}),
@@ -1274,6 +1276,28 @@ function parseAuthoredEntry(
     ],
     senses
   };
+}
+
+function sourceFormRestrictions(
+  evidenceIds: string[],
+  knownEvidence: Map<string, SourceEvidence["senses"][number]>
+): PublicSense["appliesTo"] {
+  if (evidenceIds.length === 0) return { kanji: ["*"], kana: ["*"] };
+  const restrictions = evidenceIds.map((evidenceId) => knownEvidence.get(evidenceId)?.appliesTo);
+  if (restrictions.every((restriction) => restriction === undefined)) {
+    return { kanji: ["*"], kana: ["*"] };
+  }
+  if (restrictions.some((restriction) => restriction === undefined)) {
+    throw new Error("Source form restrictions were omitted");
+  }
+  const first = restrictions[0]!;
+  if (restrictions.some((restriction) =>
+    !sameStringSet(new Set(restriction!.kanji), new Set(first.kanji))
+    || !sameStringSet(new Set(restriction!.kana), new Set(first.kana))
+  )) {
+    throw new Error("Source senses with different form restrictions cannot be merged");
+  }
+  return { kanji: [...first.kanji], kana: [...first.kana] };
 }
 
 function parseGlosses(value: unknown, lang: ApiLang, circularTerms: string[]): PublicSense["glosses"] {
