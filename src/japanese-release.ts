@@ -12,8 +12,12 @@ import {
 } from "./canonical-store";
 import { visitJapaneseEntries, type JapaneseEntryGroups } from "./db";
 import {
+  assertPublishableJapaneseEvidenceSnapshot,
+  readJapaneseEvidenceSnapshot,
+  type JapaneseEvidenceSnapshot
+} from "./japanese-evidence-snapshot";
+import {
   japaneseCanonicalTables,
-  japaneseSchemaVersion,
   readExplanationCoverageGaps,
   readCoverage,
   type LanguageCoverage
@@ -61,15 +65,16 @@ export async function buildJapaneseRelease(
   if (!(await production.exists())) throw new Error(`Production database does not exist: ${productionPath}`);
   await mkdir(options.outputDirectory, { recursive: true });
 
-  const metadata = readMetadata(productionPath);
-  if (metadata.schemaVersion !== japaneseSchemaVersion) {
-    throw new Error(
-      `Japanese release requires classified schema ${japaneseSchemaVersion}; `
-      + `found ${metadata.schemaVersion ?? "no schemaVersion"}. `
-      + "Run an explicit Japanese rebuild or import before publishing."
-    );
-  }
-  const version = options.version ?? metadata.dictionaryVersion ?? "unknown";
+  const evidenceSnapshot = (() => {
+    const metadataDb = new Database(productionPath, { readonly: true });
+    try {
+      return readJapaneseEvidenceSnapshot(metadataDb);
+    } finally {
+      metadataDb.close();
+    }
+  })();
+  assertPublishableJapaneseEvidenceSnapshot(evidenceSnapshot);
+  const version = options.version ?? evidenceSnapshot.dictDate ?? "unknown";
   const base = `yori-dict-${version}`;
   const artifacts: JapaneseReleaseArtifacts = {
     sqlite: join(options.outputDirectory, `${base}.sqlite`),
@@ -161,13 +166,13 @@ export async function buildJapaneseRelease(
     sqliteBytes: sqliteStats.size,
     gzipBytes: gzipStats.size,
     artifactVersion: version,
-    schemaVersion: metadata.schemaVersion,
-    dictionaryVersion: metadata.dictionaryVersion,
-    jmdictSimplifiedVersion: metadata.jmdictSimplifiedVersion,
+    schemaVersion: evidenceSnapshot.schemaVersion,
+    dictionaryVersion: evidenceSnapshot.dictDate,
+    jmdictSimplifiedVersion: evidenceSnapshot.jmdictSimplifiedVersion,
     entries,
     coverage,
     coverageGaps: coverageGaps.summary,
-    sources: japaneseSources(metadata)
+    sources: japaneseSources(evidenceSnapshot)
   }, null, 2)}\n`);
   return artifacts;
 }
@@ -201,23 +206,6 @@ function releaseSense(sense: PublicSense, lang: ApiLang) {
 
 
 
-function readMetadata(path: string) {
-  const db = new Database(path, { readonly: true });
-  const value = (key: string) => db.query<{ value: string }, [string]>(
-    "select value from ja_metadata where key = ?"
-  ).get(key)?.value ?? null;
-  try {
-    return {
-      schemaVersion: value("schemaVersion"),
-      dictionaryVersion: value("dictDate"),
-      jmdictSimplifiedVersion: value("jmdictSimplifiedVersion")
-    };
-  } finally {
-    db.close();
-  }
-}
-
-
 /**
  * Every source records the version the release was actually built from. A
  * version the rebuild does not pin is omitted rather than described in prose,
@@ -240,12 +228,12 @@ export function senseAppliesTo(sense: PublicSense, headword: PublicHeadword): bo
     && (headword.reading === null || allows(sense.appliesTo.kana, headword.reading));
 }
 
-function japaneseSources(metadata: { jmdictSimplifiedVersion: string | null; dictionaryVersion: string | null }) {
+function japaneseSources(metadata: JapaneseEvidenceSnapshot) {
   return [
     {
       name: "JMdict",
       ...(metadata.jmdictSimplifiedVersion ? { version: metadata.jmdictSimplifiedVersion } : {}),
-      ...(metadata.dictionaryVersion ? { dictDate: metadata.dictionaryVersion } : {}),
+      ...(metadata.dictDate ? { dictDate: metadata.dictDate } : {}),
       license: "CC-BY-SA-4.0",
       url: "https://www.edrdg.org/wiki/index.php/JMdict-EDICT_Dictionary_Project"
     },

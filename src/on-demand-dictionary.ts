@@ -3,9 +3,15 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { findPrcTerms } from "../scripts/taiwan-terminology";
 import { deinflect } from "./deinflect";
 import { resolveEnglishLemma } from "./english-strip";
+import {
+  JapaneseEvidenceSnapshotChangedError,
+  type JapaneseEvidenceSnapshot
+} from "./japanese-evidence-snapshot";
 import type { ApiLang, InflectionStep, PublicExample, PublicLookupItem, PublicSense } from "./types";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./english-types";
 import type { LookupDictionary } from "./lookup-contract";
+
+export { JapaneseEvidenceSnapshotChangedError };
 
 /**
  * Enrichment targets the same headword dictionaries lookup names, so the two
@@ -157,18 +163,9 @@ export type ExplanationCoverageDecision =
       kind: "proven-partial";
       missingEvidenceIds: string[];
       sourceEvidence: SourceEvidence[];
-      sourceVersion: string;
+      evidenceSnapshot: JapaneseEvidenceSnapshot;
     }
   | { kind: "not-proven-partial" };
-
-export class JapaneseEvidenceSnapshotChangedError extends Error {
-  constructor(expectedSourceVersion: string, currentSourceVersion: string) {
-    super(
-      `Japanese Evidence inventory changed from ${expectedSourceVersion} to ${currentSourceVersion}`
-    );
-    this.name = "JapaneseEvidenceSnapshotChangedError";
-  }
-}
 
 /**
  * Japanese enrichment persistence is scoped to one explanation language.
@@ -186,7 +183,7 @@ export type EnrichmentRepository = {
     entry: PublicLookupItem,
     lang: ApiLang,
     generation?: GenerationProvenance,
-    expectedSourceVersion?: string
+    expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
   ): void;
   saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
@@ -532,7 +529,7 @@ function repairPartialGroup(
         options,
         current.word,
         coverage.sourceEvidence,
-        coverage.sourceVersion
+        coverage.evidenceSnapshot
       ) ?? current;
     } catch (error) {
       if (error instanceof JapaneseEvidenceSnapshotChangedError) {
@@ -781,7 +778,7 @@ async function authorEntry(
   options: RuntimeOptions,
   headword: string,
   evidence: SourceEvidence[],
-  expectedSourceVersion?: string
+  expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
 ): Promise<PublicLookupItem | null> {
   // An entry shares one identity across explanation languages. When the
   // dictionary already knows this headword, the authored group joins that
@@ -836,7 +833,7 @@ async function authorEntry(
     entry,
     request.lang,
     acceptedGeneration(authored.attempt),
-    expectedSourceVersion
+    expectedEvidenceSnapshot
   );
   // Read the group back so an authored language group on an existing entry
   // answers with that entry's own identity, written forms, and source facts

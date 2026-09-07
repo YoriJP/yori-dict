@@ -5,6 +5,11 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { downloadPinnedDataRelease } from "../scripts/download-data-release";
 import { createEnglishSchema } from "./english-schema";
+import {
+  assertJapaneseEvidenceSnapshotCurrent,
+  readJapaneseEvidenceSnapshot,
+  sameJapaneseEvidenceSnapshot
+} from "./japanese-evidence-snapshot";
 import { createJapaneseSchema } from "./japanese-schema";
 
 const migrationsFolder = resolve(import.meta.dir, "../drizzle");
@@ -184,31 +189,13 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
   production.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
   createJapaneseSchema(production);
   const source = new Database(releasePath, { readonly: true });
-  const incomingVersion = source.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'dictDate'"
-  ).get()?.value;
-  const incomingSchemaVersion = source.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'schemaVersion'"
-  ).get()?.value;
-  const incomingEvidenceVersion = source.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
-  ).get()?.value;
+  const incomingSnapshot = readJapaneseEvidenceSnapshot(source);
   source.close();
-  if (!incomingVersion) throw new Error(`Japanese release has no dictDate: ${releasePath}`);
-  const currentVersion = production.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'dictDate'"
-  ).get()?.value;
-  const currentSchemaVersion = production.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'schemaVersion'"
-  ).get()?.value;
-  const currentEvidenceVersion = production.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
-  ).get()?.value;
-  if (
-    currentVersion === incomingVersion
-    && currentSchemaVersion === incomingSchemaVersion
-    && currentEvidenceVersion === incomingEvidenceVersion
-  ) {
+  if (!incomingSnapshot.dictDate) {
+    throw new Error(`Japanese release has no dictDate: ${releasePath}`);
+  }
+  const currentSnapshot = readJapaneseEvidenceSnapshot(production);
+  if (sameJapaneseEvidenceSnapshot(currentSnapshot, incomingSnapshot)) {
     production.close();
     return false;
   }
@@ -494,14 +481,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           drop table retained_ja_examples;
         `);
       }).immediate();
-      const installedVersion = production.query<{ value: string }, []>(
-        "select value from ja_metadata where key = 'dictDate'"
-      ).get()?.value;
-      if (installedVersion !== incomingVersion) {
-        throw new Error(
-          `Japanese release graft did not install ${incomingVersion}: found ${installedVersion ?? "no version"}`
-        );
-      }
+      assertJapaneseEvidenceSnapshotCurrent(production, incomingSnapshot);
     } finally {
       production.exec("detach database japanese_release");
     }
@@ -629,7 +609,7 @@ function hasJapaneseDictionary(path: string): boolean {
   if (!existsSync(path)) return false;
   const db = new Database(path, { readonly: true });
   try {
-    return Boolean(db.query<{ value: string }, []>("select value from ja_metadata where key = 'dictDate'").get()?.value);
+    return Boolean(readJapaneseEvidenceSnapshot(db).dictDate);
   } catch {
     return false;
   } finally {

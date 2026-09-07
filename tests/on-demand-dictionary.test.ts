@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import {
   createJapaneseOnDemandDictionary,
   createModelCallGate,
-  JapaneseEvidenceSnapshotChangedError,
   sameTierBackoffMs,
   type EnrichmentRepository,
   type ExplanationCoverageDecision,
@@ -14,7 +13,17 @@ import {
   type ResolveRequest,
   type SourceEvidence
 } from "../src/on-demand-dictionary";
+import {
+  JapaneseEvidenceSnapshotChangedError,
+  type JapaneseEvidenceSnapshot
+} from "../src/japanese-evidence-snapshot";
 import type { PublicLookupItem } from "../src/types";
+
+const fixtureEvidenceSnapshot: JapaneseEvidenceSnapshot = {
+  schemaVersion: "ja-3",
+  dictDate: "fixture-date",
+  jmdictSimplifiedVersion: "fixture-v1"
+};
 
 test("resolve returns a released entry without calling a model", async () => {
   const released = existingEntry();
@@ -96,7 +105,7 @@ test("authorized lookup replaces a proven-partial Explanation Group from complet
     coverage: [[`${partial.id}:zh-tw`, {
       kind: "proven-partial",
       missingEvidenceIds: ["jmdict:1410750:2"],
-      sourceVersion: "fixture-v1",
+      evidenceSnapshot: fixtureEvidenceSnapshot,
       sourceEvidence
     }]]
   });
@@ -125,7 +134,7 @@ test("authorized lookup replaces a proven-partial Explanation Group from complet
 
   expect(repaired?.senses[0]?.evidenceIds).toEqual(["jmdict:1410750:1", "jmdict:1410750:2"]);
   expect(concurrent).toEqual(repaired);
-  expect(repository.savedSourceVersions).toEqual(["fixture-v1"]);
+  expect(repository.savedEvidenceSnapshots).toEqual([fixtureEvidenceSnapshot]);
   expect(readAgain).toEqual(repaired);
   expect(gateway.calls.map(({ role }) => role)).toEqual([
     "entry-author", "entry-review", "example-author", "example-review"
@@ -163,7 +172,7 @@ test("recoverable partial-group repair failures preserve the original group and 
     const decision: ExplanationCoverageDecision = {
       kind: "proven-partial",
       missingEvidenceIds: ["jmdict:1206730:2"],
-      sourceVersion: "fixture-v1",
+      evidenceSnapshot: fixtureEvidenceSnapshot,
       sourceEvidence: evidence
     };
     const repository = new MemoryRepository({
@@ -196,7 +205,7 @@ test("a storage failure during partial-group replacement remains fatal", async (
     coverage: [[`${original.id}:en`, {
       kind: "proven-partial",
       missingEvidenceIds: ["jmdict:1206730:2"],
-      sourceVersion: "fixture-v1",
+      evidenceSnapshot: fixtureEvidenceSnapshot,
       sourceEvidence
     }]],
     saveError: new Error("disk full")
@@ -232,10 +241,13 @@ test("an Evidence inventory refresh makes an in-flight repair safely retryable",
     coverage: [[`${original.id}:en`, {
       kind: "proven-partial",
       missingEvidenceIds: ["jmdict:1206730:2"],
-      sourceVersion: "fixture-v1",
+      evidenceSnapshot: fixtureEvidenceSnapshot,
       sourceEvidence
     }]],
-    saveError: new JapaneseEvidenceSnapshotChangedError("fixture-v1", "fixture-v2")
+    saveError: new JapaneseEvidenceSnapshotChangedError(
+      fixtureEvidenceSnapshot,
+      { ...fixtureEvidenceSnapshot, jmdictSimplifiedVersion: "fixture-v2" }
+    )
   });
   const gateway = new ScriptedGateway([
     authoredEntry({
@@ -253,7 +265,7 @@ test("an Evidence inventory refresh makes an in-flight repair safely retryable",
 
   expect(result).toEqual(original);
   expect(repository.entries.size).toBe(0);
-  expect(repository.savedSourceVersions).toEqual(["fixture-v1"]);
+  expect(repository.savedEvidenceSnapshots).toEqual([fixtureEvidenceSnapshot]);
 });
 
 test("one accepting review cannot persist an example when unanimous review is required", async () => {
@@ -1396,7 +1408,7 @@ function exampleFor(headword: string, translation?: string): string {
 class MemoryRepository implements EnrichmentRepository {
   readonly lookups: Array<[string, string]> = [];
   readonly attempts: unknown[] = [];
-  readonly savedSourceVersions: Array<string | undefined> = [];
+  readonly savedEvidenceSnapshots: Array<JapaneseEvidenceSnapshot | undefined> = [];
   readonly entries = new Map<string, PublicLookupItem>();
   readonly examples = new Map<string, PublicLookupItem["senses"][number]["examples"]>();
   private readonly released: Map<string, PublicLookupItem>;
@@ -1460,9 +1472,9 @@ class MemoryRepository implements EnrichmentRepository {
     entry: PublicLookupItem,
     lang = "en",
     _generation?: unknown,
-    expectedSourceVersion?: string
+    expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
   ) {
-    this.savedSourceVersions.push(expectedSourceVersion);
+    this.savedEvidenceSnapshots.push(expectedEvidenceSnapshot);
     if (this.saveError) throw this.saveError;
     this.entries.set(entry.word, entry);
     this.coverage.delete(`${entry.id}:${lang}`);

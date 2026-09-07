@@ -4,6 +4,10 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rename } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+  readJapaneseEvidenceSnapshot,
+  writeJapaneseEvidenceSnapshot
+} from "./japanese-evidence-snapshot";
+import {
   createJapaneseSchema,
   hasJapaneseSchema,
   japaneseSchemaVersion,
@@ -179,10 +183,12 @@ async function buildInto(
 }
 
 function writeMetadata(db: Database, source: JmdictFile): void {
+  writeJapaneseEvidenceSnapshot(db, {
+    schemaVersion: japaneseSchemaVersion,
+    dictDate: source.dictDate ?? null,
+    jmdictSimplifiedVersion: source.version ?? null
+  });
   const insert = db.prepare("insert or replace into ja_metadata (key, value) values (?, ?)");
-  insert.run("schemaVersion", japaneseSchemaVersion);
-  if (source.version) insert.run("jmdictSimplifiedVersion", source.version);
-  if (source.dictDate) insert.run("dictDate", source.dictDate);
   if (source.languages) insert.run("sourceLanguages", JSON.stringify(source.languages));
   if (source.tags) insert.run("tags", JSON.stringify(source.tags));
 }
@@ -855,9 +861,7 @@ function versionRetainedSenses(
 }
 
 function readSourceVersion(db: Database): string {
-  return db.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
-  ).get()?.value ?? "unknown";
+  return readJapaneseEvidenceSnapshot(db).jmdictSimplifiedVersion ?? "unknown";
 }
 
 function evidenceKey(evidenceId: string, sourceVersion: string): string {

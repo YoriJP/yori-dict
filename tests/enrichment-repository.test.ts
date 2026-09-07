@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { openEnrichmentRepository } from "../src/enrichment-repository";
 import { createEnglishSchema } from "../src/english-schema";
+import { readJapaneseEvidenceSnapshot } from "../src/japanese-evidence-snapshot";
 import { importLegacyOverlays } from "../src/legacy-overlay-import";
 import { openLookupDb } from "../src/db";
 import { importJapaneseRelease, migrateProductionDatabase } from "../src/production-database";
@@ -343,9 +344,8 @@ test("a Japanese repair cannot clear gaps from a newer Evidence inventory", asyn
   repository.saveEntry(partial, "zh-tw", generation);
 
   const before = new Database(path);
-  const oldVersion = before.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
-  ).get()!.value;
+  const oldSnapshot = readJapaneseEvidenceSnapshot(before);
+  const oldVersion = oldSnapshot.jmdictSimplifiedVersion!;
   before.prepare(`
     insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
     values ('yori:s_jmdict_1206730_1:en', 2, ?, 'jmdict')
@@ -357,7 +357,7 @@ test("a Japanese repair cannot clear gaps from a newer Evidence inventory", asyn
   `).run(entryId, secondEvidence, oldVersion);
   before.close();
   const decision = repository.coverageDecision(entryId, "zh-tw");
-  expect(decision).toMatchObject({ kind: "proven-partial", sourceVersion: oldVersion });
+  expect(decision).toMatchObject({ kind: "proven-partial", evidenceSnapshot: oldSnapshot });
 
   const nextVersion = `${oldVersion}-next`;
   const refreshed = new Database(path);
@@ -375,8 +375,8 @@ test("a Japanese repair cannot clear gaps from a newer Evidence inventory", asyn
   const repaired = structuredClone(partial);
   repaired.senses[0]!.glosses[0]!.text = "古い Evidence から作った完全な説明";
   repaired.senses[0]!.evidenceIds = [firstEvidence, secondEvidence];
-  expect(() => repository.saveEntry(repaired, "zh-tw", generation, oldVersion))
-    .toThrow("Japanese Evidence inventory changed");
+  expect(() => repository.saveEntry(repaired, "zh-tw", generation, oldSnapshot))
+    .toThrow("Japanese Evidence snapshot changed");
 
   const verified = new Database(path, { readonly: true });
   expect(verified.query<{ text: string }, []>(`
