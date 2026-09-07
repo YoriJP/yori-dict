@@ -393,6 +393,72 @@ test("a Japanese repair cannot clear gaps from a newer Evidence inventory", asyn
   lookup.close();
 });
 
+test("a coverage decision cannot mix gaps with a newer database snapshot", async () => {
+  const path = await productionDatabase();
+  const setup = new Database(path);
+  const oldSnapshot = readJapaneseEvidenceSnapshot(setup);
+  setup.prepare(`
+    insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values ('yori:s_jmdict_1206730_1:en', 2, 'jmdict:1206730:2', 'jmdict')
+  `).run();
+  setup.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (
+      'yori:e_jmdict_1206730',
+      'zh-tw',
+      'jmdict:1206730:2',
+      ?,
+      'accepted-authored-evidence'
+    )
+  `).run(oldSnapshot.jmdictSimplifiedVersion);
+  setup.close();
+
+  const refresh = new Database(path);
+  const originalQuery = Database.prototype.query;
+  let refreshed = false;
+  Database.prototype.query = function (this: Database, sql: string) {
+    const statement = originalQuery.call(this, sql);
+    if (!sql.includes("select gap.missing_evidence_id")) return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property !== "all") return Reflect.get(target, property, target);
+        return (...parameters: unknown[]) => {
+          const rows = (target.all as (...args: unknown[]) => unknown[])(...parameters);
+          if (!refreshed) {
+            refreshed = true;
+            refresh.transaction(() => {
+              refresh.prepare("update ja_metadata set value = 'new-date' where key = 'dictDate'")
+                .run();
+              refresh.prepare(`
+                delete from ja_explanation_group_gaps
+                 where entry_id = 'yori:e_jmdict_1206730' and lang = 'zh-tw'
+              `).run();
+            })();
+          }
+          return rows;
+        };
+      }
+    });
+  } as typeof Database.prototype.query;
+
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  try {
+    const decision = repository.coverageDecision("yori:e_jmdict_1206730", "zh-tw");
+    expect(decision).toMatchObject({
+      kind: "proven-partial",
+      evidenceSnapshot: oldSnapshot
+    });
+    expect(readJapaneseEvidenceSnapshot(refresh).dictDate).toBe("new-date");
+  } finally {
+    Database.prototype.query = originalQuery;
+    repository.close();
+    lookup.close();
+    refresh.close();
+  }
+});
+
 test("a production import keeps an accepted repair over proven-partial release content", async () => {
   const path = await productionDatabase();
   const entryId = "yori:e_jmdict_1206730";
