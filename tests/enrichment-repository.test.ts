@@ -250,6 +250,41 @@ test("a Japanese source refresh preserves accepted generated content", async () 
   gaps.close();
 });
 
+test("a Japanese source refresh imports a new Evidence inventory for the same dictionary date", async () => {
+  const path = await productionDatabase();
+  const current = new Database(path, { readonly: true });
+  const dictDate = current.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'dictDate'"
+  ).get()!.value;
+  current.close();
+
+  const next = await productionDatabase();
+  const release = new Database(next);
+  release.prepare("update ja_metadata set value = ? where key = 'dictDate'").run(dictDate);
+  release.prepare(
+    "update ja_metadata set value = 'fixture-v2' where key = 'jmdictSimplifiedVersion'"
+  ).run();
+  release.prepare("update ja_senses set source_version = 'fixture-v2' where provenance = 'source'")
+    .run();
+  release.prepare("update ja_glosses set text = 'school from refreshed Evidence inventory' where sense_id = 'yori:s_jmdict_1206730_1:en'")
+    .run();
+  release.close();
+
+  expect(importJapaneseRelease(path, next)).toBe(true);
+
+  const refreshed = new Database(path, { readonly: true });
+  expect(refreshed.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
+  ).get()?.value).toBe("fixture-v2");
+  expect(refreshed.query<{ source_version: string }, []>(
+    "select source_version from ja_senses where id = 'yori:s_jmdict_1206730_1:en'"
+  ).get()?.source_version).toBe("fixture-v2");
+  expect(refreshed.query<{ text: string }, []>(
+    "select text from ja_glosses where sense_id = 'yori:s_jmdict_1206730_1:en'"
+  ).get()?.text).toBe("school from refreshed Evidence inventory");
+  refreshed.close();
+});
+
 test("an open repository stamps repairs with the source version imported at runtime", async () => {
   const path = await productionDatabase();
   const lookup = openLookupDb(path);

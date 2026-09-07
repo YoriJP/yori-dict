@@ -190,6 +190,9 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
   const incomingSchemaVersion = source.query<{ value: string }, []>(
     "select value from ja_metadata where key = 'schemaVersion'"
   ).get()?.value;
+  const incomingEvidenceVersion = source.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
+  ).get()?.value;
   source.close();
   if (!incomingVersion) throw new Error(`Japanese release has no dictDate: ${releasePath}`);
   const currentVersion = production.query<{ value: string }, []>(
@@ -198,7 +201,14 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
   const currentSchemaVersion = production.query<{ value: string }, []>(
     "select value from ja_metadata where key = 'schemaVersion'"
   ).get()?.value;
-  if (currentVersion === incomingVersion && currentSchemaVersion === incomingSchemaVersion) {
+  const currentEvidenceVersion = production.query<{ value: string }, []>(
+    "select value from ja_metadata where key = 'jmdictSimplifiedVersion'"
+  ).get()?.value;
+  if (
+    currentVersion === incomingVersion
+    && currentSchemaVersion === incomingSchemaVersion
+    && currentEvidenceVersion === incomingEvidenceVersion
+  ) {
     production.close();
     return false;
   }
