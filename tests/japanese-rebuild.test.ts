@@ -165,6 +165,51 @@ test("a rebuild records the exact source Evidence missing from a retained langua
   });
 });
 
+test("a rebuild recovers legacy source_ref Evidence after a structure-only migration", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-migrated-evidence-"));
+  const input = join(root, "jmdict.json");
+  const glossPath = join(root, "zh-tw.jsonl");
+  const out = join(root, "yori.sqlite");
+  const sense = (text: string) => ({
+    partOfSpeech: ["n"], appliesToKanji: ["*"], appliesToKana: ["*"],
+    related: [], antonym: [], field: [], dialect: [], misc: [], info: [], languageSource: [],
+    gloss: [{ lang: "eng", gender: null, type: null, text }]
+  });
+  await writeFile(input, JSON.stringify({
+    version: "fixture-v1",
+    dictDate: "fixture-v1",
+    words: [{
+      id: "1410750",
+      kanji: [{ text: "様", common: true, tags: [] }],
+      kana: [{ text: "さま", common: true, tags: [], appliesToKanji: ["*"] }],
+      sense: [sense("appearance"), sense("manner")]
+    }]
+  }));
+  await writeFile(glossPath, JSON.stringify({
+    senseId: "yori:s_jmdict_1410750_1", lang: "zh-tw", glosses: ["舊的部分解釋"]
+  }));
+  await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  migrateProductionDatabase(out);
+
+  const migrated = new Database(out);
+  migrated.prepare(`
+    delete from ja_sense_evidence
+     where sense_id = 'yori:s_jmdict_1410750_1:zh-tw'
+  `).run();
+  migrated.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  migrated.close();
+
+  const result = await rebuildJapaneseDictionary({ input, aiGlosses: [glossPath], out });
+  expect(result.coverageGaps.details.map((gap) => gap.missingEvidenceId)).toEqual([
+    "jmdict:1410750:2"
+  ]);
+  const rebuilt = openLookupDb(out);
+  expect(rebuilt.lookup("様", "zh-tw").item?.senses[0]?.evidenceIds).toEqual([
+    "jmdict:1410750:1"
+  ]);
+  rebuilt.close();
+});
+
 test("a rebuild retains accepted generated content and does not reorder imported senses", async () => {
   const out = join(mkdtempSync(join(tmpdir(), "yori-ja-retain-")), "yori.sqlite");
   await rebuildJapaneseDictionary({ input: "fixtures/jmdict-sample.json", out });

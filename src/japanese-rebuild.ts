@@ -7,6 +7,7 @@ import {
   createJapaneseSchema,
   hasJapaneseSchema,
   japaneseSchemaVersion,
+  normalizeJapaneseEvidenceId,
   readExplanationCoverageGaps,
   readCoverage,
   type ExplanationCoverageGapReport,
@@ -785,15 +786,16 @@ function readEvidenceRows(
   return senses.flatMap((sense) => {
     const senseId = String(sense.id);
     if (hasEvidenceTable) {
-      return db.query<Record<string, unknown>, [string]>(
+      const evidence = db.query<Record<string, unknown>, [string]>(
         "select * from ja_sense_evidence where sense_id = ? order by position"
       ).all(senseId);
+      if (evidence.length > 0) return evidence;
     }
     const evidenceId = sense.source_ref;
     return typeof evidenceId === "string" ? [{
       sense_id: senseId,
       position: 1,
-      evidence_id: evidenceId,
+      evidence_id: normalizeJapaneseEvidenceId(evidenceId),
       source_name: typeof sense.source_name === "string" ? sense.source_name : "source"
     }] : [];
   });

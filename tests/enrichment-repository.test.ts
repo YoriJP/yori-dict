@@ -367,6 +367,119 @@ test("a production import keeps an accepted repair over proven-partial release c
   englishDb.close();
 });
 
+test("a production import recovers retained legacy source_ref Evidence before replacement", async () => {
+  const path = await productionDatabase();
+  const entryId = "yori:e_jmdict_1206730";
+  const sourceSenseId = "yori:s_jmdict_1206730_1:en";
+  const targetSenseId = "yori:s_migrated_school:zh-tw:1";
+  const firstEvidence = "jmdict:1206730:1";
+  const secondEvidence = "jmdict:1206730:2";
+  const production = new Database(path);
+  production.prepare(`
+    insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values (?, 2, ?, 'jmdict')
+  `).run(sourceSenseId, secondEvidence);
+  const source = production.query<Record<string, unknown>, [string]>(
+    "select * from ja_senses where id = ?"
+  ).get(sourceSenseId)!;
+  production.prepare(`
+    insert into ja_generations
+      (id, model, provider, reasoning_effort, prompt_version, service_tier, review_outcome, created_at)
+    values ('legacy:migrated', 'legacy', 'unrecorded', 'unrecorded', 'legacy', null, 'accepted', 'legacy')
+  `).run();
+  const retained: Record<string, unknown> = {
+    ...source,
+    id: targetSenseId,
+    lang: "zh-tw",
+    provenance: "generated",
+    source_name: "yori-legacy",
+    source_ref: "yori:s_jmdict_1206730_1",
+    generation_id: "legacy:migrated"
+  };
+  const retainedColumns = Object.keys(retained);
+  production.prepare(
+    `insert into ja_senses (${retainedColumns.join(", ")}) values (${retainedColumns.map(() => "?").join(", ")})`
+  ).run(...retainedColumns.map((column) => retained[column] as never));
+  production.prepare(
+    "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, '保留的舊解釋', 'generated', 'checked')"
+  ).run(targetSenseId);
+  production.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  production.close();
+
+  const next = join(mkdtempSync(join(tmpdir(), "yori-migrated-partial-release-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${next}`.quiet();
+  const release = new Database(next);
+  release.prepare(`
+    insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values (?, 2, ?, 'jmdict')
+  `).run(sourceSenseId, secondEvidence);
+  const incomingSenseId = "yori:s_jmdict_1206730_1:zh-tw";
+  const incoming: Record<string, unknown> = {
+    ...source,
+    id: incomingSenseId,
+    lang: "zh-tw",
+    provenance: "generated",
+    source_name: "yori-legacy",
+    source_ref: "yori:s_jmdict_1206730_1",
+    generation_id: "legacy:release"
+  };
+  release.prepare(`
+    insert into ja_generations
+      (id, model, provider, reasoning_effort, prompt_version, service_tier, review_outcome, created_at)
+    values ('legacy:release', 'legacy', 'unrecorded', 'unrecorded', 'legacy', null, 'accepted', 'legacy')
+  `).run();
+  const incomingColumns = Object.keys(incoming);
+  release.prepare(
+    `insert into ja_senses (${incomingColumns.join(", ")}) values (${incomingColumns.map(() => "?").join(", ")})`
+  ).run(...incomingColumns.map((column) => incoming[column] as never));
+  release.prepare(
+    "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, '發布的部分解釋', 'generated', 'checked')"
+  ).run(incomingSenseId);
+  release.prepare(`
+    insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values (?, 1, ?, 'yori-legacy')
+  `).run(incomingSenseId, firstEvidence);
+  release.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, 'zh-tw', ?, 'next', 'legacy-exact-sense-mapping')
+  `).run(entryId, secondEvidence);
+  release.prepare("update ja_metadata set value = 'next' where key = 'dictDate'").run();
+  release.close();
+
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const imported = openLookupDb(path);
+  expect(imported.lookup("学校", "zh-tw").item?.senses[0]?.glosses[0]?.text).toBe("保留的舊解釋");
+  expect(imported.lookup("学校", "zh-tw").item?.senses[0]?.evidenceIds).toEqual([firstEvidence]);
+  imported.close();
+  const verified = new Database(path, { readonly: true });
+  expect(verified.query<{ missing_evidence_id: string }, [string]>(`
+    select missing_evidence_id from ja_explanation_group_gaps
+     where entry_id = ? and lang = 'zh-tw'
+  `).all(entryId)).toEqual([{ missing_evidence_id: secondEvidence }]);
+  verified.close();
+
+  // A retained group with neither normalized Evidence nor a legacy reference
+  // cannot prove coverage, so it must not displace the release's mapped group.
+  const evidenceFree = new Database(path);
+  evidenceFree.prepare("delete from ja_sense_evidence where sense_id = ?").run(targetSenseId);
+  evidenceFree.prepare("update ja_senses set source_ref = null where id = ?").run(targetSenseId);
+  evidenceFree.close();
+  const secondRelease = new Database(next);
+  secondRelease.prepare("update ja_metadata set value = 'next-2' where key = 'dictDate'").run();
+  secondRelease.prepare("update ja_glosses set text = '發布的可追溯解釋' where sense_id = ?")
+    .run(incomingSenseId);
+  secondRelease.close();
+
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const authoritative = openLookupDb(path);
+  expect(authoritative.lookup("学校", "zh-tw").item?.senses[0]?.glosses[0]?.text)
+    .toBe("發布的可追溯解釋");
+  expect(authoritative.lookup("学校", "zh-tw").item?.senses[0]?.evidenceIds)
+    .toEqual([firstEvidence]);
+  authoritative.close();
+});
+
 test("a failed Japanese production import rolls back the existing dictionary", async () => {
   const path = await productionDatabase();
   const before = new Database(path, { readonly: true });

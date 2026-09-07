@@ -249,6 +249,27 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           create temp table retained_ja_evidence as
             select evidence.* from ja_sense_evidence evidence
             where evidence.sense_id in (select id from retained_ja_senses);
+          -- A structure-only ja-3 migration leaves this table empty for
+          -- pre-existing ja-2 senses. Recover each exact legacy reference here,
+          -- during the explicit content import, and normalize it to Evidence ID.
+          insert or ignore into retained_ja_evidence
+            (sense_id, position, evidence_id, source_name)
+            select retained.id, 1,
+                   case
+                     when retained.source_ref like 'yori:s_jmdict_%'
+                       then 'jmdict:' || replace(
+                         substr(retained.source_ref, length('yori:s_jmdict_') + 1),
+                         '_', ':'
+                       )
+                     else retained.source_ref
+                   end,
+                   coalesce(retained.source_name, 'source')
+              from retained_ja_senses retained
+             where retained.source_ref is not null
+               and not exists (
+                 select 1 from retained_ja_evidence evidence
+                  where evidence.sense_id = retained.id
+               );
           create temp table retained_ja_examples as
             select example.* from ja_examples example
             join ja_senses sense on sense.id = example.sense_id
@@ -304,7 +325,14 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
             select distinct retained.entry_id as entry_id, retained.lang as lang
               from retained_ja_senses retained
               join ja_explanation_group_gaps gap
-                on gap.entry_id = retained.entry_id and gap.lang = retained.lang;
+                on gap.entry_id = retained.entry_id and gap.lang = retained.lang
+             where exists (
+               select 1 from retained_ja_senses retained_sense
+                 join retained_ja_evidence retained_evidence
+                   on retained_evidence.sense_id = retained_sense.id
+                where retained_sense.entry_id = retained.entry_id
+                  and retained_sense.lang = retained.lang
+             );
           delete from ja_examples where sense_id in (
             select sense.id from ja_senses sense join retained_ja_replacements replacement
               on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang

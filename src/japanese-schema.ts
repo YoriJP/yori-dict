@@ -16,6 +16,12 @@ export type CoverageGapDerivationBasis =
   | "legacy-exact-sense-mapping"
   | "accepted-authored-evidence";
 
+/** Converts the pre-ja-3 JMdict Sense reference into canonical Evidence identity. */
+export function normalizeJapaneseEvidenceId(sourceRef: string): string {
+  const legacy = /^yori:s_jmdict_(\d+)_(\d+)$/.exec(sourceRef);
+  return legacy ? `jmdict:${legacy[1]}:${legacy[2]}` : sourceRef;
+}
+
 export type ExplanationCoverageGapReport = {
   summary: Record<string, { groups: number; missingEvidenceIds: number }>;
   details: ExplanationCoverageGap[];
