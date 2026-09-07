@@ -82,6 +82,21 @@ test("the Japanese release publishes sibling language groups, per-language packs
   released.close();
 });
 
+test("a Japanese release refuses an unclassified migrated database", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-unclassified-release-"));
+  const path = join(root, "production.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  migrateProductionDatabase(path);
+  const migrated = new Database(path);
+  migrated.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  migrated.close();
+
+  await expect(buildJapaneseRelease(path, {
+    outputDirectory: join(root, "release"),
+    version: "test"
+  })).rejects.toThrow("ja-2");
+});
+
 test("no release artifact mixes explanation languages", async () => {
   const { artifacts } = await release();
   const released = new Database(artifacts.sqlite, { readonly: true });

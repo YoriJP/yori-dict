@@ -62,6 +62,13 @@ export async function buildJapaneseRelease(
   await mkdir(options.outputDirectory, { recursive: true });
 
   const metadata = readMetadata(productionPath);
+  if (metadata.schemaVersion !== japaneseSchemaVersion) {
+    throw new Error(
+      `Japanese release requires classified schema ${japaneseSchemaVersion}; `
+      + `found ${metadata.schemaVersion ?? "no schemaVersion"}. `
+      + "Run an explicit Japanese rebuild or import before publishing."
+    );
+  }
   const version = options.version ?? metadata.dictionaryVersion ?? "unknown";
   const base = `yori-dict-${version}`;
   const artifacts: JapaneseReleaseArtifacts = {
@@ -154,7 +161,7 @@ export async function buildJapaneseRelease(
     sqliteBytes: sqliteStats.size,
     gzipBytes: gzipStats.size,
     artifactVersion: version,
-    schemaVersion: japaneseSchemaVersion,
+    schemaVersion: metadata.schemaVersion,
     dictionaryVersion: metadata.dictionaryVersion,
     jmdictSimplifiedVersion: metadata.jmdictSimplifiedVersion,
     entries,
@@ -201,6 +208,7 @@ function readMetadata(path: string) {
   ).get(key)?.value ?? null;
   try {
     return {
+      schemaVersion: value("schemaVersion"),
       dictionaryVersion: value("dictDate"),
       jmdictSimplifiedVersion: value("jmdictSimplifiedVersion")
     };

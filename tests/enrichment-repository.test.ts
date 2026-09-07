@@ -210,6 +210,16 @@ test("a Japanese source refresh preserves accepted generated content", async () 
       evidenceIds: []
     }]
   }, "zh-tw", generation);
+  repository.saveEntry({
+    ...imported,
+    senses: [{
+      ...imported.senses[0]!,
+      id: "yori:s_unrelated_school:ko:1",
+      glosses: [{ lang: "ko", text: "학교", source: "generated", reviewStatus: "checked" }],
+      provenance: "source",
+      evidenceIds: ["japanese-wordnet:01930874-v"]
+    }]
+  }, "ko", generation);
   repository.saveExample(imported.senses[0].id, example, generation);
   repository.close();
   lookup.close();
@@ -230,7 +240,14 @@ test("a Japanese source refresh preserves accepted generated content", async () 
   expect(taiwanese?.id).toBe(refreshedLookup.lookup("学校", "en").item?.id);
   expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
   expect(taiwanese?.senses[0].provenance).toBe("generated");
+  expect(refreshedLookup.lookup("学校", "ko").item?.senses[0].glosses[0].text).toBe("학교");
   refreshedLookup.close();
+  const gaps = new Database(path, { readonly: true });
+  expect(gaps.query<{ count: number }, []>(`
+    select count(*) as count from ja_explanation_group_gaps
+     where entry_id = 'yori:e_jmdict_1206730' and lang = 'ko'
+  `).get()?.count).toBe(0);
+  gaps.close();
 });
 
 test("an open repository stamps repairs with the source version imported at runtime", async () => {
@@ -421,6 +438,35 @@ test("a production import keeps an accepted repair over proven-partial release c
   expect(authoritative.lookup("学校", "zh-tw").item?.senses.map((sense) => sense.glosses[0]?.text))
     .toEqual(["完整發布解釋一", "完整發布解釋二", "完整發布解釋三"]);
   authoritative.close();
+
+  const poorerRetained = new Database(path);
+  for (const position of [2, 3]) {
+    const senseId = `yori:s_jmdict_1206730_${position}:zh-tw`;
+    poorerRetained.prepare("delete from ja_sense_evidence where sense_id = ?").run(senseId);
+    poorerRetained.prepare("delete from ja_glosses where sense_id = ?").run(senseId);
+    poorerRetained.prepare("delete from ja_senses where id = ?").run(senseId);
+  }
+  poorerRetained.close();
+
+  const richerPartial = new Database(next);
+  richerPartial.prepare("update ja_senses set source_version = 'fixture-v2'").run();
+  const thirdSenseId = "yori:s_jmdict_1206730_3:zh-tw";
+  richerPartial.prepare("delete from ja_sense_evidence where sense_id = ?").run(thirdSenseId);
+  richerPartial.prepare("delete from ja_glosses where sense_id = ?").run(thirdSenseId);
+  richerPartial.prepare("delete from ja_senses where id = ?").run(thirdSenseId);
+  richerPartial.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, 'zh-tw', ?, 'fixture-v2', 'legacy-exact-sense-mapping')
+  `).run(entryId, thirdEvidence);
+  richerPartial.prepare("update ja_metadata set value = 'richer-partial' where key = 'dictDate'").run();
+  richerPartial.close();
+
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const richer = openLookupDb(path);
+  expect(richer.lookup("学校", "zh-tw").item?.senses.map((sense) => sense.glosses[0]?.text))
+    .toEqual(["完整發布解釋一", "完整發布解釋二"]);
+  richer.close();
   const englishDb = new Database(path, { readonly: true });
   expect(englishDb.query<{ value: string }, []>(
     "select value from en_metadata where key = 'dictionaryVersion'"

@@ -468,6 +468,10 @@ function deriveExplanationCoverageGaps(db: Database, sourceVersion: string): voi
   `).all();
   for (const group of groups) {
     const { expected, covered } = readEvidenceCoverage(db, group.entry_id, group.lang);
+    const coveredExpected = expected.filter(
+      (evidence) => covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))
+    );
+    if (coveredExpected.length === 0) continue;
     const legacy = db.query<{ found: number }, [string, string]>(`
       select 1 as found from ja_senses
        where entry_id = ? and lang = ? and generation_id like 'legacy:%'
@@ -719,7 +723,7 @@ function restoreRetained(
       ).get(group.entryId, group.lang);
       if (incoming && (
         !groupHasProvenGap(db, group.entryId, group.lang)
-        || !retainedGroupHasCurrentEvidence(db, group)
+        || !retainedGroupCoversIncoming(db, group)
       )) continue;
       if (incoming) deleteExplanationGroup(db, group.entryId, group.lang);
       for (const generation of group.generations) insertRow(db, "ja_generations", generation, true);
@@ -813,17 +817,30 @@ function readEvidenceRows(
 
 function groupHasProvenGap(db: Database, entryId: string, lang: string): boolean {
   const { expected, covered } = readEvidenceCoverage(db, entryId, lang);
-  return covered.size > 0 && expected.some(
-    (evidence) => !covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))
+  const coveredExpected = expected.filter(
+    (evidence) => covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))
   );
+  return coveredExpected.length > 0 && coveredExpected.length < expected.length;
 }
 
-function retainedGroupHasCurrentEvidence(db: Database, group: RetainedGroup): boolean {
-  const sourceVersion = readSourceVersion(db);
-  const evidenceSenseIds = new Set(group.evidence.map((evidence) => String(evidence.sense_id)));
-  return group.senses.some(
-    (sense) => evidenceSenseIds.has(String(sense.id)) && sense.source_version === sourceVersion
-  );
+function retainedGroupCoversIncoming(db: Database, group: RetainedGroup): boolean {
+  const { expected, covered: incomingCovered } = readEvidenceCoverage(db, group.entryId, group.lang);
+  const expectedKeys = new Set(expected.map(
+    (evidence) => evidenceKey(evidence.evidenceId, evidence.sourceVersion)
+  ));
+  const senseVersions = new Map(group.senses.map(
+    (sense) => [String(sense.id), typeof sense.source_version === "string" ? sense.source_version : "unknown"]
+  ));
+  const retainedCovered = new Set(group.evidence.flatMap((evidence) => {
+    const sourceVersion = senseVersions.get(String(evidence.sense_id));
+    const evidenceId = evidence.evidence_id;
+    if (!sourceVersion || typeof evidenceId !== "string") return [];
+    const key = evidenceKey(evidenceId, sourceVersion);
+    return expectedKeys.has(key) ? [key] : [];
+  }));
+  const incomingExpected = [...incomingCovered].filter((key) => expectedKeys.has(key));
+  return retainedCovered.size > 0
+    && incomingExpected.every((key) => retainedCovered.has(key));
 }
 
 function versionRetainedSenses(

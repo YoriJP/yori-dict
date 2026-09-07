@@ -340,10 +340,59 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
                select 1 from retained_ja_senses retained_sense
                  join retained_ja_evidence retained_evidence
                    on retained_evidence.sense_id = retained_sense.id
+                 join ja_senses source_sense
+                   on source_sense.entry_id = retained_sense.entry_id
+                  and source_sense.lang = 'en'
+                  and source_sense.provenance = 'source'
+                 join ja_sense_evidence expected
+                   on expected.sense_id = source_sense.id
+                  and expected.evidence_id = retained_evidence.evidence_id
                 where retained_sense.entry_id = retained.entry_id
                   and retained_sense.lang = retained.lang
                   and retained_sense.source_version = gap.source_version
-             );
+                  and source_sense.source_version = gap.source_version
+             )
+               and exists (
+                 select 1 from ja_senses incoming_sense
+                   join ja_sense_evidence incoming_evidence
+                     on incoming_evidence.sense_id = incoming_sense.id
+                   join ja_senses source_sense
+                     on source_sense.entry_id = incoming_sense.entry_id
+                    and source_sense.lang = 'en'
+                    and source_sense.provenance = 'source'
+                   join ja_sense_evidence expected
+                     on expected.sense_id = source_sense.id
+                    and expected.evidence_id = incoming_evidence.evidence_id
+                  where incoming_sense.entry_id = retained.entry_id
+                    and incoming_sense.lang = retained.lang
+                    and incoming_sense.source_version = gap.source_version
+                    and source_sense.source_version = gap.source_version
+               )
+               and not exists (
+                 select 1 from ja_senses incoming_sense
+                   join ja_sense_evidence incoming_evidence
+                     on incoming_evidence.sense_id = incoming_sense.id
+                   join ja_senses source_sense
+                     on source_sense.entry_id = incoming_sense.entry_id
+                    and source_sense.lang = 'en'
+                    and source_sense.provenance = 'source'
+                   join ja_sense_evidence expected
+                     on expected.sense_id = source_sense.id
+                    and expected.evidence_id = incoming_evidence.evidence_id
+                  where incoming_sense.entry_id = retained.entry_id
+                    and incoming_sense.lang = retained.lang
+                    and incoming_sense.source_version = gap.source_version
+                    and source_sense.source_version = gap.source_version
+                    and not exists (
+                      select 1 from retained_ja_senses retained_sense
+                        join retained_ja_evidence retained_evidence
+                          on retained_evidence.sense_id = retained_sense.id
+                       where retained_sense.entry_id = retained.entry_id
+                         and retained_sense.lang = retained.lang
+                         and retained_sense.source_version = gap.source_version
+                         and retained_evidence.evidence_id = incoming_evidence.evidence_id
+                    )
+               );
           delete from ja_examples where sense_id in (
             select sense.id from ja_senses sense join retained_ja_replacements replacement
               on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang
@@ -415,9 +464,16 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
                  select 1 from retained_ja_senses retained_sense
                    join retained_ja_evidence retained_evidence
                      on retained_evidence.sense_id = retained_sense.id
+                   join ja_senses mapped_source_sense
+                     on mapped_source_sense.entry_id = retained_sense.entry_id
+                    and mapped_source_sense.lang = 'en'
+                    and mapped_source_sense.provenance = 'source'
+                   join ja_sense_evidence mapped_expected
+                     on mapped_expected.sense_id = mapped_source_sense.id
+                    and mapped_expected.evidence_id = retained_evidence.evidence_id
                   where retained_sense.entry_id = replacement.entry_id
                     and retained_sense.lang = replacement.lang
-                    and retained_sense.source_version = source_sense.source_version
+                    and retained_sense.source_version = mapped_source_sense.source_version
                );
           drop table promoted_ja_entries;
           drop table retained_ja_replacements;
