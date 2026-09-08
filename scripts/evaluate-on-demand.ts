@@ -114,7 +114,6 @@ for (const { test, repetition } of repeated(entryReviewCases, repetitions)) {
 }
 
 for (const { test, repetition } of repeated(acceptedExamples, repetitions)) {
-  // Keep defect names and expected verdicts out of the reviewer input.
   const candidateId = `eval:${crypto.randomUUID()}`;
   const response = await gateway.call(request({
     role: "example-review",
@@ -132,7 +131,6 @@ for (const { test, repetition } of repeated(acceptedExamples, repetitions)) {
 }
 
 for (const { test, repetition } of repeated(rejectedExamples, repetitions)) {
-  // Keep defect names and expected verdicts out of the reviewer input.
   const candidateId = `eval:${crypto.randomUUID()}`;
   const response = await gateway.call(request({
     role: "example-review",

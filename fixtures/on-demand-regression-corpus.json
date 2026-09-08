@@ -257,5 +257,462 @@
         }
       }
     }
+  ],
+  "entryReviews": [
+    {
+      "id": "folklore-generated",
+      "expected": "accepted",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1752760",
+          "word": "民間伝承",
+          "reading": "みんかんでんしょう",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1752760",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "民間伝承",
+              "reading": "みんかんでんしょう",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_25db65b5278b68a3",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "glosses": [
+                {
+                  "text": "民間流傳下來的故事、信仰、習俗、技藝等文化傳統的總稱。",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [],
+              "provenance": "generated"
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    },
+    {
+      "id": "folklore-invented-meaning",
+      "expected": "rejected",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1752760",
+          "word": "民間伝承",
+          "reading": "みんかんでんしょう",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1752760",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "民間伝承",
+              "reading": "みんかんでんしょう",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_25db65b5278b68a3",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "glosses": [
+                {
+                  "text": "透過衛星自動預測明天天氣的電子設備。",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [],
+              "provenance": "generated"
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    },
+    {
+      "id": "folklore-wrong-reading",
+      "expected": "rejected",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1752760",
+          "word": "民間伝承",
+          "reading": "てんきよほう",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1752760",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "民間伝承",
+              "reading": "てんきよほう",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_25db65b5278b68a3",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "glosses": [
+                {
+                  "text": "民間流傳下來的故事、信仰、習俗、技藝等文化傳統的總稱。",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [],
+              "provenance": "generated",
+              "pronunciations": [
+                "てんきよほう"
+              ]
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    },
+    {
+      "id": "folklore-fabricated-source",
+      "expected": "rejected",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1752760",
+          "word": "民間伝承",
+          "reading": "みんかんでんしょう",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1752760",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "民間伝承",
+              "reading": "みんかんでんしょう",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_25db65b5278b68a3",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "glosses": [
+                {
+                  "text": "民間流傳下來的故事、信仰、習俗、技藝等文化傳統的總稱。",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [
+                "nonexistent-source:1"
+              ],
+              "provenance": "source"
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    },
+    {
+      "id": "bridge-pile-generated",
+      "expected": "accepted",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1664540",
+          "word": "橋杙",
+          "reading": "はしぐい",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1664540",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "橋杙",
+              "reading": "はしぐい",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_42df486d6e5b1403",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "field": [
+                "civeng"
+              ],
+              "pronunciations": [
+                "はしぐい"
+              ],
+              "glosses": [
+                {
+                  "text": "橋樁；用來支撐橋梁的樁柱",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [],
+              "provenance": "generated"
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    },
+    {
+      "id": "bridge-pile-invented-meaning",
+      "expected": "rejected",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1664540",
+          "word": "橋杙",
+          "reading": "はしぐい",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1664540",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "橋杙",
+              "reading": "はしぐい",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_42df486d6e5b1403",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "field": [
+                "civeng"
+              ],
+              "pronunciations": [
+                "はしぐい"
+              ],
+              "glosses": [
+                {
+                  "text": "透過衛星自動預測明天天氣的電子設備。",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [],
+              "provenance": "generated"
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    },
+    {
+      "id": "bridge-pile-wrong-reading",
+      "expected": "rejected",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1664540",
+          "word": "橋杙",
+          "reading": "てんきよほう",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1664540",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "橋杙",
+              "reading": "てんきよほう",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_42df486d6e5b1403",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "field": [
+                "civeng"
+              ],
+              "pronunciations": [
+                "てんきよほう"
+              ],
+              "glosses": [
+                {
+                  "text": "橋樁；用來支撐橋梁的樁柱",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [],
+              "provenance": "generated"
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    },
+    {
+      "id": "bridge-pile-fabricated-source",
+      "expected": "rejected",
+      "candidate": {
+        "explanationLanguage": "zh-tw",
+        "entry": {
+          "id": "yori:e_jmdict_1664540",
+          "word": "橋杙",
+          "reading": "はしぐい",
+          "common": false,
+          "source": "generated",
+          "sourceId": "yori:e_jmdict_1664540",
+          "headwordLanguage": "ja",
+          "headwords": [
+            {
+              "text": "橋杙",
+              "reading": "はしぐい",
+              "kind": "kanji",
+              "common": false,
+              "tags": []
+            }
+          ],
+          "senses": [
+            {
+              "id": "yori:s_generated_42df486d6e5b1403",
+              "position": 1,
+              "appliesTo": {
+                "kanji": [
+                  "*"
+                ],
+                "kana": [
+                  "*"
+                ]
+              },
+              "partOfSpeech": [
+                "n"
+              ],
+              "field": [
+                "civeng"
+              ],
+              "pronunciations": [
+                "はしぐい"
+              ],
+              "glosses": [
+                {
+                  "text": "橋樁；用來支撐橋梁的樁柱",
+                  "lang": "zh-tw",
+                  "source": "generated",
+                  "reviewStatus": "checked"
+                }
+              ],
+              "evidenceIds": [
+                "nonexistent-source:1"
+              ],
+              "provenance": "source"
+            }
+          ]
+        },
+        "sourceEvidence": []
+      }
+    }
   ]
 }

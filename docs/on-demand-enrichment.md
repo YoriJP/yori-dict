@@ -122,23 +122,15 @@ Normal tests use scripted gateways and never spend model credits. `bun run enric
 
 ### Generated-entry review regression
 
-`bun run enrichment:eval -- --run --corpus fixtures/generated-entry-review-corpus.json`
-replays the Taiwanese Chinese 民間伝承 and 橋杙 candidates that production rejected,
-plus mutations with invented meanings, wrong readings, and fabricated source claims.
-It requires both production review passes to accept, using the pinned reviewer
-and the production Japanese review prompts. It writes no dictionary content. Both false acceptance and false rejection fail the run. Direct review evaluations
-use standard service with a two-minute request deadline; runtime Flex retries
-are unchanged.
-Use `--review-case folklore-generated --repeat 3` (and `bridge-pile-generated`)
-to repeat a candidate before deployment; scripted unit tests verify plumbing and
-fail-closed persistence, not model judgment.
+The default regression corpus includes the rejected Taiwanese Chinese definitions
+of 民間伝承 and 橋杙, plus variants with wrong meanings, readings, and provenance.
+Entry evaluation uses both production review passes. Missing source IDs are valid
+for generated senses; uncertain meanings and fabricated source claims still fail.
 
-Japanese entry review accepts empty source bundles for established generated
-meanings, as authoring does. It still requires supplied source coverage and rejects
-uncertain meanings, incorrect readings, and fabricated provenance. The shared
-review instruction defers to each candidate type's evidence policy; it does not
-treat every missing source ID as a defect. Both production passes must accept.
-
+`bun run enrichment:eval -- --run --review-case folklore-generated --repeat 3`
+repeats one case; use `bridge-pile-generated` for the other. Direct model calls
+use standard service and a two-minute deadline. Evaluations write no dictionary
+content, and false acceptance or false rejection fails the run.
 
 ## Out of scope
 

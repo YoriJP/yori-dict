@@ -115,13 +115,13 @@ test("a targeted paid evaluation requires a non-empty case selector", async () =
 });
 
 test("generated-entry review cases can be selected and repeated before model setup", async () => {
-  const corpus = await Bun.file("fixtures/generated-entry-review-corpus.json").json();
+  const corpus = await Bun.file("fixtures/on-demand-regression-corpus.json").json();
   expect(corpus.entryReviews.filter((test: { expected: string }) => test.expected === "accepted")).toHaveLength(2);
   expect(corpus.entryReviews.filter((test: { expected: string }) => test.expected === "rejected")).toHaveLength(6);
   for (const id of ["folklore-generated", "bridge-pile-generated"]) {
     const child = Bun.spawn([
       "bun", "run", "scripts/evaluate-on-demand.ts", "--run",
-      "--corpus", "fixtures/generated-entry-review-corpus.json", "--review-case", id, "--repeat", "3"
+      "--review-case", id, "--repeat", "3"
     ], {
       cwd: process.cwd(),
       env: { ...Bun.env, OPENROUTER_API_KEY: "" },
