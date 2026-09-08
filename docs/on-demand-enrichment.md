@@ -120,6 +120,26 @@ lookup trace id and does not require a separate dashboard.
 
 Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid Japanese OpenRouter regression command. `bun run english:eval -- --run` requires at least two author and two reviewer model flags, compares author output blindly, and calibrates each reviewer; false acceptance is release-blocking.
 
+### Generated-entry review regression
+
+`bun run enrichment:eval -- --run --corpus fixtures/generated-entry-review-corpus.json`
+replays the Taiwanese Chinese 民間伝承 and 橋杙 candidates that production rejected,
+plus mutations with invented meanings, wrong readings, and fabricated source claims.
+It requires both production review passes to accept, using the pinned reviewer
+and the production Japanese review prompts. It writes no dictionary content. Both false acceptance and false rejection fail the run. Direct review evaluations
+use standard service with a two-minute request deadline; runtime Flex retries
+are unchanged.
+Use `--review-case folklore-generated --repeat 3` (and `bridge-pile-generated`)
+to repeat a candidate before deployment; scripted unit tests verify plumbing and
+fail-closed persistence, not model judgment.
+
+Japanese entry review accepts empty source bundles for established generated
+meanings, as authoring does. It still requires supplied source coverage and rejects
+uncertain meanings, incorrect readings, and fabricated provenance. The shared
+review instruction defers to each candidate type's evidence policy; it does not
+treat every missing source ID as a defect. Both production passes must accept.
+
+
 ## Out of scope
 
 - A public unauthenticated generation endpoint

@@ -39,7 +39,7 @@ test("the example reviewer receives a lean fail-closed decision prompt", () => {
     }
   });
 
-  expect(onDemandEvaluationContracts.exampleReview.promptVersion).toBe("example-review-v6");
+  expect(onDemandEvaluationContracts.exampleReview.promptVersion).toBe("example-review-v7");
   expect(prompt).toStartWith("Return exactly one token: ACCEPT or REJECT.");
   expect(prompt).toContain("# Criteria");
   expect(prompt).toContain("# Candidate");
@@ -111,5 +111,24 @@ test("a targeted paid evaluation requires a non-empty case selector", async () =
     });
     expect(await child.exited).toBe(2);
     expect(await new Response(child.stderr).text()).toContain("--case requires a non-empty candidate");
+  }
+});
+
+test("generated-entry review cases can be selected and repeated before model setup", async () => {
+  const corpus = await Bun.file("fixtures/generated-entry-review-corpus.json").json();
+  expect(corpus.entryReviews.filter((test: { expected: string }) => test.expected === "accepted")).toHaveLength(2);
+  expect(corpus.entryReviews.filter((test: { expected: string }) => test.expected === "rejected")).toHaveLength(6);
+  for (const id of ["folklore-generated", "bridge-pile-generated"]) {
+    const child = Bun.spawn([
+      "bun", "run", "scripts/evaluate-on-demand.ts", "--run",
+      "--corpus", "fixtures/generated-entry-review-corpus.json", "--review-case", id, "--repeat", "3"
+    ], {
+      cwd: process.cwd(),
+      env: { ...Bun.env, OPENROUTER_API_KEY: "" },
+      stdout: "pipe",
+      stderr: "pipe"
+    });
+    expect(await child.exited).toBe(2);
+    expect(await new Response(child.stderr).text()).toContain("OPENROUTER_API_KEY is required.");
   }
 });

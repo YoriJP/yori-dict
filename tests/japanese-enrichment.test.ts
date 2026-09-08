@@ -259,7 +259,7 @@ test("Japanese entry and Example review require two unanimous passes", async () 
   expect(await enrich("二段語", "ja", twoPassApp)).toBeNull();
   expect(await read("二段語", "ja")).toBeNull();
   expect(gateway.calls.filter(({ role }) => role === "entry-review").map(({ promptVersion }) => promptVersion))
-    .toEqual(["entry-review-v5", "entry-review-v5-verification-v2"]);
+    .toEqual(["entry-review-v6", "entry-review-v6-verification-v2"]);
 
   gateway.reset();
   gateway.script("eligibility", "全会語");
@@ -277,7 +277,7 @@ test("Japanese entry and Example review require two unanimous passes", async () 
   const completed = await enrich("全会語", "ja", twoPassApp);
   expect(completed.senses[0].examples[0].translations).toEqual([]);
   expect(gateway.calls.filter(({ role }) => role === "example-review").map(({ promptVersion }) => promptVersion))
-    .toEqual(["example-review-v6", "example-review-v6-verification-v2"]);
+    .toEqual(["example-review-v7", "example-review-v7-verification-v2"]);
 });
 
 test("a sourced monolingual Japanese Example closes the Example gap", async () => {

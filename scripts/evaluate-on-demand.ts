@@ -54,7 +54,10 @@ const acceptedExamples = selectedCase ? [] : corpus.acceptedExamples.filter((tes
 const rejectedExamples = selectedCase ? [] : corpus.rejectedExamples.filter((test) =>
   !selectedReviewCase || test.id === selectedReviewCase
 );
-if (selectedReviewCase && acceptedExamples.length + rejectedExamples.length !== 1) {
+const entryReviews = selectedCase ? [] : (corpus.entryReviews ?? []).filter((test) =>
+  !selectedReviewCase || test.id === selectedReviewCase
+);
+if (selectedReviewCase && acceptedExamples.length + rejectedExamples.length + entryReviews.length !== 1) {
   console.error(`Review eval case not found: ${selectedReviewCase}`);
   process.exit(2);
 }
@@ -84,25 +87,35 @@ for (const test of eligibility) {
   if (!production.passed) console.log(JSON.stringify(production.diagnostics));
 }
 
-for (const test of selectedCase || selectedReviewCase ? [] : corpus.reviewDefects) {
-  const candidateId = `eval:${test.id}`;
-  const response = await gateway.call(request({
-    role: "entry-review",
-    model: onDemandEvaluationContracts.entryReview.model,
-    promptVersion: onDemandEvaluationContracts.entryReview.promptVersion,
-    prompt: onDemandEvaluationContracts.entryReview.prompt(candidateId, test.candidate)
-  }));
-  const verdict = parseReview(response.text);
-  const passed = verdict === "rejected";
+const entryReviewCases = [
+  ...(selectedCase || selectedReviewCase ? [] : corpus.reviewDefects.map((test) => ({ ...test, expected: "rejected" as const }))),
+  ...entryReviews
+];
+for (const { test, repetition } of repeated(entryReviewCases, repetitions)) {
+  // Keep defect names and expected verdicts out of the reviewer input.
+  const candidateId = `eval:${crypto.randomUUID()}`;
+  const contract = onDemandEvaluationContracts.entryReview;
+  let verdict: ReturnType<typeof parseReview> = "malformed";
+  for (const review of [
+    { promptVersion: contract.promptVersion, prompt: contract.prompt(candidateId, test.candidate) },
+    contract.verification(candidateId, test.candidate)
+  ]) {
+    const response = await gateway.call(request({ role: "entry-review", model: contract.model, ...review }));
+    verdict = parseReview(response.text);
+    if (verdict !== "accepted") break;
+  }
+  const passed = verdict === test.expected;
   if (!passed) {
     failed += 1;
-    falseAccepts += 1;
+    if (test.expected === "accepted") falseRejects += 1;
+    else falseAccepts += 1;
   }
-  console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}: ${verdict}`);
+  console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}${repeatLabel(repetition, repetitions)}: ${verdict}`);
 }
 
 for (const { test, repetition } of repeated(acceptedExamples, repetitions)) {
-  const candidateId = `eval:${test.id}`;
+  // Keep defect names and expected verdicts out of the reviewer input.
+  const candidateId = `eval:${crypto.randomUUID()}`;
   const response = await gateway.call(request({
     role: "example-review",
     model: onDemandEvaluationContracts.exampleReview.model,
@@ -119,7 +132,8 @@ for (const { test, repetition } of repeated(acceptedExamples, repetitions)) {
 }
 
 for (const { test, repetition } of repeated(rejectedExamples, repetitions)) {
-  const candidateId = `eval:${test.id}`;
+  // Keep defect names and expected verdicts out of the reviewer input.
+  const candidateId = `eval:${crypto.randomUUID()}`;
   const response = await gateway.call(request({
     role: "example-review",
     model: onDemandEvaluationContracts.exampleReview.model,
@@ -136,7 +150,7 @@ for (const { test, repetition } of repeated(rejectedExamples, repetitions)) {
 }
 
 const total = eligibility.length * 2
-  + (selectedCase || selectedReviewCase ? 0 : corpus.reviewDefects.length)
+  + entryReviewCases.length * repetitions
   + acceptedExamples.length * repetitions
   + rejectedExamples.length * repetitions;
 console.log(`${total - failed}/${total} passed`);
@@ -148,8 +162,9 @@ function request(input: Omit<ModelRequest, "provider" | "reasoningEffort" | "req
     ...input,
     provider: "openrouter",
     reasoningEffort: "minimal",
-    requestedServiceTier: "flex",
-    signal: new AbortController().signal
+    // Calibration should measure verdicts without waiting for spare Flex capacity.
+    requestedServiceTier: "standard",
+    signal: AbortSignal.timeout(120_000)
   };
 }
 
@@ -251,6 +266,7 @@ function repeatLabel(repetition: number, repetitions: number): string {
 type Corpus = {
   eligibility: EligibilityCase[];
   reviewDefects: Array<{ id: string; candidate: unknown }>;
+  entryReviews?: Array<{ id: string; candidate: unknown; expected: "accepted" | "rejected" }>;
   acceptedExamples: Array<{ id: string; candidate: unknown }>;
   rejectedExamples: Array<{ id: string; candidate: unknown }>;
 };

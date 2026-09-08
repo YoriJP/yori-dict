@@ -3,6 +3,7 @@ import {
   createJapaneseOnDemandDictionary,
   createModelCallGate,
   sameTierBackoffMs,
+  onDemandEvaluationContracts,
   type EnrichmentRepository,
   type CanonicalCandidate,
   type LabelVocabulary,
@@ -62,7 +63,7 @@ test("resolve completes missing examples once across concurrent requests", async
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-review"]);
   expect(gateway.calls[0]).toMatchObject({ promptVersion: "example-author-v3" });
   expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword spelling as a standalone lexical item");
-  expect(gateway.calls[1]).toMatchObject({ promptVersion: "example-review-v6" });
+  expect(gateway.calls[1]).toMatchObject({ promptVersion: "example-review-v7" });
   expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
   expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
 });
@@ -87,7 +88,7 @@ test("one accepting review cannot persist an example when unanimous review is re
   expect(gateway.calls.map(({ role }) => role)).toEqual([
     "example-author", "example-review", "example-review", "example-author"
   ]);
-  expect(gateway.calls[2]).toMatchObject({ promptVersion: "example-review-v6-verification-v2" });
+  expect(gateway.calls[2]).toMatchObject({ promptVersion: "example-review-v7-verification-v2" });
   expect(gateway.calls[2]!.prompt).toStartWith("# Verification Context");
 });
 
@@ -1332,3 +1333,46 @@ test("a Japanese dictionary form is still authored", async () => {
   expect(resolved?.word).toBe("読む");
   expect(repository.entries.size).toBe(1);
 });
+
+for (const [headword, reading, gloss] of [
+  ["民間伝承", "みんかんでんしょう", "民間流傳下來的故事、信仰、習俗、技藝等文化傳統的總稱。"],
+  ["橋杙", "はしぐい", "橋樁；用來支撐橋梁的樁柱"]
+]) {
+  for (const verdicts of [["ACCEPT", "ACCEPT"], ["REJECT"], ["ACCEPT", "REJECT"], ["ACCEPT", "ACCEPT because it is correct"]]) {
+    test(`generated ${headword} requires unanimous exact acceptance: ${verdicts.join("/")}`, async () => {
+      const repository = new MemoryRepository();
+      const gateway = new ScriptedGateway([
+        headword,
+        authoredEntry({ headword, reading, partOfSpeech: ["n"], glosses: [gloss], provenance: "generated" }),
+        ...verdicts.map((verdict, pass) => (call: ModelRequest) => {
+          const candidate = JSON.parse(call.prompt.split("candidate: ")[1]);
+          const contract = onDemandEvaluationContracts.entryReview;
+          const expected = pass === 0
+            ? { promptVersion: contract.promptVersion, prompt: contract.prompt(candidate.entry.id, candidate) }
+            : contract.verification(candidate.entry.id, candidate);
+          expect(call).toMatchObject(expected);
+          expect(call.prompt).toContain("Missing source evidence alone is not a reason to reject");
+          expect(call.prompt).not.toContain("Missing evidence or uncertainty means REJECT");
+          expect(candidate.explanationLanguage).toBe("zh-tw");
+          expect(candidate.sourceEvidence).toEqual([]);
+          expect(candidate.entry.senses[0]).toMatchObject({ provenance: "generated", evidenceIds: [] });
+          return verdict;
+        }),
+        exampleFor(headword, "我詳細調查了這個詞。"),
+        reviewForPrompt,
+        reviewForPrompt
+      ]);
+      const entry = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, reviewPasses: 2 }).resolve({
+        query: headword, targetDictionary: "ja", lang: "zh-tw"
+      });
+      if (verdicts.every((verdict) => verdict === "ACCEPT")) {
+        expect(entry?.senses[0].glosses[0].text).toBe(gloss);
+        expect(repository.entries.size).toBe(1);
+      } else {
+        expect(entry).toBeNull();
+        expect(repository.entries.size).toBe(0);
+        expect(gateway.calls).toHaveLength(2 + verdicts.length);
+      }
+    });
+  }
+}
