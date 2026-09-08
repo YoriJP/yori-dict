@@ -128,9 +128,10 @@ Entry evaluation uses both production review passes. Missing source IDs are vali
 for generated senses; uncertain meanings and fabricated source claims still fail.
 
 `bun run enrichment:eval -- --run --review-case folklore-generated --repeat 3`
-repeats one case; use `bridge-pile-generated` for the other. Direct model calls
-use standard service and a two-minute deadline. Evaluations write no dictionary
-content, and false acceptance or false rejection fails the run.
+repeats one case; any review case ID in the corpus can be selected. Direct model
+calls use standard service and a two-minute deadline. Evaluations write no
+dictionary content. False acceptance, false rejection, and malformed output fail
+the run and are counted separately; provider errors stop the run.
 
 ## Out of scope
 

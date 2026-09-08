@@ -933,17 +933,11 @@ async function requireUnanimousReview(
   passes: 1 | 2,
   record: (attempt: AttemptRecord, outcome: "accepted" | "rejected" | "malformed") => void
 ): Promise<"accepted" | "rejected" | "malformed"> {
-  for (let pass = 1; pass <= passes; pass += 1) {
-    const verification = pass === 1
-      ? { config, prompt }
-      : {
-          config: { ...config, promptVersion: `${config.promptVersion}-verification-v2` },
-          prompt: verificationPrompt(prompt)
-        };
+  for (const { prompt: passPrompt, ...passConfig } of reviewRequests(config, prompt, passes)) {
     const reviewed = await callAndRecord(
       options,
-      verification.config,
-      verification.prompt,
+      passConfig,
+      passPrompt,
       mode,
       candidateId
     );
@@ -954,13 +948,21 @@ async function requireUnanimousReview(
   return "accepted";
 }
 
-function verificationPrompt(prompt: string): string {
-  return [
-    "# Verification Context",
-    "This is a separate verification pass. Re-evaluate from scratch; do not assume an earlier verdict was correct.",
-    "",
-    prompt
-  ].join("\n");
+function reviewRequests(config: ModelConfig, prompt: string, passes: 1 | 2): Array<Omit<ModelRequest, "signal">> {
+  const requests = [{ ...config, prompt }];
+  if (passes === 2) {
+    requests.push({
+      ...config,
+      promptVersion: `${config.promptVersion}-verification-v2`,
+      prompt: [
+        "# Verification Context",
+        "This is a separate verification pass. Re-evaluate from scratch; do not assume an earlier verdict was correct.",
+        "",
+        prompt
+      ].join("\n")
+    });
+  }
+  return requests;
 }
 
 /**
@@ -1347,7 +1349,7 @@ function isStandaloneInflection(chars: string[], start: number, end: number, hea
     .some(({ segment, isWordLike }) => Boolean(isWordLike) && segment === headword);
 }
 
-function reviewOutcome(text: string): "accepted" | "rejected" | "malformed" {
+export function reviewOutcome(text: string): "accepted" | "rejected" | "malformed" {
   const verdict = text.trim();
   if (verdict === "ACCEPT") return "accepted";
   if (verdict === "REJECT") return "rejected";
@@ -1581,23 +1583,11 @@ export const onDemandEvaluationContracts = {
       return eligibilityPrompt({ query: candidate, targetDictionary: "ja", lang: "en" });
     }
   },
-  entryReview: {
-    model: geminiReviewModel,
-    promptVersion: entryReviewConfig.promptVersion,
-    prompt: japaneseEntryReviewPrompt,
-    verification(candidateId: string, candidate: unknown) {
-      return {
-        promptVersion: `${entryReviewConfig.promptVersion}-verification-v2`,
-        prompt: verificationPrompt(japaneseEntryReviewPrompt(candidateId, candidate))
-      };
-    }
+  entryReview(candidateId: string, candidate: unknown) {
+    return reviewRequests(entryReviewConfig, japaneseEntryReviewPrompt(candidateId, candidate), 2);
   },
-  exampleReview: {
-    model: geminiReviewModel,
-    promptVersion: "example-review-v7",
-    prompt(candidateId: string, candidate: unknown) {
-      return reviewPrompt(candidateId, candidate, exampleReviewCriteria);
-    }
+  exampleReview(candidateId: string, candidate: unknown) {
+    return reviewRequests(exampleReviewConfig, reviewPrompt(candidateId, candidate, exampleReviewCriteria), 1);
   }
 } as const;
 

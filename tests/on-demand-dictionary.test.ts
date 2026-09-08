@@ -1346,11 +1346,8 @@ for (const [headword, reading, gloss] of [
         authoredEntry({ headword, reading, partOfSpeech: ["n"], glosses: [gloss], provenance: "generated" }),
         ...verdicts.map((verdict, pass) => (call: ModelRequest) => {
           const candidate = JSON.parse(call.prompt.split("candidate: ")[1]);
-          const contract = onDemandEvaluationContracts.entryReview;
-          const expected = pass === 0
-            ? { promptVersion: contract.promptVersion, prompt: contract.prompt(candidate.entry.id, candidate) }
-            : contract.verification(candidate.entry.id, candidate);
-          expect(call).toMatchObject(expected);
+          const requests = onDemandEvaluationContracts.entryReview(candidate.entry.id, candidate);
+          expect(call).toMatchObject(requests[pass]);
           expect(call.prompt).toContain("Missing source evidence alone is not a reason to reject");
           expect(call.prompt).not.toContain("Missing evidence or uncertainty means REJECT");
           expect(candidate.explanationLanguage).toBe("zh-tw");
