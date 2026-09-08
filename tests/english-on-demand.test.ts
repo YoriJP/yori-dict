@@ -54,7 +54,7 @@ test("English resolve completes missing examples on released senses", async () =
   }]]);
   expect(gateway.calls[0]).toMatchObject({ promptVersion: "english-example-author-v3" });
   expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword exactly as a complete lexical item");
-  expect(gateway.calls[1]).toMatchObject({ promptVersion: "english-example-review-v6" });
+  expect(gateway.calls[1]).toMatchObject({ promptVersion: "english-example-review-v7" });
   expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
   expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
 });
@@ -80,7 +80,7 @@ test("English examples require unanimous review when configured", async () => {
   expect(gateway.calls.map(({ role }) => role)).toEqual([
     "example-author", "example-review", "example-review", "example-author"
   ]);
-  expect(gateway.calls[2]).toMatchObject({ promptVersion: "english-example-review-v6-verification-v2" });
+  expect(gateway.calls[2]).toMatchObject({ promptVersion: "english-example-review-v7-verification-v2" });
 });
 
 test("English translated groups require a matching example translation", async () => {

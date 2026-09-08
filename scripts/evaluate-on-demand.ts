@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { createOpenRouterModelGateway } from "../src/model-gateway";
+import { evaluateReview, reviewCases, type ReviewCorpus } from "../src/on-demand-evaluation";
 import {
   createJapaneseOnDemandDictionary,
   onDemandEvaluationContracts,
@@ -48,13 +49,10 @@ if (selectedCase && eligibility.length !== 1) {
   console.error(`Eval case not found: ${selectedCase}`);
   process.exit(2);
 }
-const acceptedExamples = selectedCase ? [] : corpus.acceptedExamples.filter((test) =>
+const reviews = selectedCase ? [] : reviewCases(corpus).filter((test) =>
   !selectedReviewCase || test.id === selectedReviewCase
 );
-const rejectedExamples = selectedCase ? [] : corpus.rejectedExamples.filter((test) =>
-  !selectedReviewCase || test.id === selectedReviewCase
-);
-if (selectedReviewCase && acceptedExamples.length + rejectedExamples.length !== 1) {
+if (selectedReviewCase && reviews.length !== 1) {
   console.error(`Review eval case not found: ${selectedReviewCase}`);
   process.exit(2);
 }
@@ -66,6 +64,7 @@ const gateway = createOpenRouterModelGateway({ apiKey: process.env.OPENROUTER_AP
 let failed = 0;
 let falseAccepts = 0;
 let falseRejects = 0;
+let malformedReviews = 0;
 
 for (const test of eligibility) {
   const response = await gateway.call(request({
@@ -84,63 +83,24 @@ for (const test of eligibility) {
   if (!production.passed) console.log(JSON.stringify(production.diagnostics));
 }
 
-for (const test of selectedCase || selectedReviewCase ? [] : corpus.reviewDefects) {
-  const candidateId = `eval:${test.id}`;
-  const response = await gateway.call(request({
-    role: "entry-review",
-    model: onDemandEvaluationContracts.entryReview.model,
-    promptVersion: onDemandEvaluationContracts.entryReview.promptVersion,
-    prompt: onDemandEvaluationContracts.entryReview.prompt(candidateId, test.candidate)
-  }));
-  const verdict = parseReview(response.text);
-  const passed = verdict === "rejected";
-  if (!passed) {
-    failed += 1;
-    falseAccepts += 1;
+for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+  for (const test of reviews) {
+    const verdict = await evaluateReview(test, gateway);
+    const passed = verdict === test.expected;
+    if (!passed) {
+      failed += 1;
+      if (verdict === "accepted") falseAccepts += 1;
+      else if (verdict === "rejected") falseRejects += 1;
+      else malformedReviews += 1;
+    }
+    const suffix = repetitions === 1 ? "" : `#${repetition}`;
+    console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}${suffix}: ${verdict}`);
   }
-  console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}: ${verdict}`);
 }
 
-for (const { test, repetition } of repeated(acceptedExamples, repetitions)) {
-  const candidateId = `eval:${test.id}`;
-  const response = await gateway.call(request({
-    role: "example-review",
-    model: onDemandEvaluationContracts.exampleReview.model,
-    promptVersion: onDemandEvaluationContracts.exampleReview.promptVersion,
-    prompt: onDemandEvaluationContracts.exampleReview.prompt(candidateId, test.candidate)
-  }));
-  const verdict = parseReview(response.text);
-  const passed = verdict === "accepted";
-  if (!passed) {
-    failed += 1;
-    falseRejects += 1;
-  }
-  console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}${repeatLabel(repetition, repetitions)}: ${verdict}`);
-}
-
-for (const { test, repetition } of repeated(rejectedExamples, repetitions)) {
-  const candidateId = `eval:${test.id}`;
-  const response = await gateway.call(request({
-    role: "example-review",
-    model: onDemandEvaluationContracts.exampleReview.model,
-    promptVersion: onDemandEvaluationContracts.exampleReview.promptVersion,
-    prompt: onDemandEvaluationContracts.exampleReview.prompt(candidateId, test.candidate)
-  }));
-  const verdict = parseReview(response.text);
-  const passed = verdict === "rejected";
-  if (!passed) {
-    failed += 1;
-    falseAccepts += 1;
-  }
-  console.log(`${passed ? "PASS" : "FAIL"} review/${test.id}${repeatLabel(repetition, repetitions)}: ${verdict}`);
-}
-
-const total = eligibility.length * 2
-  + (selectedCase || selectedReviewCase ? 0 : corpus.reviewDefects.length)
-  + acceptedExamples.length * repetitions
-  + rejectedExamples.length * repetitions;
+const total = eligibility.length * 2 + reviews.length * repetitions;
 console.log(`${total - failed}/${total} passed`);
-console.log(`review calibration: ${falseAccepts} false accept(s), ${falseRejects} false reject(s)`);
+console.log(`review calibration: ${falseAccepts} false accept(s), ${falseRejects} false reject(s), ${malformedReviews} malformed response(s)`);
 if (failed > 0) process.exitCode = 1;
 
 function request(input: Omit<ModelRequest, "provider" | "reasoningEffort" | "requestedServiceTier" | "signal">): ModelRequest {
@@ -148,16 +108,10 @@ function request(input: Omit<ModelRequest, "provider" | "reasoningEffort" | "req
     ...input,
     provider: "openrouter",
     reasoningEffort: "minimal",
-    requestedServiceTier: "flex",
-    signal: new AbortController().signal
+    // Calibration should measure verdicts without waiting for spare Flex capacity.
+    requestedServiceTier: "standard",
+    signal: AbortSignal.timeout(120_000)
   };
-}
-
-function parseReview(text: string): "accepted" | "rejected" | "malformed" {
-  const verdict = text.trim();
-  if (verdict === "ACCEPT") return "accepted";
-  if (verdict === "REJECT") return "rejected";
-  return "malformed";
 }
 
 async function evaluateProductionPath(
@@ -238,22 +192,7 @@ function flag(name: string): string | null {
   return index === -1 ? null : Bun.argv[index + 1] ?? null;
 }
 
-function repeated<T>(items: T[], repetitions: number): Array<{ test: T; repetition: number }> {
-  return Array.from({ length: repetitions }, (_, repetition) =>
-    items.map((test) => ({ test, repetition: repetition + 1 }))
-  ).flat();
-}
-
-function repeatLabel(repetition: number, repetitions: number): string {
-  return repetitions === 1 ? "" : `#${repetition}`;
-}
-
-type Corpus = {
-  eligibility: EligibilityCase[];
-  reviewDefects: Array<{ id: string; candidate: unknown }>;
-  acceptedExamples: Array<{ id: string; candidate: unknown }>;
-  rejectedExamples: Array<{ id: string; candidate: unknown }>;
-};
+type Corpus = ReviewCorpus & { eligibility: EligibilityCase[] };
 
 type EligibilityCase = {
   candidate: string;

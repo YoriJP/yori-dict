@@ -120,6 +120,19 @@ lookup trace id and does not require a separate dashboard.
 
 Normal tests use scripted gateways and never spend model credits. `bun run enrichment:eval -- --run` is the explicit paid Japanese OpenRouter regression command. `bun run english:eval -- --run` requires at least two author and two reviewer model flags, compares author output blindly, and calibrates each reviewer; false acceptance is release-blocking.
 
+### Generated-entry review regression
+
+The default regression corpus includes the rejected Taiwanese Chinese definitions
+of 民間伝承 and 橋杙, plus variants with wrong meanings, readings, and provenance.
+Entry evaluation uses both production review passes. Missing source IDs are valid
+for generated senses; uncertain meanings and fabricated source claims still fail.
+
+`bun run enrichment:eval -- --run --review-case folklore-generated --repeat 3`
+repeats one case; any review case ID in the corpus can be selected. Direct model
+calls use standard service and a two-minute deadline. Evaluations write no
+dictionary content. False acceptance, false rejection, and malformed output fail
+the run and are counted separately; provider errors stop the run.
+
 ## Out of scope
 
 - A public unauthenticated generation endpoint
