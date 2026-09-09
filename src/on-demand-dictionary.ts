@@ -529,7 +529,8 @@ function repairPartialGroup(
         options,
         current.word,
         coverage.sourceEvidence,
-        coverage.evidenceSnapshot
+        coverage.evidenceSnapshot,
+        current.id
       ) ?? current;
     } catch (error) {
       if (error instanceof JapaneseEvidenceSnapshotChangedError) {
@@ -778,12 +779,14 @@ async function authorEntry(
   options: RuntimeOptions,
   headword: string,
   evidence: SourceEvidence[],
-  expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
+  expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot,
+  targetEntryId?: string
 ): Promise<PublicLookupItem | null> {
   // An entry shares one identity across explanation languages. When the
   // dictionary already knows this headword, the authored group joins that
   // entry instead of creating a second entry the read path would never see.
-  const entryId = request.candidate?.id
+  const entryId = targetEntryId
+    ?? request.candidate?.id
     ?? options.repository.canonicalEntry?.(headword)?.id
     ?? stableId("entry", headword);
   const vocabulary = options.repository.labelVocabulary();

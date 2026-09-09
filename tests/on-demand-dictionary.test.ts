@@ -142,6 +142,63 @@ test("authorized lookup replaces a proven-partial Explanation Group from complet
   expect(gateway.calls[0]?.prompt).toContain('"evidenceId":"jmdict:1410750:2"');
 });
 
+test("a partial repair stays bound to the matched homographic entry", async () => {
+  const matched = existingEntry();
+  matched.id = "yori:e_jmdict_matched";
+  matched.word = "生";
+  matched.reading = "なま";
+  matched.headwords = [{ text: "生", reading: "なま", kind: "kanji", common: false, tags: [] }];
+  matched.senses = [{
+    ...matched.senses[0]!,
+    id: "yori:s_jmdict_matched_1:en",
+    evidenceIds: ["jmdict:matched:1"]
+  }];
+  const sourceEvidence: SourceEvidence[] = [{
+    source: "jmdict",
+    sourceEntryId: "matched",
+    headword: "生",
+    reading: "なま",
+    senses: [
+      { evidenceId: "jmdict:matched:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "raw" }] },
+      { evidenceId: "jmdict:matched:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "uncooked" }] }
+    ]
+  }];
+  const repository = Object.assign(new MemoryRepository({
+    released: [["生", matched]],
+    coverage: [[`${matched.id}:en`, {
+      kind: "proven-partial" as const,
+      missingEvidenceIds: ["jmdict:matched:2"],
+      evidenceSnapshot: fixtureEvidenceSnapshot,
+      sourceEvidence
+    }]]
+  }), {
+    canonicalEntry() {
+      return { id: "yori:e_jmdict_higher_ranked", headword: "生" };
+    }
+  });
+  const gateway = new ScriptedGateway([
+    JSON.stringify({
+      headword: "生",
+      reading: "なま",
+      senses: [{
+        partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
+        pragmaticFunctions: [], glosses: ["raw or uncooked"],
+        evidenceIds: ["jmdict:matched:1", "jmdict:matched:2"], provenance: "source"
+      }]
+    }),
+    reviewForPrompt,
+    JSON.stringify({ sentence: "生の魚を食べた。", translation: "I ate raw fish." }),
+    reviewForPrompt
+  ]);
+
+  const repaired = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
+    .resolve(request("生"));
+
+  expect(repaired?.id).toBe(matched.id);
+  expect(repository.entries.get("生")?.id).toBe(matched.id);
+  expect(repository.coverageDecision(matched.id, "en")).toEqual({ kind: "not-proven-partial" });
+});
+
 test("recoverable partial-group repair failures preserve the original group and gap", async () => {
   const evidence: SourceEvidence[] = [{
     source: "jmdict", sourceEntryId: "1206730", headword: "学校", reading: "がっこう",
