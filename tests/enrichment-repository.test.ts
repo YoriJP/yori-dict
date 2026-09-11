@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { openEnrichmentRepository } from "../src/enrichment-repository";
 import { createEnglishSchema } from "../src/english-schema";
-import { readJapaneseEvidenceSnapshot } from "../src/japanese-evidence-snapshot";
+import { japaneseEvidenceInventoryVersion, readJapaneseEvidenceSnapshot } from "../src/japanese-evidence-snapshot";
 import { importLegacyOverlays } from "../src/legacy-overlay-import";
 import { openLookupDb } from "../src/db";
 import { importJapaneseRelease, migrateProductionDatabase } from "../src/production-database";
@@ -306,7 +306,7 @@ test("a Japanese source refresh imports a new Evidence inventory for the same di
   ).get()?.value).toBe("fixture-v2");
   expect(refreshed.query<{ source_version: string }, []>(
     "select source_version from ja_senses where id = 'yori:s_jmdict_1206730_1:en'"
-  ).get()?.source_version).toBe("fixture-v2");
+  ).get()?.source_version).toBe(JSON.stringify(["fixture-v2", "2026-06-08"]));
   expect(refreshed.query<{ text: string }, []>(
     "select text from ja_glosses where sense_id = 'yori:s_jmdict_1206730_1:en'"
   ).get()?.text).toBe("school from refreshed Evidence inventory");
@@ -346,7 +346,7 @@ test("an open repository stamps repairs with the source version imported at runt
   expect(verified.query<{ source_version: string }, []>(`
     select source_version from ja_senses
      where id = 'yori:s_runtime_version_school:zh-tw:1'
-  `).get()?.source_version).toBe("fixture-v2");
+  `).get()?.source_version).toBe(JSON.stringify(["fixture-v2", "next"]));
   verified.close();
 });
 
@@ -372,7 +372,7 @@ test("a Japanese repair cannot clear gaps from a newer Evidence inventory", asyn
 
   const before = new Database(path);
   const oldSnapshot = readJapaneseEvidenceSnapshot(before);
-  const oldVersion = oldSnapshot.jmdictSimplifiedVersion!;
+  const oldVersion = japaneseEvidenceInventoryVersion(oldSnapshot);
   before.prepare(`
     insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
     values ('yori:s_jmdict_1206730_1:en', 2, ?, 'jmdict')
@@ -438,7 +438,7 @@ test("a coverage decision cannot mix gaps with a newer database snapshot", async
       ?,
       'accepted-authored-evidence'
     )
-  `).run(oldSnapshot.jmdictSimplifiedVersion);
+  `).run(japaneseEvidenceInventoryVersion(oldSnapshot));
   setup.close();
 
   const refresh = new Database(path);
@@ -587,18 +587,18 @@ test("a production import keeps an accepted repair over proven-partial release c
   // them. Once that inventory changes, the old accepted repair cannot claim
   // coverage of the release's newly numbered senses.
   const versionedRelease = new Database(next);
-  versionedRelease.prepare("update ja_senses set source_version = 'fixture-v2'").run();
+  const nextInventory = japaneseEvidenceInventoryVersion({
+    ...readJapaneseEvidenceSnapshot(versionedRelease), dictDate: "next-v2"
+  });
+  versionedRelease.prepare("update ja_senses set source_version = ?").run(nextInventory);
   versionedRelease.prepare(`
     update ja_explanation_group_gaps
-       set source_version = 'fixture-v2'
+       set source_version = ?
      where entry_id = ? and lang = 'zh-tw'
-  `).run(entryId);
+  `).run(nextInventory, entryId);
   versionedRelease.prepare("update ja_glosses set text = '新版部分解釋' where sense_id = ?")
     .run(partialSenseId);
   versionedRelease.prepare("update ja_metadata set value = 'next-v2' where key = 'dictDate'").run();
-  versionedRelease.prepare(
-    "update ja_metadata set value = 'fixture-v2' where key = 'jmdictSimplifiedVersion'"
-  ).run();
   versionedRelease.close();
 
   expect(importJapaneseRelease(path, next)).toBe(true);
@@ -784,6 +784,51 @@ test("a production import recovers retained legacy source_ref Evidence before re
   expect(authoritative.lookup("学校", "zh-tw").item?.senses[0]?.evidenceIds)
     .toEqual([firstEvidence]);
   authoritative.close();
+});
+
+test("a Japanese import rolls back a release refreshed after validation", async () => {
+  const path = await productionDatabase();
+  const before = new Database(path, { readonly: true });
+  const previousSnapshot = readJapaneseEvidenceSnapshot(before);
+  const previousGlosses = before.query("select * from ja_glosses order by sense_id, position").all();
+  before.close();
+  const next = join(mkdtempSync(join(tmpdir(), "yori-refreshed-release-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${next}`.quiet();
+  const refresh = new Database(next);
+  refresh.exec("update ja_metadata set value = 'next' where key = 'dictDate'");
+  const originalQuery = Database.prototype.query;
+  let refreshed = false;
+  Database.prototype.query = function (this: Database, sql: string) {
+    const statement = originalQuery.call(this, sql);
+    if (!sql.includes("select key, value from ja_metadata")) return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property !== "all") return Reflect.get(target, property, target);
+        return (...parameters: unknown[]) => {
+          const rows = (target.all as (...args: unknown[]) => unknown[])(...parameters);
+          if (!refreshed) {
+            refreshed = true;
+            refresh.exec("update ja_metadata set value = 'changed' where key = 'dictDate'; update ja_glosses set text = 'changed'");
+          }
+          return rows;
+        };
+      }
+    });
+  } as typeof Database.prototype.query;
+  try {
+    expect(() => importJapaneseRelease(path, next)).toThrow("Japanese Evidence snapshot changed");
+    expect(refreshed).toBe(true);
+    const after = new Database(path, { readonly: true });
+    try {
+      expect(readJapaneseEvidenceSnapshot(after)).toEqual(previousSnapshot);
+      expect(after.query("select * from ja_glosses order by sense_id, position").all()).toEqual(previousGlosses);
+    } finally {
+      after.close();
+    }
+  } finally {
+    Database.prototype.query = originalQuery;
+    refresh.close();
+  }
 });
 
 test("a failed Japanese production import rolls back the existing dictionary", async () => {

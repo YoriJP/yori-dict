@@ -9,6 +9,13 @@ export type JapaneseEvidenceSnapshot = Readonly<{
 
 const metadataKeys = ["schemaVersion", "dictDate", "jmdictSimplifiedVersion"] as const;
 
+/** JMdict's format version alone does not identify its dated sense inventory. */
+export function japaneseEvidenceInventoryVersion(snapshot: JapaneseEvidenceSnapshot): string {
+  return snapshot.jmdictSimplifiedVersion && snapshot.dictDate
+    ? JSON.stringify([snapshot.jmdictSimplifiedVersion, snapshot.dictDate])
+    : "unknown";
+}
+
 export function readJapaneseEvidenceSnapshot(db: Database): JapaneseEvidenceSnapshot {
   const rows = db.query<{ key: string; value: string }, []>(`
     select key, value from ja_metadata
@@ -57,6 +64,9 @@ export function assertPublishableJapaneseEvidenceSnapshot(
       "Japanese release requires a JMdict inventory version. "
       + "Rebuild from a versioned JMdict source before publishing."
     );
+  }
+  if (!snapshot.dictDate) {
+    throw new Error("Japanese release requires a dictionary date to identify its Evidence inventory.");
   }
 }
 

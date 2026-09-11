@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rename } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+  japaneseEvidenceInventoryVersion,
   readJapaneseEvidenceSnapshot,
   writeJapaneseEvidenceSnapshot
 } from "./japanese-evidence-snapshot";
@@ -166,10 +167,10 @@ async function buildInto(
 
   writeMetadata(db, source);
   const importResult = importWords(db, source, exampleSource, estimatedLevels);
-  const glossResult = importLegacyGlosses(db, legacyGlosses, importResult.importedSenses, source.version ?? "unknown");
+  const glossResult = importLegacyGlosses(db, legacyGlosses, importResult.importedSenses, readSourceVersion(db));
   const exampleResult = importLegacyExamples(db, legacyExamples, importResult.importedSenses);
   const retainedResult = restoreRetained(db, retained);
-  deriveExplanationCoverageGaps(db, source.version ?? "unknown");
+  deriveExplanationCoverageGaps(db);
 
   return {
     entries: db.query<{ count: number }, []>("select count(*) as count from ja_entries").get()?.count ?? 0,
@@ -209,7 +210,7 @@ function importWords(
 ) {
   const exampleStats = { imported: 0, unmatched: 0, ambiguous: 0, invalid: 0 };
   const importedSenses = new Map<string, ImportedSense>();
-  const sourceVersion = source.version ?? "unknown";
+  const sourceVersion = readSourceVersion(db);
 
   const insertEntry = db.prepare(
     "insert into ja_entries (id, source, source_id, headword_language, estimated_level) values (?, 'jmdict', ?, 'ja', ?)"
@@ -458,7 +459,7 @@ function insertEvidenceStatement(db: Database) {
   `);
 }
 
-function deriveExplanationCoverageGaps(db: Database, sourceVersion: string): void {
+function deriveExplanationCoverageGaps(db: Database): void {
   db.prepare("delete from ja_explanation_group_gaps").run();
   const insert = db.prepare(`
     insert into ja_explanation_group_gaps
@@ -581,7 +582,7 @@ function readRetained(path: string): Retained {
                estimated_level as estimatedLevel
           from ja_entries where id = ?
       `).get(entryId)!;
-      const senses = versionRetainedSenses(db, db.query<Record<string, unknown>, [string]>(
+      const senses = versionRetainedSenses(db.query<Record<string, unknown>, [string]>(
         "select * from ja_senses where entry_id = ? order by lang, position"
       ).all(entryId));
       const senseIds = senses.map((sense) => String(sense.id));
@@ -622,7 +623,7 @@ function readRetained(path: string): Retained {
        group by sense.entry_id, sense.lang
        order by sense.entry_id, sense.lang
     `).all().map<RetainedGroup>(({ entry_id: entryId, lang }) => {
-      const senses = versionRetainedSenses(db, db.query<Record<string, unknown>, [string, string]>(
+      const senses = versionRetainedSenses(db.query<Record<string, unknown>, [string, string]>(
         "select * from ja_senses where entry_id = ? and lang = ? order by position"
       ).all(entryId, lang));
       const senseIds = senses.map((sense) => String(sense.id));
@@ -850,18 +851,17 @@ function retainedGroupCoversIncoming(db: Database, group: RetainedGroup): boolea
 }
 
 function versionRetainedSenses(
-  db: Database,
   senses: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> {
-  const sourceVersion = readSourceVersion(db);
   return senses.map((sense) => ({
     ...sense,
-    source_version: typeof sense.source_version === "string" ? sense.source_version : sourceVersion
+    // Bare format versions and missing versions cannot prove a dated inventory.
+    source_version: typeof sense.source_version === "string" ? sense.source_version : "unknown"
   }));
 }
 
 function readSourceVersion(db: Database): string {
-  return readJapaneseEvidenceSnapshot(db).jmdictSimplifiedVersion ?? "unknown";
+  return japaneseEvidenceInventoryVersion(readJapaneseEvidenceSnapshot(db));
 }
 
 function evidenceKey(evidenceId: string, sourceVersion: string): string {

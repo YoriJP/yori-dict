@@ -172,6 +172,11 @@ test("a partial repair stays bound to the matched homographic entry", async () =
       sourceEvidence
     }]]
   }), {
+    find(query: string): PublicLookupItem {
+      const stored = repository.entries.get(query);
+      // A spelling lookup can change rank while authoring is in flight.
+      return stored ? { ...matched, id: "yori:e_jmdict_higher_ranked" } : matched;
+    },
     canonicalEntry() {
       return { id: "yori:e_jmdict_higher_ranked", headword: "生" };
     }
@@ -191,10 +196,15 @@ test("a partial repair stays bound to the matched homographic entry", async () =
     reviewForPrompt
   ]);
 
-  const repaired = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
-    .resolve(request("生"));
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
+  const [repaired, ranked] = await Promise.all([
+    dictionary.resolve(request("生")),
+    dictionary.resolve({ ...request("生"), candidate: { id: matched.id, headword: matched.word } })
+  ]);
 
   expect(repaired?.id).toBe(matched.id);
+  expect(ranked).toEqual(repaired);
+  expect(gateway.calls.filter(({ role }) => role === "entry-author")).toHaveLength(1);
   expect(repository.entries.get("生")?.id).toBe(matched.id);
   expect(repository.coverageDecision(matched.id, "en")).toEqual({ kind: "not-proven-partial" });
 });

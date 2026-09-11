@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import {
   assertJapaneseEvidenceSnapshotCurrent,
   assertPublishableJapaneseEvidenceSnapshot,
+  japaneseEvidenceInventoryVersion,
   JapaneseEvidenceSnapshotChangedError,
   readJapaneseEvidenceSnapshot,
   sameJapaneseEvidenceSnapshot,
@@ -16,6 +17,14 @@ const current: JapaneseEvidenceSnapshot = {
   dictDate: "2026-09-07",
   jmdictSimplifiedVersion: "fixture-v1"
 };
+
+test("ordinal inventory identity changes when either JMdict format version or dictionary date changes", () => {
+  const identity = japaneseEvidenceInventoryVersion(current);
+  expect(japaneseEvidenceInventoryVersion({ ...current })).toBe(identity);
+  expect(japaneseEvidenceInventoryVersion({ ...current, dictDate: "2026-09-08" })).not.toBe(identity);
+  expect(japaneseEvidenceInventoryVersion({ ...current, jmdictSimplifiedVersion: "fixture-v2" })).not.toBe(identity);
+  expect(japaneseEvidenceInventoryVersion({ ...current, dictDate: null })).toBe("unknown");
+});
 
 test("snapshot equality changes for every field that controls Japanese Evidence identity", () => {
   const transitions: Array<[string, JapaneseEvidenceSnapshot, boolean]> = [
@@ -52,6 +61,8 @@ test("publication and transactional repair checks use the same complete snapshot
     .toThrow("Japanese release requires classified schema ja-3");
   expect(() => assertPublishableJapaneseEvidenceSnapshot({ ...current, jmdictSimplifiedVersion: null }))
     .toThrow("Japanese release requires a JMdict inventory version");
+  expect(() => assertPublishableJapaneseEvidenceSnapshot({ ...current, dictDate: null }))
+    .toThrow("Japanese release requires a dictionary date");
 
   const db = new Database(":memory:");
   createJapaneseSchema(db);

@@ -12,6 +12,7 @@ import {
 } from "./canonical-store";
 import { visitJapaneseEntries, type JapaneseEntryGroups } from "./db";
 import {
+  assertJapaneseEvidenceSnapshotCurrent,
   assertPublishableJapaneseEvidenceSnapshot,
   readJapaneseEvidenceSnapshot,
   type JapaneseEvidenceSnapshot
@@ -89,10 +90,16 @@ export async function buildJapaneseRelease(
   ].map((path) => rm(path, { force: true })));
 
   snapshotCanonicalDatabase(productionPath, artifacts.sqlite, japaneseCanonicalTables);
-  const coverage = readCoverageFrom(artifacts.sqlite, "ja");
   const releasedDb = new Database(artifacts.sqlite, { readonly: true });
-  const coverageGaps = readExplanationCoverageGaps(releasedDb);
-  releasedDb.close();
+  const coverageGaps = (() => {
+    try {
+      assertJapaneseEvidenceSnapshotCurrent(releasedDb, evidenceSnapshot);
+      return readExplanationCoverageGaps(releasedDb);
+    } finally {
+      releasedDb.close();
+    }
+  })();
+  const coverage = readCoverageFrom(artifacts.sqlite, "ja");
   for (const lang of Object.keys(coverage)) {
     artifacts.yomitan[lang] = join(options.outputDirectory, `yori-ja-${lang}.zip`);
     await rm(artifacts.yomitan[lang], { force: true });

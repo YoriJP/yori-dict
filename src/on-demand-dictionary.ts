@@ -515,6 +515,14 @@ function repairPartialGroup(
   existing: PublicLookupItem,
   request: ResolveRequest
 ): Promise<PublicLookupItem | null> {
+  request = {
+    ...request,
+    candidate: {
+      id: existing.id,
+      headword: existing.word,
+      ...(request.candidate?.inflectionPath ? { inflectionPath: request.candidate.inflectionPath } : {})
+    }
+  };
   return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, existing.word), async () => {
     const current = options.repository.findById?.(
       existing.id,
@@ -529,8 +537,7 @@ function repairPartialGroup(
         options,
         current.word,
         coverage.sourceEvidence,
-        coverage.evidenceSnapshot,
-        current.id
+        coverage.evidenceSnapshot
       ) ?? current;
     } catch (error) {
       if (error instanceof JapaneseEvidenceSnapshotChangedError) {
@@ -779,14 +786,12 @@ async function authorEntry(
   options: RuntimeOptions,
   headword: string,
   evidence: SourceEvidence[],
-  expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot,
-  targetEntryId?: string
+  expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
 ): Promise<PublicLookupItem | null> {
   // An entry shares one identity across explanation languages. When the
   // dictionary already knows this headword, the authored group joins that
   // entry instead of creating a second entry the read path would never see.
-  const entryId = targetEntryId
-    ?? request.candidate?.id
+  const entryId = request.candidate?.id
     ?? options.repository.canonicalEntry?.(headword)?.id
     ?? stableId("entry", headword);
   const vocabulary = options.repository.labelVocabulary();

@@ -8,6 +8,7 @@ import { createEnglishSchema } from "./english-schema";
 import {
   assertPublishableJapaneseEvidenceSnapshot,
   assertJapaneseEvidenceSnapshotCurrent,
+  japaneseEvidenceInventoryVersion,
   readJapaneseEvidenceSnapshot,
   sameJapaneseEvidenceSnapshot
 } from "./japanese-evidence-snapshot";
@@ -214,6 +215,10 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
       // share the same production file and the same concurrent enrichment
       // writer, so either source refresh can race a deferred WAL snapshot.
       production.transaction(() => {
+        production.exec("create temp table ja_import_inventory (incoming_version text)");
+        production.prepare("insert into ja_import_inventory values (?)").run(
+          japaneseEvidenceInventoryVersion(incomingSnapshot)
+        );
         production.exec(`
           -- A headword first accepted as a generated entry, and now supplied by
           -- the release, is promoted to the release's own identity. Without
@@ -253,15 +258,11 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           create temp table retained_ja_evidence as
             select evidence.* from ja_sense_evidence evidence
             where evidence.sense_id in (select id from retained_ja_senses);
-          -- Evidence IDs are ordinal within one JMdict source version. Capture
-          -- the installed version on migrated authored senses before metadata
-          -- is replaced, so later comparisons cannot confuse two inventories.
+          -- A legacy bare format version does not identify the dictionary date
+          -- that assigned its Evidence ordinals. Preserve it as unproven;
+          -- missing provenance must not inherit the currently installed date.
           update retained_ja_senses
-             set source_version = coalesce(
-               source_version,
-               (select value from ja_metadata where key = 'jmdictSimplifiedVersion'),
-               'unknown'
-             )
+             set source_version = coalesce(source_version, 'unknown')
            where source_ref is not null or id in (select sense_id from retained_ja_evidence);
           -- A structure-only ja-3 migration leaves this table empty for
           -- pre-existing ja-2 senses. Recover each exact legacy reference here,
@@ -332,6 +333,13 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           insert or ignore into ja_glosses select * from japanese_release.ja_glosses;
           insert or ignore into ja_examples select * from japanese_release.ja_examples;
           insert or ignore into ja_explanation_group_gaps select * from japanese_release.ja_explanation_group_gaps;
+          update ja_senses
+             set source_version = (select incoming_version from ja_import_inventory)
+           where id in (select id from japanese_release.ja_senses)
+             and generation_id is null and provenance = 'source'
+             and (source_version is null or source_version = (
+               select value from ja_metadata where key = 'jmdictSimplifiedVersion'
+             ));
           -- A release group with exact missing Evidence is objectively partial.
           -- An accepted retained repair replaces that group; complete or
           -- Unknown Coverage release content remains authoritative.
@@ -448,7 +456,7 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           insert or ignore into ja_explanation_group_gaps
             (entry_id, lang, missing_evidence_id, source_version, basis)
             select replacement.entry_id, replacement.lang, expected.evidence_id,
-                   coalesce((select value from ja_metadata where key = 'jmdictSimplifiedVersion'), 'unknown'),
+                   (select incoming_version from ja_import_inventory),
                    'accepted-authored-evidence'
               from retained_ja_restored_groups replacement
               join ja_senses source_sense
@@ -486,9 +494,10 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           drop table retained_ja_glosses;
           drop table retained_ja_evidence;
           drop table retained_ja_examples;
+          drop table ja_import_inventory;
         `);
+        assertJapaneseEvidenceSnapshotCurrent(production, incomingSnapshot);
       }).immediate();
-      assertJapaneseEvidenceSnapshotCurrent(production, incomingSnapshot);
     } finally {
       production.exec("detach database japanese_release");
     }

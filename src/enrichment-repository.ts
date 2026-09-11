@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { readJapaneseLookupItem, type LookupDb } from "./db";
 import {
   assertJapaneseEvidenceSnapshotCurrent,
+  japaneseEvidenceInventoryVersion,
   readJapaneseEvidenceSnapshot
 } from "./japanese-evidence-snapshot";
 import { createJapaneseSchema } from "./japanese-schema";
@@ -158,7 +159,11 @@ export function openEnrichmentRepository(
         if (sourceVersions.size !== 1) return { kind: "not-proven-partial" };
         const sourceVersion = gaps[0]!.source_version;
         const evidenceSnapshot = readJapaneseEvidenceSnapshot(db);
-        if (evidenceSnapshot.jmdictSimplifiedVersion !== sourceVersion) {
+        const inventoryVersion = japaneseEvidenceInventoryVersion(evidenceSnapshot);
+        if (inventoryVersion === "unknown" || (
+          sourceVersion !== inventoryVersion
+          && sourceVersion !== evidenceSnapshot.jmdictSimplifiedVersion
+        )) {
           return { kind: "not-proven-partial" };
         }
         const missingEvidenceIds = gaps.map((row) => row.missing_evidence_id);
@@ -204,7 +209,7 @@ export function openEnrichmentRepository(
           ? assertJapaneseEvidenceSnapshotCurrent(db, expectedEvidenceSnapshot)
           : readJapaneseEvidenceSnapshot(db);
         const currentJapaneseSourceVersion =
-          currentEvidenceSnapshot.jmdictSimplifiedVersion ?? "unknown";
+          japaneseEvidenceInventoryVersion(currentEvidenceSnapshot);
         const senseIds = db.query<{ id: string }, [string, string]>(
           "select id from ja_senses where entry_id = ? and lang = ?"
         ).all(entry.id, lang).map((row) => row.id);

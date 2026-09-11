@@ -144,21 +144,21 @@ test("a rebuild records the exact source Evidence missing from a retained langua
         entryId: "yori:e_jmdict_1410750",
         lang: "zh-tw",
         missingEvidenceId: "jmdict:1410750:2",
-        sourceVersion: "fixture-v1",
+        sourceVersion: JSON.stringify(["fixture-v1", "2026-09-06"]),
         basis: "legacy-exact-sense-mapping"
       },
       {
         entryId: "yori:e_jmdict_1410750",
         lang: "zh-tw",
         missingEvidenceId: "jmdict:1410750:3",
-        sourceVersion: "fixture-v1",
+        sourceVersion: JSON.stringify(["fixture-v1", "2026-09-06"]),
         basis: "legacy-exact-sense-mapping"
       },
       {
         entryId: "yori:e_jmdict_1410750",
         lang: "zh-tw",
         missingEvidenceId: "jmdict:1410750:4",
-        sourceVersion: "fixture-v1",
+        sourceVersion: JSON.stringify(["fixture-v1", "2026-09-06"]),
         basis: "legacy-exact-sense-mapping"
       }
     ]
@@ -210,7 +210,7 @@ test("a rebuild recovers legacy source_ref Evidence after a structure-only migra
   rebuilt.close();
 });
 
-test("an evidence-free retained group cannot displace a newly proven partial group", async () => {
+test.each(["no evidence", "undated evidence"])("a retained group with %s remains unknown and cannot displace proven incoming coverage", async (evidenceKind) => {
   const root = mkdtempSync(join(tmpdir(), "yori-ja-unknown-retain-"));
   const input = join(root, "jmdict.json");
   const glossPath = join(root, "zh-tw.jsonl");
@@ -242,12 +242,24 @@ test("an evidence-free retained group cannot displace a newly proven partial gro
       ...imported.senses[0]!,
       id: "yori:s_unknown_1410750:zh-tw:1",
       glosses: [{ lang: "zh-tw", text: "沒有來源證據的解釋", source: "generated", reviewStatus: "checked" }],
-      evidenceIds: [],
-      provenance: "generated"
+      evidenceIds: evidenceKind === "undated evidence" ? ["jmdict:1410750:1"] : [],
+      provenance: evidenceKind === "undated evidence" ? "source" : "generated"
     }]
   }, "zh-tw", generation);
   repository.close();
   lookup.close();
+
+  if (evidenceKind === "undated evidence") {
+    const undated = new Database(out);
+    undated.prepare("update ja_senses set source_version = 'fixture-v1' where lang = 'zh-tw'").run();
+    undated.close();
+  }
+  const retainedOnly = await rebuildJapaneseDictionary({ input, out });
+  expect(retainedOnly.coverageGaps.details).toEqual([]);
+  const retainedLookup = openLookupDb(out);
+  expect(retainedLookup.lookup("様", "zh-tw").item?.senses[0]?.glosses[0]?.text)
+    .toBe("沒有來源證據的解釋");
+  retainedLookup.close();
 
   await writeFile(glossPath, JSON.stringify({
     senseId: "yori:s_jmdict_1410750_1", lang: "zh-tw", glosses: ["樣子"]
@@ -540,7 +552,7 @@ test("an accepted repair survives same-version rebuilds but not a new ordinal in
   expect(completeImport.coverageGaps.summary["zh-tw"]).toBeUndefined();
 });
 
-test("retained ordinal Evidence does not cover a different sense in a newer source version", async () => {
+test.each(["source version", "dictionary date"])("retained ordinal Evidence does not cover a different sense after changing %s", async (changedField) => {
   const root = mkdtempSync(join(tmpdir(), "yori-ja-versioned-evidence-"));
   const input = join(root, "jmdict.json");
   const glossPath = join(root, "zh-tw.jsonl");
@@ -551,7 +563,7 @@ test("retained ordinal Evidence does not cover a different sense in a newer sour
     gloss: [{ lang: "eng", gender: null, type: null, text }]
   });
   const writeSource = async (version: string, glosses: string[]) => writeFile(input, JSON.stringify({
-    version,
+    version: changedField === "dictionary date" ? "3.6.2" : version,
     dictDate: version,
     words: [{
       id: "1410750",

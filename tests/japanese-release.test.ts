@@ -111,6 +111,43 @@ test("a Japanese release refuses a snapshot without a JMdict inventory version",
   })).rejects.toThrow("JMdict inventory version");
 });
 
+test("a Japanese release rejects a source refresh between validation and copying", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-release-refresh-"));
+  const path = join(root, "production.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  const refresh = new Database(path);
+  const originalQuery = Database.prototype.query;
+  let refreshed = false;
+  Database.prototype.query = function (this: Database, sql: string) {
+    const statement = originalQuery.call(this, sql);
+    if (!sql.includes("select key, value from ja_metadata")) return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property !== "all") return Reflect.get(target, property, target);
+        return (...parameters: unknown[]) => {
+          const rows = (target.all as (...args: unknown[]) => unknown[])(...parameters);
+          if (!refreshed) {
+            refreshed = true;
+            refresh.exec("update ja_metadata set value = 'refreshed' where key = 'dictDate'");
+          }
+          return rows;
+        };
+      }
+    });
+  } as typeof Database.prototype.query;
+  try {
+    await expect(buildJapaneseRelease(path, {
+      outputDirectory: join(root, "release"), version: "test"
+    })).rejects.toThrow("Japanese Evidence snapshot changed");
+    expect(refreshed).toBe(true);
+    expect(await Bun.file(join(root, "release/yori-dict-test.json")).exists()).toBe(false);
+    expect(await Bun.file(join(root, "release/yori-dict-test.sqlite.gz")).exists()).toBe(false);
+  } finally {
+    Database.prototype.query = originalQuery;
+    refresh.close();
+  }
+});
+
 test("no release artifact mixes explanation languages", async () => {
   const { artifacts } = await release();
   const released = new Database(artifacts.sqlite, { readonly: true });
