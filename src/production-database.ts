@@ -5,6 +5,13 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { downloadPinnedDataRelease } from "../scripts/download-data-release";
 import { createEnglishSchema } from "./english-schema";
+import {
+  assertPublishableJapaneseEvidenceSnapshot,
+  assertJapaneseEvidenceSnapshotCurrent,
+  japaneseEvidenceInventoryVersion,
+  readJapaneseEvidenceSnapshot,
+  sameJapaneseEvidenceSnapshot
+} from "./japanese-evidence-snapshot";
 import { createJapaneseSchema } from "./japanese-schema";
 
 const migrationsFolder = resolve(import.meta.dir, "../drizzle");
@@ -180,19 +187,23 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
  * examples on imported senses are retained with their provenance.
  */
 export function importJapaneseRelease(path: string, releasePath: string): boolean {
+  const source = new Database(releasePath, { readonly: true });
+  const incomingSnapshot = (() => {
+    try {
+      return readJapaneseEvidenceSnapshot(source);
+    } finally {
+      source.close();
+    }
+  })();
+  assertPublishableJapaneseEvidenceSnapshot(incomingSnapshot);
+  if (!incomingSnapshot.dictDate) {
+    throw new Error(`Japanese release has no dictDate: ${releasePath}`);
+  }
   const production = new Database(path);
   production.exec("pragma journal_mode = WAL; pragma synchronous = NORMAL; pragma busy_timeout = 5000;");
   createJapaneseSchema(production);
-  const source = new Database(releasePath, { readonly: true });
-  const incomingVersion = source.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'dictDate'"
-  ).get()?.value;
-  source.close();
-  if (!incomingVersion) throw new Error(`Japanese release has no dictDate: ${releasePath}`);
-  const currentVersion = production.query<{ value: string }, []>(
-    "select value from ja_metadata where key = 'dictDate'"
-  ).get()?.value;
-  if (currentVersion === incomingVersion) {
+  const currentSnapshot = readJapaneseEvidenceSnapshot(production);
+  if (sameJapaneseEvidenceSnapshot(currentSnapshot, incomingSnapshot)) {
     production.close();
     return false;
   }
@@ -204,6 +215,10 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
       // share the same production file and the same concurrent enrichment
       // writer, so either source refresh can race a deferred WAL snapshot.
       production.transaction(() => {
+        production.exec("create temp table ja_import_inventory (incoming_version text)");
+        production.prepare("insert into ja_import_inventory values (?)").run(
+          japaneseEvidenceInventoryVersion(incomingSnapshot)
+        );
         production.exec(`
           -- A headword first accepted as a generated entry, and now supplied by
           -- the release, is promoted to the release's own identity. Without
@@ -240,6 +255,36 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           create temp table retained_ja_glosses as
             select gloss.* from ja_glosses gloss
             where gloss.sense_id in (select id from retained_ja_senses);
+          create temp table retained_ja_evidence as
+            select evidence.* from ja_sense_evidence evidence
+            where evidence.sense_id in (select id from retained_ja_senses);
+          -- A legacy bare format version does not identify the dictionary date
+          -- that assigned its Evidence ordinals. Preserve it as unproven;
+          -- missing provenance must not inherit the currently installed date.
+          update retained_ja_senses
+             set source_version = coalesce(source_version, 'unknown')
+           where source_ref is not null or id in (select sense_id from retained_ja_evidence);
+          -- A structure-only ja-3 migration leaves this table empty for
+          -- pre-existing ja-2 senses. Recover each exact legacy reference here,
+          -- during the explicit content import, and normalize it to Evidence ID.
+          insert or ignore into retained_ja_evidence
+            (sense_id, position, evidence_id, source_name)
+            select retained.id, 1,
+                   case
+                     when retained.source_ref like 'yori:s_jmdict_%'
+                       then 'jmdict:' || replace(
+                         substr(retained.source_ref, length('yori:s_jmdict_') + 1),
+                         '_', ':'
+                       )
+                     else retained.source_ref
+                   end,
+                   coalesce(retained.source_name, 'source')
+              from retained_ja_senses retained
+             where retained.source_ref is not null
+               and not exists (
+                 select 1 from retained_ja_evidence evidence
+                  where evidence.sense_id = retained.id
+               );
           create temp table retained_ja_examples as
             select example.* from ja_examples example
             join ja_senses sense on sense.id = example.sense_id
@@ -253,6 +298,14 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           delete from ja_glosses where sense_id in (
             select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
             where entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries)
+          );
+          delete from ja_sense_evidence where sense_id in (
+            select sense.id from ja_senses sense join ja_entries entry on entry.id = sense.entry_id
+            where entry.source <> 'generated' or entry.id in (select id from promoted_ja_entries)
+          );
+          delete from ja_explanation_group_gaps where entry_id in (
+            select id from ja_entries where source <> 'generated'
+            union select id from promoted_ja_entries
           );
           delete from ja_senses where entry_id in (
             select id from ja_entries where source <> 'generated'
@@ -276,8 +329,111 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           insert or ignore into ja_forms select * from japanese_release.ja_forms;
           insert or ignore into ja_lookup_terms select * from japanese_release.ja_lookup_terms;
           insert or ignore into ja_senses select * from japanese_release.ja_senses;
+          insert or ignore into ja_sense_evidence select * from japanese_release.ja_sense_evidence;
           insert or ignore into ja_glosses select * from japanese_release.ja_glosses;
           insert or ignore into ja_examples select * from japanese_release.ja_examples;
+          insert or ignore into ja_explanation_group_gaps select * from japanese_release.ja_explanation_group_gaps;
+          update ja_senses
+             set source_version = (select incoming_version from ja_import_inventory)
+           where id in (select id from japanese_release.ja_senses)
+             and generation_id is null and provenance = 'source'
+             and (source_version is null or source_version = (
+               select value from ja_metadata where key = 'jmdictSimplifiedVersion'
+             ));
+          -- A release group with exact missing Evidence is objectively partial.
+          -- An accepted retained repair replaces that group; complete or
+          -- Unknown Coverage release content remains authoritative.
+          create temp table retained_ja_replacements as
+            select distinct retained.entry_id as entry_id, retained.lang as lang
+              from retained_ja_senses retained
+              join ja_explanation_group_gaps gap
+                on gap.entry_id = retained.entry_id and gap.lang = retained.lang
+             where exists (
+               select 1 from retained_ja_senses retained_sense
+                 join retained_ja_evidence retained_evidence
+                   on retained_evidence.sense_id = retained_sense.id
+                 join ja_senses source_sense
+                   on source_sense.entry_id = retained_sense.entry_id
+                  and source_sense.lang = 'en'
+                  and source_sense.provenance = 'source'
+                 join ja_sense_evidence expected
+                   on expected.sense_id = source_sense.id
+                  and expected.evidence_id = retained_evidence.evidence_id
+                where retained_sense.entry_id = retained.entry_id
+                  and retained_sense.lang = retained.lang
+                  and retained_sense.source_version = gap.source_version
+                  and source_sense.source_version = gap.source_version
+             )
+               and exists (
+                 select 1 from ja_senses incoming_sense
+                   join ja_sense_evidence incoming_evidence
+                     on incoming_evidence.sense_id = incoming_sense.id
+                   join ja_senses source_sense
+                     on source_sense.entry_id = incoming_sense.entry_id
+                    and source_sense.lang = 'en'
+                    and source_sense.provenance = 'source'
+                   join ja_sense_evidence expected
+                     on expected.sense_id = source_sense.id
+                    and expected.evidence_id = incoming_evidence.evidence_id
+                  where incoming_sense.entry_id = retained.entry_id
+                    and incoming_sense.lang = retained.lang
+                    and incoming_sense.source_version = gap.source_version
+                    and source_sense.source_version = gap.source_version
+               )
+               and not exists (
+                 select 1 from ja_senses incoming_sense
+                   join ja_sense_evidence incoming_evidence
+                     on incoming_evidence.sense_id = incoming_sense.id
+                   join ja_senses source_sense
+                     on source_sense.entry_id = incoming_sense.entry_id
+                    and source_sense.lang = 'en'
+                    and source_sense.provenance = 'source'
+                   join ja_sense_evidence expected
+                     on expected.sense_id = source_sense.id
+                    and expected.evidence_id = incoming_evidence.evidence_id
+                  where incoming_sense.entry_id = retained.entry_id
+                    and incoming_sense.lang = retained.lang
+                    and incoming_sense.source_version = gap.source_version
+                    and source_sense.source_version = gap.source_version
+                    and not exists (
+                      select 1 from retained_ja_senses retained_sense
+                        join retained_ja_evidence retained_evidence
+                          on retained_evidence.sense_id = retained_sense.id
+                       where retained_sense.entry_id = retained.entry_id
+                         and retained_sense.lang = retained.lang
+                         and retained_sense.source_version = gap.source_version
+                         and retained_evidence.evidence_id = incoming_evidence.evidence_id
+                    )
+               );
+          delete from ja_examples where sense_id in (
+            select sense.id from ja_senses sense join retained_ja_replacements replacement
+              on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang
+          );
+          delete from ja_glosses where sense_id in (
+            select sense.id from ja_senses sense join retained_ja_replacements replacement
+              on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang
+          );
+          delete from ja_sense_evidence where sense_id in (
+            select sense.id from ja_senses sense join retained_ja_replacements replacement
+              on replacement.entry_id = sense.entry_id and replacement.lang = sense.lang
+          );
+          delete from ja_senses where exists (
+            select 1 from retained_ja_replacements replacement
+             where replacement.entry_id = ja_senses.entry_id and replacement.lang = ja_senses.lang
+          );
+          delete from ja_explanation_group_gaps where exists (
+            select 1 from retained_ja_replacements replacement
+             where replacement.entry_id = ja_explanation_group_gaps.entry_id
+               and replacement.lang = ja_explanation_group_gaps.lang
+          );
+          create temp table retained_ja_restored_groups as
+            select distinct retained.entry_id as entry_id, retained.lang as lang
+              from retained_ja_senses retained
+              join ja_entries entry on entry.id = retained.entry_id
+             where not exists (
+               select 1 from ja_senses existing
+                where existing.entry_id = retained.entry_id and existing.lang = retained.lang
+             );
           -- A retained group only returns to an entry the release still
           -- provides, and never displaces content the release itself explains
           -- in that language.
@@ -288,26 +444,60 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
               select 1 from ja_senses existing
                where existing.entry_id = retained.entry_id and existing.lang = retained.lang
             );
+          insert or ignore into ja_sense_evidence
+            select retained.* from retained_ja_evidence retained
+            join ja_senses sense on sense.id = retained.sense_id;
           insert or ignore into ja_glosses
             select retained.* from retained_ja_glosses retained
             join ja_senses sense on sense.id = retained.sense_id;
           insert or ignore into ja_examples
             select retained.* from retained_ja_examples retained
             join ja_senses sense on sense.id = retained.sense_id;
+          insert or ignore into ja_explanation_group_gaps
+            (entry_id, lang, missing_evidence_id, source_version, basis)
+            select replacement.entry_id, replacement.lang, expected.evidence_id,
+                   (select incoming_version from ja_import_inventory),
+                   'accepted-authored-evidence'
+              from retained_ja_restored_groups replacement
+              join ja_senses source_sense
+                on source_sense.entry_id = replacement.entry_id
+               and source_sense.lang = 'en'
+               and source_sense.provenance = 'source'
+              join ja_sense_evidence expected on expected.sense_id = source_sense.id
+             where not exists (
+               select 1 from ja_senses target_sense
+                 join ja_sense_evidence covered on covered.sense_id = target_sense.id
+                where target_sense.entry_id = replacement.entry_id
+                  and target_sense.lang = replacement.lang
+                  and covered.evidence_id = expected.evidence_id
+                  and target_sense.source_version = source_sense.source_version
+             )
+               and exists (
+                 select 1 from retained_ja_senses retained_sense
+                   join retained_ja_evidence retained_evidence
+                     on retained_evidence.sense_id = retained_sense.id
+                   join ja_senses mapped_source_sense
+                     on mapped_source_sense.entry_id = retained_sense.entry_id
+                    and mapped_source_sense.lang = 'en'
+                    and mapped_source_sense.provenance = 'source'
+                   join ja_sense_evidence mapped_expected
+                     on mapped_expected.sense_id = mapped_source_sense.id
+                    and mapped_expected.evidence_id = retained_evidence.evidence_id
+                  where retained_sense.entry_id = replacement.entry_id
+                    and retained_sense.lang = replacement.lang
+                    and retained_sense.source_version = mapped_source_sense.source_version
+               );
           drop table promoted_ja_entries;
+          drop table retained_ja_replacements;
+          drop table retained_ja_restored_groups;
           drop table retained_ja_senses;
           drop table retained_ja_glosses;
+          drop table retained_ja_evidence;
           drop table retained_ja_examples;
+          drop table ja_import_inventory;
         `);
+        assertJapaneseEvidenceSnapshotCurrent(production, incomingSnapshot);
       }).immediate();
-      const installedVersion = production.query<{ value: string }, []>(
-        "select value from ja_metadata where key = 'dictDate'"
-      ).get()?.value;
-      if (installedVersion !== incomingVersion) {
-        throw new Error(
-          `Japanese release graft did not install ${incomingVersion}: found ${installedVersion ?? "no version"}`
-        );
-      }
     } finally {
       production.exec("detach database japanese_release");
     }
@@ -435,7 +625,7 @@ function hasJapaneseDictionary(path: string): boolean {
   if (!existsSync(path)) return false;
   const db = new Database(path, { readonly: true });
   try {
-    return Boolean(db.query<{ value: string }, []>("select value from ja_metadata where key = 'dictDate'").get()?.value);
+    return Boolean(readJapaneseEvidenceSnapshot(db).dictDate);
   } catch {
     return false;
   } finally {

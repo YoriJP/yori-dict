@@ -15,3 +15,5 @@ Enrichment authors one entry-language group per request, and production persists
 A release publishes one canonical SQLite and JSONL plus one Yomitan pack per explanation language, named `yori-ja-<lang>.zip`. Language separation is structural rather than a filter applied while writing, so a pack cannot silently mix languages.
 
 Source maintenance is a deliberate full rebuild into a fresh file. A failed rebuild leaves the previous database usable, and a sense the pinned source version no longer contains simply disappears along with the legacy records mapped onto it.
+
+Evidence coverage is defined separately in ADR-0013. Different Sense counts remain valid; only exact Evidence identity can prove that an existing Explanation Group omitted source-backed meaning.

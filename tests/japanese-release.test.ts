@@ -60,6 +60,7 @@ test("the Japanese release publishes sibling language groups, per-language packs
   expect(manifest.coverage.en).toEqual({ entries: 15, senses: 18, glosses: 21, examples: 2 });
   expect(manifest.coverage["zh-tw"]).toEqual({ entries: 2, senses: 2, glosses: 2, examples: 0 });
   expect(manifest.coverage.ja).toEqual({ entries: 1, senses: 1, glosses: 1, examples: 1 });
+  expect(manifest.coverageGaps).toEqual({ "zh-tw": { groups: 1, missingEvidenceIds: 1 } });
   expect(manifest.yomitan).toEqual({
     en: "yori-ja-en.zip",
     ja: "yori-ja-ja.zip",
@@ -79,6 +80,72 @@ test("the Japanese release publishes sibling language groups, per-language packs
     "select name from sqlite_master where type = 'table' and name not like 'sqlite_%' and name not like 'ja_%'"
   ).all()).toEqual([]);
   released.close();
+});
+
+test("a Japanese release refuses an unclassified migrated database", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-unclassified-release-"));
+  const path = join(root, "production.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  migrateProductionDatabase(path);
+  const migrated = new Database(path);
+  migrated.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
+  migrated.close();
+
+  await expect(buildJapaneseRelease(path, {
+    outputDirectory: join(root, "release"),
+    version: "test"
+  })).rejects.toThrow("ja-2");
+});
+
+test("a Japanese release refuses a snapshot without a JMdict inventory version", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-unversioned-release-"));
+  const path = join(root, "production.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  const unversioned = new Database(path);
+  unversioned.prepare("delete from ja_metadata where key = 'jmdictSimplifiedVersion'").run();
+  unversioned.close();
+
+  await expect(buildJapaneseRelease(path, {
+    outputDirectory: join(root, "release"),
+    version: "test"
+  })).rejects.toThrow("JMdict inventory version");
+});
+
+test("a Japanese release rejects a source refresh between validation and copying", async () => {
+  const root = mkdtempSync(join(tmpdir(), "yori-ja-release-refresh-"));
+  const path = join(root, "production.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  const refresh = new Database(path);
+  const originalQuery = Database.prototype.query;
+  let refreshed = false;
+  Database.prototype.query = function (this: Database, sql: string) {
+    const statement = originalQuery.call(this, sql);
+    if (!sql.includes("select key, value from ja_metadata")) return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property !== "all") return Reflect.get(target, property, target);
+        return (...parameters: unknown[]) => {
+          const rows = (target.all as (...args: unknown[]) => unknown[])(...parameters);
+          if (!refreshed) {
+            refreshed = true;
+            refresh.exec("update ja_metadata set value = 'refreshed' where key = 'dictDate'");
+          }
+          return rows;
+        };
+      }
+    });
+  } as typeof Database.prototype.query;
+  try {
+    await expect(buildJapaneseRelease(path, {
+      outputDirectory: join(root, "release"), version: "test"
+    })).rejects.toThrow("Japanese Evidence snapshot changed");
+    expect(refreshed).toBe(true);
+    expect(await Bun.file(join(root, "release/yori-dict-test.json")).exists()).toBe(false);
+    expect(await Bun.file(join(root, "release/yori-dict-test.sqlite.gz")).exists()).toBe(false);
+  } finally {
+    Database.prototype.query = originalQuery;
+    refresh.close();
+  }
 });
 
 test("no release artifact mixes explanation languages", async () => {
@@ -137,9 +204,8 @@ test("no release artifact mixes explanation languages", async () => {
     packs.set(lang, definitions);
   }
   expect(new Set(packs.get("en"))).not.toEqual(new Set(packs.get("zh-tw")));
-  // 食べる carries a variant written form, and each form gets its own row so a
-  // reader scanning the variant finds the entry too.
-  expect(packs.get("zh-tw")).toEqual(["未知詞", "吃", "吃"]);
+  // The language pack contains only its own two explanation groups.
+  expect(packs.get("zh-tw")).toEqual(["未知詞", "模糊詞"]);
 });
 
 test("a pack row carries the inflection class Yomitan validates deinflections against", async () => {
@@ -258,7 +324,7 @@ test("imported gloss language survives release into its own pack", async () => {
   expect(englishTerms.find((term) => term[0] === "学校")?.[5]).toEqual(["school"]);
 
   const taiwaneseTerms = JSON.parse(await packEntry(artifacts.yomitan["zh-tw"], "term_bank_1.json")) as unknown[][];
-  expect(taiwaneseTerms.find((term) => term[0] === "食べる")?.[5]).toEqual(["吃"]);
+  expect(taiwaneseTerms.find((term) => term[0] === "あいまい語")?.[5]).toEqual(["模糊詞"]);
 });
 
 test("a JMdict component EDRDG does not license never reaches a release", async () => {
@@ -327,7 +393,7 @@ async function release(): Promise<{ path: string; artifacts: JapaneseReleaseArti
   repository.close();
   lookup.close();
 
-  addLegacyTaiwaneseMeaning(path, "yori:s_jmdict_1358280_1", "吃");
+  addLegacyTaiwaneseMeaning(path, "yori:s_jmdict_2000006_1", "模糊詞");
 
   return {
     path,
@@ -391,6 +457,22 @@ function addLegacyTaiwaneseMeaning(path: string, baseSenseId: string, gloss: str
   db.prepare(
     "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, ?, 'generated', 'checked')"
   ).run(`${baseSenseId}:zh-tw`, gloss);
+  db.prepare(
+    "insert into ja_sense_evidence (sense_id, position, evidence_id, source_name) values (?, 1, ?, 'yori-legacy')"
+  ).run(`${baseSenseId}:zh-tw`, baseSenseId.replace(/^yori:s_jmdict_/, "jmdict:").replace(/_(\d+)$/, ":$1"));
+  const match = /^yori:s_jmdict_(.+)_(\d+)$/.exec(baseSenseId);
+  if (!match) throw new Error(`Unexpected JMdict sense id: ${baseSenseId}`);
+  const [, sourceEntryId, sourcePositionText] = match;
+  const sourcePosition = Number(sourcePositionText);
+  db.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, 'zh-tw', ?, ?, 'legacy-exact-sense-mapping')
+  `).run(
+    `yori:e_jmdict_${sourceEntryId}`,
+    `jmdict:${sourceEntryId}:${sourcePosition + 1}`,
+    String(source.source_version)
+  );
   db.close();
 }
 

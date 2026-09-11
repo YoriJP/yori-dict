@@ -4,10 +4,18 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rename } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+  japaneseEvidenceInventoryVersion,
+  readJapaneseEvidenceSnapshot,
+  writeJapaneseEvidenceSnapshot
+} from "./japanese-evidence-snapshot";
+import {
   createJapaneseSchema,
   hasJapaneseSchema,
   japaneseSchemaVersion,
+  normalizeJapaneseEvidenceId,
+  readExplanationCoverageGaps,
   readCoverage,
+  type ExplanationCoverageGapReport,
   type LanguageCoverage
 } from "./japanese-schema";
 import { parseApiLang, toApiLang } from "./lang";
@@ -38,6 +46,7 @@ export type JapaneseRebuildResult = {
   legacyGlosses: { imported: number; droppedUnknownSense: number };
   legacyExamples: { imported: number; droppedUnknownSense: number };
   retained: { entries: number; groups: number; examples: number };
+  coverageGaps: ExplanationCoverageGapReport;
 };
 
 type LegacyGlossRow = {
@@ -68,6 +77,7 @@ type RetainedGroup = {
   entryId: string;
   lang: string;
   senses: Array<Record<string, unknown>>;
+  evidence: Array<Record<string, unknown>>;
   glosses: Array<Record<string, unknown>>;
   examples: Array<Record<string, unknown>>;
   generations: Array<Record<string, unknown>>;
@@ -92,6 +102,7 @@ type RetainedEntry = {
   forms: Array<Record<string, unknown>>;
   lookupTerms: Array<Record<string, unknown>>;
   senses: Array<Record<string, unknown>>;
+  evidence: Array<Record<string, unknown>>;
   glosses: Array<Record<string, unknown>>;
   examples: Array<Record<string, unknown>>;
   generations: Array<Record<string, unknown>>;
@@ -156,9 +167,10 @@ async function buildInto(
 
   writeMetadata(db, source);
   const importResult = importWords(db, source, exampleSource, estimatedLevels);
-  const glossResult = importLegacyGlosses(db, legacyGlosses, importResult.importedSenses, source.version ?? "unknown");
+  const glossResult = importLegacyGlosses(db, legacyGlosses, importResult.importedSenses, readSourceVersion(db));
   const exampleResult = importLegacyExamples(db, legacyExamples, importResult.importedSenses);
   const retainedResult = restoreRetained(db, retained);
+  deriveExplanationCoverageGaps(db);
 
   return {
     entries: db.query<{ count: number }, []>("select count(*) as count from ja_entries").get()?.count ?? 0,
@@ -166,15 +178,18 @@ async function buildInto(
     sourcedExamples: importResult.exampleStats,
     legacyGlosses: glossResult,
     legacyExamples: exampleResult,
-    retained: retainedResult
+    retained: retainedResult,
+    coverageGaps: readExplanationCoverageGaps(db)
   };
 }
 
 function writeMetadata(db: Database, source: JmdictFile): void {
+  writeJapaneseEvidenceSnapshot(db, {
+    schemaVersion: japaneseSchemaVersion,
+    dictDate: source.dictDate ?? null,
+    jmdictSimplifiedVersion: source.version ?? null
+  });
   const insert = db.prepare("insert or replace into ja_metadata (key, value) values (?, ?)");
-  insert.run("schemaVersion", japaneseSchemaVersion);
-  if (source.version) insert.run("jmdictSimplifiedVersion", source.version);
-  if (source.dictDate) insert.run("dictDate", source.dictDate);
   if (source.languages) insert.run("sourceLanguages", JSON.stringify(source.languages));
   if (source.tags) insert.run("tags", JSON.stringify(source.tags));
 }
@@ -195,7 +210,7 @@ function importWords(
 ) {
   const exampleStats = { imported: 0, unmatched: 0, ambiguous: 0, invalid: 0 };
   const importedSenses = new Map<string, ImportedSense>();
-  const sourceVersion = source.version ?? "unknown";
+  const sourceVersion = readSourceVersion(db);
 
   const insertEntry = db.prepare(
     "insert into ja_entries (id, source, source_id, headword_language, estimated_level) values (?, 'jmdict', ?, 'ja', ?)"
@@ -210,6 +225,7 @@ function importWords(
   const insertGloss = db.prepare(
     "insert into ja_glosses (sense_id, position, text, source, review_status, type) values (?, ?, ?, 'jmdict', 'source', ?)"
   );
+  const insertEvidence = insertEvidenceStatement(db);
   const insertExample = db.prepare(`
     insert or ignore into ja_examples
       (sense_id, position, text, translations, source, source_name, source_id, review_status)
@@ -280,6 +296,7 @@ function importWords(
             `jmdict:${word.id}:${index + 1}`,
             null
           );
+          insertEvidence.run(senseId, 1, `jmdict:${word.id}:${index + 1}`, "jmdict");
           glosses.forEach((gloss, glossIndex) => {
             insertGloss.run(senseId, glossIndex + 1, gloss.text, gloss.type ?? null);
           });
@@ -353,6 +370,7 @@ function importLegacyGlosses(
   const insertGloss = db.prepare(
     "insert into ja_glosses (sense_id, position, text, source, review_status, type) values (?, ?, ?, 'generated', 'checked', null)"
   );
+  const insertEvidence = insertEvidenceStatement(db);
   const insertGeneration = db.prepare(`
     insert or ignore into ja_generations
       (id, model, provider, reasoning_effort, prompt_version, service_tier, review_outcome, created_at)
@@ -413,6 +431,12 @@ function importLegacyGlosses(
         row.senseId,
         generationId
       );
+      insertEvidence.run(
+        senseId,
+        1,
+        row.senseId.replace(/^yori:s_jmdict_/, "jmdict:").replace(/_(\d+)$/, ":$1"),
+        row.source ?? "yori-legacy"
+      );
       imported.byLang.set(lang, senseId);
       let glossPosition = 0;
       for (const gloss of row.glosses) {
@@ -426,6 +450,47 @@ function importLegacyGlosses(
   })(rows);
 
   return stats;
+}
+
+function insertEvidenceStatement(db: Database) {
+  return db.prepare(`
+    insert or ignore into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values (?, ?, ?, ?)
+  `);
+}
+
+function deriveExplanationCoverageGaps(db: Database): void {
+  db.prepare("delete from ja_explanation_group_gaps").run();
+  const insert = db.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, ?, ?, ?, ?)
+  `);
+  const groups = db.query<{ entry_id: string; lang: string }, []>(`
+    select distinct sense.entry_id as entry_id, sense.lang as lang
+      from ja_senses sense
+      join ja_sense_evidence evidence on evidence.sense_id = sense.id
+     where sense.lang <> 'en'
+     order by sense.entry_id, sense.lang
+  `).all();
+  for (const group of groups) {
+    const { expected, covered } = readEvidenceCoverage(db, group.entry_id, group.lang);
+    const coveredExpected = expected.filter(
+      (evidence) => covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))
+    );
+    if (coveredExpected.length === 0) continue;
+    const legacy = db.query<{ found: number }, [string, string]>(`
+      select 1 as found from ja_senses
+       where entry_id = ? and lang = ? and generation_id like 'legacy:%'
+       limit 1
+    `).get(group.entry_id, group.lang);
+    const basis = legacy ? "legacy-exact-sense-mapping" : "accepted-authored-evidence";
+    for (const evidence of expected) {
+      if (!covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))) {
+        insert.run(group.entry_id, group.lang, evidence.evidenceId, evidence.sourceVersion, basis);
+      }
+    }
+  }
 }
 
 function countSenses(db: Database, entryId: string, lang: string): number {
@@ -517,9 +582,9 @@ function readRetained(path: string): Retained {
                estimated_level as estimatedLevel
           from ja_entries where id = ?
       `).get(entryId)!;
-      const senses = db.query<Record<string, unknown>, [string]>(
+      const senses = versionRetainedSenses(db.query<Record<string, unknown>, [string]>(
         "select * from ja_senses where entry_id = ? order by lang, position"
-      ).all(entryId);
+      ).all(entryId));
       const senseIds = senses.map((sense) => String(sense.id));
       return {
         entry,
@@ -528,6 +593,7 @@ function readRetained(path: string): Retained {
           "select * from ja_lookup_terms where entry_id = ?"
         ).all(entryId),
         senses,
+        evidence: readEvidenceRows(db, senses),
         glosses: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
           "select * from ja_glosses where sense_id = ? order by position"
         ).all(senseId)),
@@ -557,14 +623,15 @@ function readRetained(path: string): Retained {
        group by sense.entry_id, sense.lang
        order by sense.entry_id, sense.lang
     `).all().map<RetainedGroup>(({ entry_id: entryId, lang }) => {
-      const senses = db.query<Record<string, unknown>, [string, string]>(
+      const senses = versionRetainedSenses(db.query<Record<string, unknown>, [string, string]>(
         "select * from ja_senses where entry_id = ? and lang = ? order by position"
-      ).all(entryId, lang);
+      ).all(entryId, lang));
       const senseIds = senses.map((sense) => String(sense.id));
       return {
         entryId,
         lang,
         senses,
+        evidence: readEvidenceRows(db, senses),
         glosses: senseIds.flatMap((senseId) => db.query<Record<string, unknown>, [string]>(
           "select * from ja_glosses where sense_id = ? order by position"
         ).all(senseId)),
@@ -648,6 +715,7 @@ function restoreRetained(
       for (const form of record.forms) insertRow(db, "ja_forms", form, true);
       for (const term of record.lookupTerms) insertRow(db, "ja_lookup_terms", term, true);
       for (const sense of record.senses) insertRow(db, "ja_senses", sense, false);
+      for (const evidence of record.evidence) insertRow(db, "ja_sense_evidence", evidence, false);
       for (const gloss of record.glosses) insertRow(db, "ja_glosses", gloss, false);
       for (const example of record.examples) insertRow(db, "ja_examples", example, false);
       entries += 1;
@@ -657,11 +725,17 @@ function restoreRetained(
       // not already explain it in this language: imported content wins, and a
       // retained group never reorders it.
       if (!db.query<{ id: string }, [string]>("select id from ja_entries where id = ?").get(group.entryId)) continue;
-      if (db.query<{ id: string }, [string, string]>(
+      const incoming = db.query<{ id: string }, [string, string]>(
         "select id from ja_senses where entry_id = ? and lang = ? limit 1"
-      ).get(group.entryId, group.lang)) continue;
+      ).get(group.entryId, group.lang);
+      if (incoming && (
+        !groupHasProvenGap(db, group.entryId, group.lang)
+        || !retainedGroupCoversIncoming(db, group)
+      )) continue;
+      if (incoming) deleteExplanationGroup(db, group.entryId, group.lang);
       for (const generation of group.generations) insertRow(db, "ja_generations", generation, true);
       for (const sense of group.senses) insertRow(db, "ja_senses", sense, false);
+      for (const evidence of group.evidence) insertRow(db, "ja_sense_evidence", evidence, false);
       for (const gloss of group.glosses) insertRow(db, "ja_glosses", gloss, false);
       for (const example of group.examples) insertRow(db, "ja_examples", example, false);
       groups += 1;
@@ -709,6 +783,9 @@ function reattachGroups(db: Database, record: RetainedEntry, entryId: string): n
     const senseIds = new Set(senses.map((sense) => String(sense.id)));
     for (const generation of record.generations) insertRow(db, "ja_generations", generation, true);
     for (const sense of senses) insertRow(db, "ja_senses", { ...sense, entry_id: entryId }, false);
+    for (const evidence of record.evidence) {
+      if (senseIds.has(String(evidence.sense_id))) insertRow(db, "ja_sense_evidence", evidence, false);
+    }
     for (const gloss of record.glosses) {
       if (senseIds.has(String(gloss.sense_id))) insertRow(db, "ja_glosses", gloss, false);
     }
@@ -718,6 +795,112 @@ function reattachGroups(db: Database, record: RetainedEntry, entryId: string): n
     moved += 1;
   }
   return moved;
+}
+
+function readEvidenceRows(
+  db: Database,
+  senses: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const hasEvidenceTable = Boolean(db.query<{ name: string }, []>(
+    "select name from sqlite_master where type = 'table' and name = 'ja_sense_evidence'"
+  ).get());
+  return senses.flatMap((sense) => {
+    const senseId = String(sense.id);
+    if (hasEvidenceTable) {
+      const evidence = db.query<Record<string, unknown>, [string]>(
+        "select * from ja_sense_evidence where sense_id = ? order by position"
+      ).all(senseId);
+      if (evidence.length > 0) return evidence;
+    }
+    const evidenceId = sense.source_ref;
+    return typeof evidenceId === "string" ? [{
+      sense_id: senseId,
+      position: 1,
+      evidence_id: normalizeJapaneseEvidenceId(evidenceId),
+      source_name: typeof sense.source_name === "string" ? sense.source_name : "source"
+    }] : [];
+  });
+}
+
+function groupHasProvenGap(db: Database, entryId: string, lang: string): boolean {
+  const { expected, covered } = readEvidenceCoverage(db, entryId, lang);
+  const coveredExpected = expected.filter(
+    (evidence) => covered.has(evidenceKey(evidence.evidenceId, evidence.sourceVersion))
+  );
+  return coveredExpected.length > 0 && coveredExpected.length < expected.length;
+}
+
+function retainedGroupCoversIncoming(db: Database, group: RetainedGroup): boolean {
+  const { expected, covered: incomingCovered } = readEvidenceCoverage(db, group.entryId, group.lang);
+  const expectedKeys = new Set(expected.map(
+    (evidence) => evidenceKey(evidence.evidenceId, evidence.sourceVersion)
+  ));
+  const senseVersions = new Map(group.senses.map(
+    (sense) => [String(sense.id), typeof sense.source_version === "string" ? sense.source_version : "unknown"]
+  ));
+  const retainedCovered = new Set(group.evidence.flatMap((evidence) => {
+    const sourceVersion = senseVersions.get(String(evidence.sense_id));
+    const evidenceId = evidence.evidence_id;
+    if (!sourceVersion || typeof evidenceId !== "string") return [];
+    const key = evidenceKey(evidenceId, sourceVersion);
+    return expectedKeys.has(key) ? [key] : [];
+  }));
+  const incomingExpected = [...incomingCovered].filter((key) => expectedKeys.has(key));
+  return retainedCovered.size > 0
+    && incomingExpected.every((key) => retainedCovered.has(key));
+}
+
+function versionRetainedSenses(
+  senses: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  return senses.map((sense) => ({
+    ...sense,
+    // Bare format versions and missing versions cannot prove a dated inventory.
+    source_version: typeof sense.source_version === "string" ? sense.source_version : "unknown"
+  }));
+}
+
+function readSourceVersion(db: Database): string {
+  return japaneseEvidenceInventoryVersion(readJapaneseEvidenceSnapshot(db));
+}
+
+function evidenceKey(evidenceId: string, sourceVersion: string): string {
+  return `${sourceVersion}\u0000${evidenceId}`;
+}
+
+function readEvidenceCoverage(
+  db: Database,
+  entryId: string,
+  lang: string
+): { expected: Array<{ evidenceId: string; sourceVersion: string }>; covered: Set<string> } {
+  const expected = db.query<{ evidence_id: string; source_version: string }, [string]>(`
+    select distinct evidence.evidence_id as evidence_id, sense.source_version as source_version
+      from ja_senses sense
+      join ja_sense_evidence evidence on evidence.sense_id = sense.id
+     where sense.entry_id = ? and sense.lang = 'en' and sense.provenance = 'source'
+     order by sense.position, evidence.position
+  `).all(entryId).map((row) => ({ evidenceId: row.evidence_id, sourceVersion: row.source_version }));
+  const covered = new Set(db.query<{ evidence_id: string; source_version: string }, [string, string]>(`
+    select distinct evidence.evidence_id as evidence_id, sense.source_version as source_version
+      from ja_senses sense
+      join ja_sense_evidence evidence on evidence.sense_id = sense.id
+     where sense.entry_id = ? and sense.lang = ?
+       and sense.source_version is not null
+  `).all(entryId, lang).map((row) => evidenceKey(row.evidence_id, row.source_version)));
+  return { expected, covered };
+}
+
+function deleteExplanationGroup(db: Database, entryId: string, lang: string): void {
+  const senseIds = db.query<{ id: string }, [string, string]>(
+    "select id from ja_senses where entry_id = ? and lang = ?"
+  ).all(entryId, lang).map((row) => row.id);
+  for (const senseId of senseIds) {
+    db.prepare("delete from ja_sense_evidence where sense_id = ?").run(senseId);
+    db.prepare("delete from ja_glosses where sense_id = ?").run(senseId);
+    db.prepare("delete from ja_examples where sense_id = ?").run(senseId);
+  }
+  db.prepare("delete from ja_senses where entry_id = ? and lang = ?").run(entryId, lang);
+  db.prepare("delete from ja_explanation_group_gaps where entry_id = ? and lang = ?").run(entryId, lang);
 }
 
 function matchExampleSenses(
@@ -810,4 +993,3 @@ async function readJsonl<T>(path: string): Promise<T[]> {
     .filter(Boolean)
     .map((line) => JSON.parse(line) as T);
 }
-

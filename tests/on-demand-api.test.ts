@@ -1,13 +1,20 @@
 import { expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createApp } from "../src/app";
-import type { LookupDb } from "../src/db";
-import { createOnDemandDictionary, ModelGatewayError } from "../src/on-demand-dictionary";
+import { openLookupDb, type LookupDb } from "../src/db";
+import { openEnrichmentRepository } from "../src/enrichment-repository";
+import { migrateProductionDatabase } from "../src/production-database";
+import { createJapaneseOnDemandDictionary, createOnDemandDictionary, ModelGatewayError } from "../src/on-demand-dictionary";
 import type {
   EnglishOnDemandDictionary,
   JapaneseOnDemandDictionary,
   OnDemandDictionary,
   ResolveRequest
 } from "../src/on-demand-dictionary";
+import type { ModelRequest } from "../src/on-demand-dictionary";
 import type { EnglishEntry } from "../src/english-types";
 import type { PublicLookupItem } from "../src/types";
 
@@ -68,6 +75,134 @@ test("the requested explanation language reaches the internal resolve request", 
   });
 
   expect(calls.map(({ lang }) => lang)).toEqual(["zh-tw", "ko"]);
+});
+
+test("the lookup route keeps a proven-partial group model-free until authorized repair", async () => {
+  const path = join(mkdtempSync(join(tmpdir(), "yori-route-partial-")), "yori.sqlite");
+  await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
+  migrateProductionDatabase(path);
+  const db = new Database(path);
+  const entryId = "yori:e_jmdict_1206730";
+  const englishSenseId = "yori:s_jmdict_1206730_1:en";
+  const targetSenseId = "yori:s_jmdict_1206730_1:zh-tw";
+  db.prepare(`
+    insert into ja_sense_evidence (sense_id, position, evidence_id, source_name)
+    values (?, 2, 'jmdict:1206730:2', 'jmdict')
+  `).run(englishSenseId);
+  db.prepare(`
+    update ja_senses
+       set applies_to_kanji = '["学校"]', applies_to_kana = '["がっこう"]'
+     where id = ?
+  `).run(englishSenseId);
+  const source = db.query<Record<string, unknown>, [string]>("select * from ja_senses where id = ?")
+    .get(englishSenseId)!;
+  const target: Record<string, unknown> = {
+    ...source,
+    id: targetSenseId,
+    lang: "zh-tw",
+    provenance: "generated",
+    source_name: "yori-legacy",
+    source_ref: "jmdict:1206730:1",
+    generation_id: "legacy:route"
+  };
+  db.prepare(`
+    insert into ja_generations
+      (id, model, provider, reasoning_effort, prompt_version, service_tier, review_outcome, created_at)
+    values ('legacy:route', 'legacy', 'unrecorded', 'unrecorded', 'legacy', null, 'accepted', 'legacy')
+  `).run();
+  const columns = Object.keys(target);
+  db.prepare(`insert into ja_senses (${columns.join(", ")}) values (${columns.map(() => "?").join(", ")})`)
+    .run(...columns.map((column) => target[column] as never));
+  db.prepare(
+    "insert into ja_glosses (sense_id, position, text, source, review_status) values (?, 1, '舊的學校解釋', 'generated', 'checked')"
+  ).run(targetSenseId);
+  db.prepare(
+    "insert into ja_sense_evidence (sense_id, position, evidence_id, source_name) values (?, 1, 'jmdict:1206730:1', 'yori-legacy')"
+  ).run(targetSenseId);
+  db.prepare(`
+    insert into ja_explanation_group_gaps
+      (entry_id, lang, missing_evidence_id, source_version, basis)
+    values (?, 'zh-tw', 'jmdict:1206730:2', ?, 'legacy-exact-sense-mapping')
+  `).run(entryId, String(source.source_version));
+  db.close();
+
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const responses = [
+    JSON.stringify({
+      headword: "学校", reading: "がっこう",
+      senses: [{
+        partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
+        pragmaticFunctions: [], glosses: ["提供教育的機構"],
+        evidenceIds: ["jmdict:1206730:1", "jmdict:1206730:2"], provenance: "source"
+      }]
+    }),
+    "ACCEPT", "ACCEPT",
+    JSON.stringify({ sentence: "毎朝、学校へ行きます。", translation: "我每天早上去學校。" }),
+    "ACCEPT", "ACCEPT"
+  ];
+  const calls: ModelRequest[] = [];
+  const dictionary = createJapaneseOnDemandDictionary({
+    repository,
+    reviewPasses: 2,
+    modelGateway: {
+      async call(input) {
+        calls.push(input);
+        const text = responses.shift();
+        if (!text) throw new Error(`Unexpected ${input.role} call`);
+        return {
+          text, requestId: `request-${calls.length}`, model: input.model, provider: "scripted",
+          effectiveServiceTier: input.requestedServiceTier, inputTokens: 1, outputTokens: 1
+        };
+      }
+    }
+  });
+  const app = createApp(lookup, { onDemand: japaneseResolver(dictionary), enrichmentToken: "secret" });
+
+  const publicResponse = await app.request("/v1/lookup?q=%E5%AD%A6%E6%A0%A1&dictionary=ja&lang=zh-tw");
+  expect((await publicResponse.json()).senses[0].glosses[0].text).toBe("舊的學校解釋");
+  expect(calls).toHaveLength(0);
+
+  const failingDictionary = createJapaneseOnDemandDictionary({
+    repository,
+    reviewPasses: 2,
+    modelGateway: {
+      async call() {
+        throw new ModelGatewayError("permanent", "provider unavailable");
+      }
+    }
+  });
+  const failingApp = createApp(lookup, {
+    onDemand: japaneseResolver(failingDictionary),
+    enrichmentToken: "secret"
+  });
+  const degraded = await failingApp.request(
+    "/v1/lookup?q=%E5%AD%A6%E6%A0%A1&dictionary=ja&lang=zh-tw&enrich=true",
+    { headers: { authorization: "Bearer secret" } }
+  );
+  expect(degraded.status).toBe(200);
+  expect((await degraded.json()).senses[0].glosses[0].text).toBe("舊的學校解釋");
+  const retryable = new Database(path, { readonly: true });
+  expect(retryable.query<{ count: number }, []>(
+    "select count(*) as count from ja_explanation_group_gaps where entry_id = 'yori:e_jmdict_1206730' and lang = 'zh-tw'"
+  ).get()?.count).toBe(1);
+  retryable.close();
+
+  const enrichedRequests = await Promise.all([1, 2].map(() => app.request(
+    "/v1/lookup?q=%E5%AD%A6%E6%A0%A1&dictionary=ja&lang=zh-tw&enrich=true",
+    { headers: { authorization: "Bearer secret" } }
+  )));
+  expect(enrichedRequests.map(({ status }) => status)).toEqual([200, 200]);
+  for (const response of enrichedRequests) {
+    const repaired = await response.json();
+    expect(repaired.senses[0].glosses[0].text).toBe("提供教育的機構");
+    expect(repaired.senses[0].appliesTo).toEqual({ kanji: ["学校"], kana: ["がっこう"] });
+  }
+  expect(calls.map(({ role }) => role)).toEqual([
+    "entry-author", "entry-review", "entry-review", "example-author", "example-review", "example-review"
+  ]);
+  repository.close();
+  lookup.close();
 });
 
 test("batch enrichment accepts contextual candidates while preserving order", async () => {

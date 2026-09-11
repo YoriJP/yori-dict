@@ -3,9 +3,15 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { findPrcTerms } from "../scripts/taiwan-terminology";
 import { deinflect } from "./deinflect";
 import { resolveEnglishLemma } from "./english-strip";
+import {
+  JapaneseEvidenceSnapshotChangedError,
+  type JapaneseEvidenceSnapshot
+} from "./japanese-evidence-snapshot";
 import type { ApiLang, InflectionStep, PublicExample, PublicLookupItem, PublicSense } from "./types";
 import type { EnglishEntry, EnglishExample, EnglishSourceRecord } from "./english-types";
 import type { LookupDictionary } from "./lookup-contract";
+
+export { JapaneseEvidenceSnapshotChangedError };
 
 /**
  * Enrichment targets the same headword dictionaries lookup names, so the two
@@ -52,6 +58,7 @@ export type SourceEvidence = {
     evidenceId: string;
     partOfSpeech: string[];
     glosses: Array<{ lang: string; text: string }>;
+    appliesTo?: { kanji: string[]; kana: string[] };
     labels?: string[];
     pronunciation?: string;
   }>;
@@ -151,6 +158,15 @@ export type GenerationProvenance = {
   createdAt: string;
 };
 
+export type ExplanationCoverageDecision =
+  | {
+      kind: "proven-partial";
+      missingEvidenceIds: string[];
+      sourceEvidence: SourceEvidence[];
+      evidenceSnapshot: JapaneseEvidenceSnapshot;
+    }
+  | { kind: "not-proven-partial" };
+
 /**
  * Japanese enrichment persistence is scoped to one explanation language.
  * `saveEntry` writes exactly one entry-language group, so a rejection or a
@@ -162,7 +178,13 @@ export type EnrichmentRepository = {
   findById?(id: string, lang: ApiLang, inflectionPath?: InflectionStep[]): PublicLookupItem | null;
   candidates?(query: string): CanonicalCandidate[];
   findSources(query: string, targetDictionary: TargetDictionary): SourceEvidence[];
-  saveEntry(entry: PublicLookupItem, lang: ApiLang, generation?: GenerationProvenance): void;
+  coverageDecision(entryId: string, lang: ApiLang): ExplanationCoverageDecision;
+  saveEntry(
+    entry: PublicLookupItem,
+    lang: ApiLang,
+    generation?: GenerationProvenance,
+    expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
+  ): void;
   saveExample(senseId: string, example: PublicExample, generation?: GenerationProvenance): void;
   recordAttempt(attempt: AttemptRecord): void;
   labelVocabulary(): LabelVocabulary;
@@ -453,12 +475,23 @@ export function createJapaneseOnDemandDictionary(options: {
         ? null
         : options.repository.find(request.query, request.targetDictionary, request.lang);
     if (invalidRequest(request)) return existing;
-    if (existing && existing.senses.every((sense) => hasJapaneseExamplePair(sense, request.lang))) return existing;
+    const coverage = existing
+      ? options.repository.coverageDecision(existing.id, request.lang)
+      : { kind: "not-proven-partial" as const };
+    if (
+      existing
+      && coverage.kind === "not-proven-partial"
+      && existing.senses.every((sense) => hasJapaneseExamplePair(sense, request.lang))
+    ) return existing;
 
     const key = `${effectiveMode(request.mode)}:${requestOutcomeKey(request)}`;
     const running = entryInFlight.get(key);
     if (running) return running;
-    const task = (existing ? completeEntryExamples(runtime, existing, request) : resolveMissing(request, runtime))
+    const task = (existing && coverage.kind === "proven-partial"
+      ? repairPartialGroup(runtime, existing, request)
+      : existing
+        ? completeEntryExamples(runtime, existing, request)
+        : resolveMissing(request, runtime))
       .finally(() => entryInFlight.delete(key));
     entryInFlight.set(key, task);
     return task;
@@ -475,6 +508,52 @@ export function createJapaneseOnDemandDictionary(options: {
       return run(request, () => resolveRanked(request, options.repository.candidates?.(request.query) ?? [], resolveCore));
     }
   };
+}
+
+function repairPartialGroup(
+  options: RuntimeOptions,
+  existing: PublicLookupItem,
+  request: ResolveRequest
+): Promise<PublicLookupItem | null> {
+  request = {
+    ...request,
+    candidate: {
+      id: existing.id,
+      headword: existing.word,
+      ...(request.candidate?.inflectionPath ? { inflectionPath: request.candidate.inflectionPath } : {})
+    }
+  };
+  return shareByKey(options.canonicalInFlight, entryOutcomeKey(request, existing.word), async () => {
+    const current = options.repository.findById?.(
+      existing.id,
+      request.lang,
+      request.candidate?.inflectionPath
+    ) ?? existing;
+    const coverage = options.repository.coverageDecision(current.id, request.lang);
+    if (coverage.kind !== "proven-partial") return completeEntryExamples(options, current, request);
+    try {
+      return await authorEntry(
+        request,
+        options,
+        current.word,
+        coverage.sourceEvidence,
+        coverage.evidenceSnapshot
+      ) ?? current;
+    } catch (error) {
+      if (error instanceof JapaneseEvidenceSnapshotChangedError) {
+        return options.repository.findById?.(
+          existing.id,
+          request.lang,
+          request.candidate?.inflectionPath
+        ) ?? current;
+      }
+      if (
+        error instanceof ModelGatewayError
+        && (error.kind === "transient" || error.kind === "permanent")
+      ) return current;
+      throw error;
+    }
+  });
 }
 
 const stringArraySchema = { type: "array", items: { type: "string" } };
@@ -706,7 +785,8 @@ async function authorEntry(
   request: ResolveRequest,
   options: RuntimeOptions,
   headword: string,
-  evidence: SourceEvidence[]
+  evidence: SourceEvidence[],
+  expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
 ): Promise<PublicLookupItem | null> {
   // An entry shares one identity across explanation languages. When the
   // dictionary already knows this headword, the authored group joins that
@@ -757,7 +837,12 @@ async function authorEntry(
   // One author request produced one complete entry-language group and every
   // configured review pass accepted it, so the group is persisted atomically for this
   // language alone.
-  options.repository.saveEntry(entry, request.lang, acceptedGeneration(authored.attempt));
+  options.repository.saveEntry(
+    entry,
+    request.lang,
+    acceptedGeneration(authored.attempt),
+    expectedEvidenceSnapshot
+  );
   // Read the group back so an authored language group on an existing entry
   // answers with that entry's own identity, written forms, and source facts
   // rather than the candidate's placeholder ones.
@@ -1157,12 +1242,14 @@ function parseAuthoredEntry(
     if (unknownPos) throw new Error(`Unknown part of speech: ${unknownPos}`);
     if (sense.provenance !== "source" && sense.provenance !== "generated") throw new Error("Invalid provenance");
     const evidenceIds = requiredStringList(sense.evidenceIds);
+    if (new Set(evidenceIds).size !== evidenceIds.length) throw new Error("Duplicate source evidence");
     if (sense.provenance === "source" && evidenceIds.length === 0) throw new Error("Source sense has no evidence");
     if (sense.provenance === "generated" && evidenceIds.length > 0) throw new Error("Generated sense claims source evidence");
     for (const evidenceId of evidenceIds) {
       if (!knownEvidence.has(evidenceId)) throw new Error("Unknown source evidence");
       usedEvidence.add(evidenceId);
     }
+    const appliesTo = sourceFormRestrictions(evidenceIds, knownEvidence);
     const glosses = parseGlosses(sense.glosses, lang, [expectedHeadword, value.reading]);
     const misc = requiredStringList(sense.registers);
     const field = requiredStringList(sense.domains);
@@ -1201,7 +1288,7 @@ function parseAuthoredEntry(
     return {
       id: stableId("sense", `${entryId}:${lang}:${index + 1}`),
       position: index + 1,
-      appliesTo: { kanji: ["*"], kana: ["*"] },
+      appliesTo,
       partOfSpeech,
       ...(misc.length ? { misc } : {}),
       ...(field.length ? { field } : {}),
@@ -1235,6 +1322,28 @@ function parseAuthoredEntry(
     ],
     senses
   };
+}
+
+function sourceFormRestrictions(
+  evidenceIds: string[],
+  knownEvidence: Map<string, SourceEvidence["senses"][number]>
+): PublicSense["appliesTo"] {
+  if (evidenceIds.length === 0) return { kanji: ["*"], kana: ["*"] };
+  const restrictions = evidenceIds.map((evidenceId) => knownEvidence.get(evidenceId)?.appliesTo);
+  if (restrictions.every((restriction) => restriction === undefined)) {
+    return { kanji: ["*"], kana: ["*"] };
+  }
+  if (restrictions.some((restriction) => restriction === undefined)) {
+    throw new Error("Source form restrictions were omitted");
+  }
+  const first = restrictions[0]!;
+  if (restrictions.some((restriction) =>
+    !sameStringSet(new Set(restriction!.kanji), new Set(first.kanji))
+    || !sameStringSet(new Set(restriction!.kana), new Set(first.kana))
+  )) {
+    throw new Error("Source senses with different form restrictions cannot be merged");
+  }
+  return { kanji: [...first.kanji], kana: [...first.kana] };
 }
 
 function parseGlosses(value: unknown, lang: ApiLang, circularTerms: string[]): PublicSense["glosses"] {

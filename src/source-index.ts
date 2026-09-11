@@ -51,6 +51,15 @@ function validateEvidence(value: unknown): SourceEvidence {
     const row = sense as Record<string, unknown>;
     if (!nonemptyString(row.evidenceId)) throw new Error("evidenceId is required");
     if (!Array.isArray(row.partOfSpeech) || !row.partOfSpeech.every(nonemptyString)) throw new Error("partOfSpeech is invalid");
+    if (row.appliesTo !== undefined) {
+      if (!row.appliesTo || typeof row.appliesTo !== "object" || Array.isArray(row.appliesTo)) {
+        throw new Error("appliesTo is invalid");
+      }
+      const appliesTo = row.appliesTo as Record<string, unknown>;
+      if (!nonemptyStringList(appliesTo.kanji) || !nonemptyStringList(appliesTo.kana)) {
+        throw new Error("appliesTo is invalid");
+      }
+    }
     if (!Array.isArray(row.glosses) || row.glosses.length === 0) throw new Error("glosses are required");
     for (const gloss of row.glosses) {
       if (!gloss || typeof gloss !== "object" || Array.isArray(gloss)) throw new Error("gloss must be an object");
@@ -63,4 +72,8 @@ function validateEvidence(value: unknown): SourceEvidence {
 
 function nonemptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function nonemptyStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every(nonemptyString);
 }

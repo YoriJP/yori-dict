@@ -13,6 +13,7 @@ import type {
   PublicSource,
   Xref
 } from "./types";
+import { normalizeJapaneseEvidenceId } from "./japanese-schema";
 import { normalizeQuery } from "./normalize";
 import { deinflect, type DeinflectionCandidate } from "./deinflect";
 
@@ -490,9 +491,24 @@ function readSenses(db: Database, entryId: string, lang: ApiLang): PublicSense[]
       ...whenPresent("pragmaticFunctions", parseList<string>(row.pragmatic_functions)),
       ...whenPresent("examples", readExamples(db, row.id)),
       glosses: readGlosses(db, row.id, row.lang),
-      evidenceIds: row.source_ref ? [row.source_ref] : [],
+      evidenceIds: readSenseEvidence(db, row.id, row.source_ref),
       provenance: row.provenance
     }));
+}
+
+function readSenseEvidence(db: Database, senseId: string, legacySourceRef: string | null): string[] {
+  const table = db.query<{ name: string }, []>(
+    "select name from sqlite_master where type = 'table' and name = 'ja_sense_evidence'"
+  ).get();
+  if (!table) return legacySourceRef ? [normalizeJapaneseEvidenceId(legacySourceRef)] : [];
+  const evidence = db.query<{ evidence_id: string }, [string]>(
+    "select evidence_id from ja_sense_evidence where sense_id = ? order by position"
+  ).all(senseId).map((row) => row.evidence_id);
+  return evidence.length > 0
+    ? evidence
+    : legacySourceRef
+      ? [normalizeJapaneseEvidenceId(legacySourceRef)]
+      : [];
 }
 
 function readExamples(db: Database, senseId: string): PublicExample[] {
