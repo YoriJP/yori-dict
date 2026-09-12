@@ -228,6 +228,8 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           -- An exact written form, reading and kind must identify one release
           -- entry. Shared lookup terms include homophones and cannot establish
           -- identity; ambiguous matches must keep their authored entry intact.
+          -- JMdict omits kana readings; generated kana forms spell them out.
+          -- Treat a missing kana reading as its text, without relaxing kanji.
           -- The accepted groups move to the release's entry with it.
           create temp table promoted_ja_entries as
             select id, min(replacement_id) as replacement_id from (
@@ -236,7 +238,8 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
                 join ja_entries entry on entry.id = local.entry_id
                 join japanese_release.ja_forms rel
                   on rel.text = local.text
-                 and rel.reading is local.reading
+                 and (case when rel.kind = 'kana' then coalesce(rel.reading, rel.text) else rel.reading end)
+                   is (case when local.kind = 'kana' then coalesce(local.reading, local.text) else local.reading end)
                  and rel.kind = local.kind
                where entry.source = 'generated'
                  and not exists (
