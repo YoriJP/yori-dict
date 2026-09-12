@@ -29,7 +29,7 @@ The union of exact Evidence identifiers cited by the Senses in one Explanation G
 _Avoid_: Matching senses, translated senses
 
 **Proven Coverage Gap**:
-The non-empty difference between Expected Evidence and Covered Evidence when both sets come from reliable exact mappings. It permits automatic repair because the omission is reproducible without judging wording or comparing Sense counts.
+The non-empty difference between Expected Evidence and Covered Evidence when both sets come from reliable exact mappings. It describes missing recorded evidence, not a proven omission in the explanation itself or permission to rewrite it.
 _Avoid_: Thin language, fewer senses
 
 **Unknown Coverage**:

@@ -5,7 +5,6 @@ import {
   sameTierBackoffMs,
   onDemandEvaluationContracts,
   type EnrichmentRepository,
-  type ExplanationCoverageDecision,
   type CanonicalCandidate,
   type LabelVocabulary,
   type ModelGateway,
@@ -14,18 +13,7 @@ import {
   type ResolveRequest,
   type SourceEvidence
 } from "../src/on-demand-dictionary";
-import {
-  JapaneseEvidenceSnapshotChangedError,
-  type JapaneseEvidenceSnapshot
-} from "../src/japanese-evidence-snapshot";
 import type { PublicLookupItem } from "../src/types";
-
-const fixtureEvidenceSnapshot: JapaneseEvidenceSnapshot = {
-  schemaVersion: "ja-3",
-  dictDate: "fixture-date",
-  jmdictSimplifiedVersion: "fixture-v1"
-};
-
 test("resolve returns a released entry without calling a model", async () => {
   const released = existingEntry();
   const repository = new MemoryRepository({ released: [["学校", released]] });
@@ -79,302 +67,28 @@ test("resolve completes missing examples once across concurrent requests", async
   expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
 });
 
-test("authorized lookup replaces a proven-partial Explanation Group from complete Source Evidence", async () => {
-  const partial = existingEntry();
-  partial.word = "様";
-  partial.reading = "さま";
-  partial.headwords = [{ text: "様", reading: "さま", kind: "kanji", common: true, tags: [] }];
-  partial.senses = [{
-    ...partial.senses[0]!,
-    id: "yori:s_jmdict_1410750_1:zh-tw",
-    glosses: [{ lang: "zh-tw", text: "樣子", source: "generated", reviewStatus: "checked" }],
-    evidenceIds: ["jmdict:1410750:1"],
-    provenance: "source"
-  }];
-  const sourceEvidence: SourceEvidence[] = [{
-    source: "jmdict",
-    sourceEntryId: "1410750",
-    headword: "様",
-    reading: "さま",
-    senses: [
-      { evidenceId: "jmdict:1410750:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "appearance" }] },
-      { evidenceId: "jmdict:1410750:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "manner" }] }
-    ]
-  }];
+test("repeated enrichment preserves existing explanations despite divergent source evidence", async () => {
+  const existing = existingEntry();
   const repository = new MemoryRepository({
-    released: [["様", partial]],
-    coverage: [[`${partial.id}:zh-tw`, {
-      kind: "proven-partial",
-      missingEvidenceIds: ["jmdict:1410750:2"],
-      evidenceSnapshot: fixtureEvidenceSnapshot,
-      sourceEvidence
-    }]]
-  });
-  const gateway = new ScriptedGateway([
-    JSON.stringify({
-      headword: "様",
-      reading: "さま",
-      senses: [{
-        partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
-        pragmaticFunctions: [], glosses: ["樣子或方式"],
-        evidenceIds: ["jmdict:1410750:1", "jmdict:1410750:2"], provenance: "source"
-      }]
-    }),
-    reviewForPrompt,
-    JSON.stringify({ sentence: "その様を詳しく説明した。", translation: "詳細說明了那個樣子。" }),
-    reviewForPrompt
-  ]);
-  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
-  const repairRequest: ResolveRequest = { query: "様", targetDictionary: "ja", lang: "zh-tw" };
-
-  const [repaired, concurrent] = await Promise.all([
-    dictionary.resolve(repairRequest),
-    dictionary.resolve(repairRequest)
-  ]);
-  const readAgain = await dictionary.resolve(repairRequest);
-
-  expect(repaired?.senses[0]?.evidenceIds).toEqual(["jmdict:1410750:1", "jmdict:1410750:2"]);
-  expect(concurrent).toEqual(repaired);
-  expect(repository.savedEvidenceSnapshots).toEqual([fixtureEvidenceSnapshot]);
-  expect(readAgain).toEqual(repaired);
-  expect(gateway.calls.map(({ role }) => role)).toEqual([
-    "entry-author", "entry-review", "example-author", "example-review"
-  ]);
-  expect(gateway.calls[0]?.prompt).toContain('"evidenceId":"jmdict:1410750:2"');
-});
-
-test("a partial repair stays bound to the matched homographic entry", async () => {
-  const matched = existingEntry();
-  matched.id = "yori:e_jmdict_matched";
-  matched.word = "生";
-  matched.reading = "なま";
-  matched.headwords = [{ text: "生", reading: "なま", kind: "kanji", common: false, tags: [] }];
-  matched.senses = [{
-    ...matched.senses[0]!,
-    id: "yori:s_jmdict_matched_1:en",
-    evidenceIds: ["jmdict:matched:1"]
-  }];
-  const sourceEvidence: SourceEvidence[] = [{
-    source: "jmdict",
-    sourceEntryId: "matched",
-    headword: "生",
-    reading: "なま",
-    senses: [
-      { evidenceId: "jmdict:matched:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "raw" }] },
-      { evidenceId: "jmdict:matched:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "uncooked" }] }
-    ]
-  }];
-  const repository = Object.assign(new MemoryRepository({
-    released: [["生", matched]],
-    coverage: [[`${matched.id}:en`, {
-      kind: "proven-partial" as const,
-      missingEvidenceIds: ["jmdict:matched:2"],
-      evidenceSnapshot: fixtureEvidenceSnapshot,
-      sourceEvidence
-    }]]
-  }), {
-    find(query: string): PublicLookupItem {
-      const stored = repository.entries.get(query);
-      // A spelling lookup can change rank while authoring is in flight.
-      return stored ? { ...matched, id: "yori:e_jmdict_higher_ranked" } : matched;
-    },
-    canonicalEntry() {
-      return { id: "yori:e_jmdict_higher_ranked", headword: "生" };
-    }
-  });
-  const gateway = new ScriptedGateway([
-    JSON.stringify({
-      headword: "生",
-      reading: "なま",
-      senses: [{
-        partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
-        pragmaticFunctions: [], glosses: ["raw or uncooked"],
-        evidenceIds: ["jmdict:matched:1", "jmdict:matched:2"], provenance: "source"
-      }]
-    }),
-    reviewForPrompt,
-    JSON.stringify({ sentence: "生の魚を食べた。", translation: "I ate raw fish." }),
-    reviewForPrompt
-  ]);
-
-  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
-  const [repaired, ranked] = await Promise.all([
-    dictionary.resolve(request("生")),
-    dictionary.resolve({ ...request("生"), candidate: { id: matched.id, headword: matched.word } })
-  ]);
-
-  expect(repaired?.id).toBe(matched.id);
-  expect(ranked).toEqual(repaired);
-  expect(gateway.calls.filter(({ role }) => role === "entry-author")).toHaveLength(1);
-  expect(repository.entries.get("生")?.id).toBe(matched.id);
-  expect(repository.coverageDecision(matched.id, "en")).toEqual({ kind: "not-proven-partial" });
-});
-
-test("recoverable partial-group repair failures preserve the original group and gap", async () => {
-  const evidence: SourceEvidence[] = [{
-    source: "jmdict", sourceEntryId: "1206730", headword: "学校", reading: "がっこう",
-    senses: [
-      { evidenceId: "jmdict:1206730:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school" }] },
-      { evidenceId: "jmdict:1206730:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school system" }] }
-    ]
-  }];
-  const complete = JSON.stringify({
-    headword: "学校", reading: "がっこう",
-    senses: [{
-      partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
-      pragmaticFunctions: [], glosses: ["學校"],
-      evidenceIds: ["jmdict:1206730:1", "jmdict:1206730:2"], provenance: "source"
-    }]
-  });
-  const incomplete = complete.replace(',"jmdict:1206730:2"', "");
-  const scenarios: ScriptedResponse[][] = [
-    ["not json"],
-    [incomplete],
-    [complete, "REJECT"],
-    [new ModelGatewayError("permanent", "provider unavailable")]
-  ];
-
-  for (const responses of scenarios) {
-    const original = existingEntry();
-    original.senses[0]!.evidenceIds = ["jmdict:1206730:1"];
-    const decision: ExplanationCoverageDecision = {
-      kind: "proven-partial",
-      missingEvidenceIds: ["jmdict:1206730:2"],
-      evidenceSnapshot: fixtureEvidenceSnapshot,
-      sourceEvidence: evidence
-    };
-    const repository = new MemoryRepository({
-      released: [["学校", original]],
-      coverage: [[`${original.id}:en`, decision]]
-    });
-    const result = await createJapaneseOnDemandDictionary({
-      repository,
-      modelGateway: new ScriptedGateway(responses)
-    }).resolve(request("学校"));
-
-    expect(result).toEqual(original);
-    expect(repository.coverageDecision(original.id, "en")).toEqual(decision);
-    expect(repository.entries.size).toBe(0);
-  }
-});
-
-test("duplicate Evidence IDs are a recoverable malformed partial-group repair", async () => {
-  const original = existingEntry();
-  original.senses[0]!.evidenceIds = ["jmdict:1206730:1"];
-  const sourceEvidence: SourceEvidence[] = [{
-    source: "jmdict", sourceEntryId: "1206730", headword: "学校", reading: "がっこう",
-    senses: [
-      { evidenceId: "jmdict:1206730:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school" }] },
-      { evidenceId: "jmdict:1206730:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school system" }] }
-    ]
-  }];
-  const decision: ExplanationCoverageDecision = {
-    kind: "proven-partial",
-    missingEvidenceIds: ["jmdict:1206730:2"],
-    evidenceSnapshot: fixtureEvidenceSnapshot,
-    sourceEvidence
-  };
-  const repository = new MemoryRepository({
-    released: [["学校", original]],
-    coverage: [[`${original.id}:en`, decision]]
-  });
-  const duplicateEvidence = JSON.stringify({
-    headword: "学校", reading: "がっこう",
-    senses: [{
-      partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
-      pragmaticFunctions: [], glosses: ["school"],
-      evidenceIds: ["jmdict:1206730:1", "jmdict:1206730:2", "jmdict:1206730:2"],
-      provenance: "source"
-    }]
-  });
-
-  const gateway = new ScriptedGateway([duplicateEvidence]);
-  const result = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
-    .resolve(request("学校"));
-
-  expect(result).toEqual(original);
-  expect(repository.coverageDecision(original.id, "en")).toEqual(decision);
-  expect(repository.entries.size).toBe(0);
-  expect(gateway.calls.map(({ role }) => role)).toEqual(["entry-author"]);
-  expect(repository.attempts).toContainEqual(expect.objectContaining({ outcome: "malformed" }));
-});
-
-test("a storage failure during partial-group replacement remains fatal", async () => {
-  const original = existingEntry();
-  original.senses[0]!.evidenceIds = ["jmdict:1206730:1"];
-  const sourceEvidence: SourceEvidence[] = [{
-    source: "jmdict", sourceEntryId: "1206730", headword: "学校", reading: "がっこう",
-    senses: [
-      { evidenceId: "jmdict:1206730:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school" }] },
-      { evidenceId: "jmdict:1206730:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school system" }] }
-    ]
-  }];
-  const repository = new MemoryRepository({
-    released: [["学校", original]],
-    coverage: [[`${original.id}:en`, {
-      kind: "proven-partial",
-      missingEvidenceIds: ["jmdict:1206730:2"],
-      evidenceSnapshot: fixtureEvidenceSnapshot,
-      sourceEvidence
-    }]],
-    saveError: new Error("disk full")
-  });
-  const gateway = new ScriptedGateway([
-    JSON.stringify({
-      headword: "学校", reading: "がっこう",
-      senses: [{
-        partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
-        pragmaticFunctions: [], glosses: ["school"],
-        evidenceIds: ["jmdict:1206730:1", "jmdict:1206730:2"], provenance: "source"
-      }]
-    }),
-    reviewForPrompt
-  ]);
-
-  await expect(createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
-    .resolve(request("学校"))).rejects.toThrow("disk full");
-});
-
-test("an Evidence inventory refresh makes an in-flight repair safely retryable", async () => {
-  const original = existingEntry();
-  original.senses[0]!.evidenceIds = ["jmdict:1206730:1"];
-  const sourceEvidence: SourceEvidence[] = [{
-    source: "jmdict", sourceEntryId: "1206730", headword: "学校", reading: "がっこう",
-    senses: [
-      { evidenceId: "jmdict:1206730:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school" }] },
-      { evidenceId: "jmdict:1206730:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school system" }] }
-    ]
-  }];
-  const repository = new MemoryRepository({
-    released: [["学校", original]],
-    coverage: [[`${original.id}:en`, {
-      kind: "proven-partial",
-      missingEvidenceIds: ["jmdict:1206730:2"],
-      evidenceSnapshot: fixtureEvidenceSnapshot,
-      sourceEvidence
-    }]],
-    saveError: new JapaneseEvidenceSnapshotChangedError(
-      fixtureEvidenceSnapshot,
-      { ...fixtureEvidenceSnapshot, jmdictSimplifiedVersion: "fixture-v2" }
-    )
-  });
-  const gateway = new ScriptedGateway([
-    authoredEntry({
+    released: [["学校", existing]],
+    sources: [["学校", [{
+      source: "jmdict",
+      sourceEntryId: "1206730",
       headword: "学校",
-      reading: "がっこう",
-      partOfSpeech: ["n"],
-      evidenceId: "jmdict:1206730:1",
-      glosses: ["school"]
-    }).replace('"jmdict:1206730:1"', '"jmdict:1206730:1","jmdict:1206730:2"'),
-    reviewForPrompt
-  ]);
+      senses: [
+        { evidenceId: "jmdict:1206730:1", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school" }] },
+        { evidenceId: "jmdict:1206730:2", partOfSpeech: ["n"], glosses: [{ lang: "en", text: "school system" }] }
+      ]
+    }]]]
+  });
+  const gateway = new ScriptedGateway([]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway });
 
-  const result = await createJapaneseOnDemandDictionary({ repository, modelGateway: gateway })
-    .resolve(request("学校"));
-
-  expect(result).toEqual(original);
+  for (let day = 0; day < 3; day++) {
+    expect(await dictionary.resolve(request("学校"))).toEqual(existing);
+  }
+  expect(gateway.calls).toEqual([]);
   expect(repository.entries.size).toBe(0);
-  expect(repository.savedEvidenceSnapshots).toEqual([fixtureEvidenceSnapshot]);
 });
 
 test("one accepting review cannot persist an example when unanimous review is required", async () => {
@@ -1517,27 +1231,20 @@ function exampleFor(headword: string, translation?: string): string {
 class MemoryRepository implements EnrichmentRepository {
   readonly lookups: Array<[string, string]> = [];
   readonly attempts: unknown[] = [];
-  readonly savedEvidenceSnapshots: Array<JapaneseEvidenceSnapshot | undefined> = [];
   readonly entries = new Map<string, PublicLookupItem>();
   readonly examples = new Map<string, PublicLookupItem["senses"][number]["examples"]>();
   private readonly released: Map<string, PublicLookupItem>;
   private readonly sources: Map<string, SourceEvidence[]>;
   private readonly rankedCandidates: Map<string, CanonicalCandidate[]>;
-  private readonly coverage: Map<string, ExplanationCoverageDecision>;
-  private readonly saveError?: Error;
 
   constructor(options: {
     released?: Array<[string, PublicLookupItem]>;
     sources?: Array<[string, SourceEvidence[]]>;
     candidates?: Array<[string, CanonicalCandidate[]]>;
-    coverage?: Array<[string, ExplanationCoverageDecision]>;
-    saveError?: Error;
   } = {}) {
     this.released = new Map(options.released ?? []);
     this.sources = new Map(options.sources ?? []);
     this.rankedCandidates = new Map(options.candidates ?? []);
-    this.coverage = new Map(options.coverage ?? []);
-    this.saveError = options.saveError;
   }
 
   find(query: string) {
@@ -1573,20 +1280,8 @@ class MemoryRepository implements EnrichmentRepository {
     return this.sources.get(query) ?? [];
   }
 
-  coverageDecision(entryId: string, lang: string): ExplanationCoverageDecision {
-    return this.coverage.get(`${entryId}:${lang}`) ?? { kind: "not-proven-partial" };
-  }
-
-  saveEntry(
-    entry: PublicLookupItem,
-    lang = "en",
-    _generation?: unknown,
-    expectedEvidenceSnapshot?: JapaneseEvidenceSnapshot
-  ) {
-    this.savedEvidenceSnapshots.push(expectedEvidenceSnapshot);
-    if (this.saveError) throw this.saveError;
+  saveEntry(entry: PublicLookupItem) {
     this.entries.set(entry.word, entry);
-    this.coverage.delete(`${entry.id}:${lang}`);
   }
 
   saveExample(senseId: string, example: NonNullable<PublicLookupItem["senses"][number]["examples"]>[number]) {
