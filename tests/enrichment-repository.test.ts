@@ -1006,6 +1006,70 @@ test("a Japanese release that starts carrying an authored headword takes over it
   refreshed.close();
 });
 
+test.each([
+  { label: "unique form", word: "未知語", reading: "みちご", ambiguous: false },
+  { label: "shared reading", word: "未知語", reading: "がっこう", ambiguous: false },
+  { label: "shared spelling", word: "学校", reading: "べつ", ambiguous: false },
+  { label: "ambiguous exact form", word: "学校", reading: "がっこう", ambiguous: true }
+])("$label cannot discard a generated entry and its example during import", async ({ word, reading, ambiguous }) => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const authored = englishGroup(generatedEntry());
+  authored.word = word;
+  authored.reading = reading;
+  authored.headwords[0]!.text = word;
+  authored.headwords[0]!.reading = reading;
+  const example: PublicExample = {
+    text: "未知語を調べた。",
+    translations: [{ lang: "en", text: "I looked up the unknown term." }],
+    source: "generated", reviewStatus: "checked"
+  };
+  repository.saveEntry(authored, "en", generation);
+  repository.saveExample(authored.senses[0]!.id, example, generation);
+  repository.close();
+  lookup.close();
+
+  const next = await productionDatabase();
+  const release = new Database(next);
+  release.exec("update ja_metadata set value = 'next' where key = 'dictDate'");
+  if (ambiguous) {
+    release.exec(`
+      insert into ja_forms (entry_id, text, reading, kind, common, tags)
+      values ('yori:e_jmdict_1358280', '学校', 'がっこう', 'kanji', 0, '[]');
+      insert into ja_lookup_terms (term, entry_id, match_kind)
+      values ('学校', 'yori:e_jmdict_1358280', 'kanji');
+    `);
+  }
+  release.close();
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const refreshed = openLookupDb(path);
+  const reader = openEnrichmentRepository(path, refreshed);
+  expect(reader.findById?.(authored.id, "en")?.id).toBe(authored.id);
+  expect(reader.findById?.(authored.id, "en")?.senses[0]?.examples).toEqual([example]);
+  reader.close();
+  refreshed.close();
+});
+
+test("an explicit release entry ID takes precedence over ambiguous form matches", async () => {
+  const path = await productionDatabase();
+  const existing = new Database(path);
+  existing.exec("update ja_entries set source='generated' where id='yori:e_jmdict_1206730'");
+  existing.close();
+  const next = await productionDatabase();
+  const release = new Database(next);
+  release.exec(`
+    update ja_metadata set value='next' where key='dictDate';
+    insert into ja_forms (entry_id,text,reading,kind,common,tags)
+    values ('yori:e_jmdict_1358280','学校','がっこう','kanji',0,'[]');
+  `);
+  release.close();
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const result = new Database(path, { readonly: true });
+  expect(result.query<{source:string}, []>("select source from ja_entries where id='yori:e_jmdict_1206730'").get()?.source).toBe("jmdict");
+  result.close();
+});
+
 const generation = {
   model: "gpt-5.6-luna",
   provider: "openrouter",
