@@ -10,6 +10,8 @@ The first start bootstraps a missing database from the pinned Japanese release a
 
 Japanese and English remain independent dictionary products even though they share one physical database. Their table groups, schemas, source policies, validation, and release versions remain separate.
 
+Japanese release import may promote an authored entry to a source entry only when an exact written form, reading and form kind identifies one release entry (or its entry ID is explicitly supplied by the release). Lookup terms are search keys, not identity: shared readings, different readings of one spelling, and ambiguous matches cannot authorize merging entries. Otherwise the authored entry and its accepted content remain separate. Promotion still follows the existing per-language incoming/retained content policy.
+
 ## Consequences
 
 - Ordinary lookup and accepted enrichment read and write one canonical store; no caller or repository merges an overlay.

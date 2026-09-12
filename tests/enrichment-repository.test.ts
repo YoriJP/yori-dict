@@ -950,7 +950,10 @@ async function productionDatabase(options: { examples?: boolean } = {}): Promise
   return path;
 }
 
-test("a Japanese release that starts carrying an authored headword takes over its entry", async () => {
+test.each([
+  { word: "学校", kind: "kanji" as const },
+  { word: "がっこう", kind: "kana" as const }
+])("a Japanese release takes over an authored $kind headword", async ({ word, kind }) => {
   const path = await productionDatabase();
   const lookup = openLookupDb(path);
   const repository = openEnrichmentRepository(path, lookup);
@@ -959,10 +962,10 @@ test("a Japanese release that starts carrying an authored headword takes over it
   const authored: PublicLookupItem = {
     ...generatedEntry(),
     id: "yori:e_generated_school",
-    word: "学校",
+    word,
     reading: "がっこう",
     sourceId: "yori:e_generated_school",
-    headwords: [{ text: "学校", reading: "がっこう", kind: "kanji", common: false, tags: [] }]
+    headwords: [{ text: word, reading: "がっこう", kind, common: false, tags: [] }]
   };
   repository.saveEntry(englishGroup(authored), "en", generation);
   repository.saveEntry({
@@ -990,11 +993,11 @@ test("a Japanese release that starts carrying an authored headword takes over it
   const db = new Database(path, { readonly: true });
   // One entry for the word, owned by the release. A surviving authored row
   // would keep answering lookups with its own stale senses.
-  expect(db.query<{ id: string; source: string }, []>(`
+  expect(db.query<{ id: string; source: string }, [string]>(`
     select distinct entry.id, entry.source from ja_entries entry
       join ja_lookup_terms term on term.entry_id = entry.id
-     where term.term = '学校'
-  `).all()).toEqual([{ id: "yori:e_jmdict_1206730", source: "jmdict" }]);
+     where term.term = ?
+  `).all(word)).toEqual([{ id: "yori:e_jmdict_1206730", source: "jmdict" }]);
   db.close();
 
   const refreshed = openLookupDb(path);
@@ -1004,6 +1007,75 @@ test("a Japanese release that starts carrying an authored headword takes over it
   expect(taiwanese?.id).toBe("yori:e_jmdict_1206730");
   expect(taiwanese?.senses[0].glosses[0].text).toBe("學校");
   refreshed.close();
+});
+
+test.each([
+  { label: "unique form", word: "未知語", reading: "みちご", kind: "kanji" as const, ambiguous: false },
+  { label: "shared reading", word: "未知語", reading: "がっこう", kind: "kanji" as const, ambiguous: false },
+  { label: "shared spelling", word: "学校", reading: "べつ", kind: "kanji" as const, ambiguous: false },
+  { label: "different kana reading", word: "がっこう", reading: "べつ", kind: "kana" as const, ambiguous: false },
+  { label: "ambiguous exact form", word: "学校", reading: "がっこう", kind: "kanji" as const, ambiguous: true },
+  { label: "ambiguous normalized kana", word: "がっこう", reading: "がっこう", kind: "kana" as const, ambiguous: true }
+])("$label cannot discard a generated entry and its example during import", async ({ word, reading, kind, ambiguous }) => {
+  const path = await productionDatabase();
+  const lookup = openLookupDb(path);
+  const repository = openEnrichmentRepository(path, lookup);
+  const authored = englishGroup(generatedEntry());
+  authored.word = word;
+  authored.reading = reading;
+  authored.headwords[0]!.text = word;
+  authored.headwords[0]!.reading = reading;
+  authored.headwords[0]!.kind = kind;
+  const example: PublicExample = {
+    text: "未知語を調べた。",
+    translations: [{ lang: "en", text: "I looked up the unknown term." }],
+    source: "generated", reviewStatus: "checked"
+  };
+  repository.saveEntry(authored, "en", generation);
+  repository.saveExample(authored.senses[0]!.id, example, generation);
+  repository.close();
+  lookup.close();
+
+  const next = await productionDatabase();
+  const release = new Database(next);
+  release.exec("update ja_metadata set value = 'next' where key = 'dictDate'");
+  if (ambiguous) {
+    release.prepare(`
+      insert into ja_forms (entry_id, text, reading, kind, common, tags)
+      values ('yori:e_jmdict_1358280', ?, ?, ?, 0, '[]')
+    `).run(word, kind === "kana" ? null : reading, kind);
+    release.prepare(`
+      insert into ja_lookup_terms (term, entry_id, match_kind)
+      values (?, 'yori:e_jmdict_1358280', ?)
+    `).run(word, kind === "kana" ? "reading" : "kanji");
+  }
+  release.close();
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const refreshed = openLookupDb(path);
+  const reader = openEnrichmentRepository(path, refreshed);
+  expect(reader.findById?.(authored.id, "en")?.id).toBe(authored.id);
+  expect(reader.findById?.(authored.id, "en")?.senses[0]?.examples).toEqual([example]);
+  reader.close();
+  refreshed.close();
+});
+
+test("an explicit release entry ID takes precedence over ambiguous form matches", async () => {
+  const path = await productionDatabase();
+  const existing = new Database(path);
+  existing.exec("update ja_entries set source='generated' where id='yori:e_jmdict_1206730'");
+  existing.close();
+  const next = await productionDatabase();
+  const release = new Database(next);
+  release.exec(`
+    update ja_metadata set value='next' where key='dictDate';
+    insert into ja_forms (entry_id,text,reading,kind,common,tags)
+    values ('yori:e_jmdict_1358280','学校','がっこう','kanji',0,'[]');
+  `);
+  release.close();
+  expect(importJapaneseRelease(path, next)).toBe(true);
+  const result = new Database(path, { readonly: true });
+  expect(result.query<{source:string}, []>("select source from ja_entries where id='yori:e_jmdict_1206730'").get()?.source).toBe("jmdict");
+  result.close();
 });
 
 const generation = {

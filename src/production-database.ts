@@ -224,22 +224,34 @@ export function importJapaneseRelease(path: string, releasePath: string): boolea
           -- the release, is promoted to the release's own identity. Without
           -- this it would keep source = 'generated' forever, and every later
           -- graft would skip it because deletion targets imported rows.
-          -- An authored Japanese entry and an imported one never share an id, so
-          -- the written forms decide whether the release now carries the word.
+          -- Authored and imported Japanese entries normally have different IDs.
+          -- An exact written form, reading and kind must identify one release
+          -- entry. Shared lookup terms include homophones and cannot establish
+          -- identity; ambiguous matches must keep their authored entry intact.
+          -- JMdict omits kana readings; generated kana forms spell them out.
+          -- Treat a missing kana reading as its text, without relaxing kanji.
           -- The accepted groups move to the release's entry with it.
           create temp table promoted_ja_entries as
             select id, min(replacement_id) as replacement_id from (
               select local.entry_id as id, rel.entry_id as replacement_id
-                from ja_lookup_terms local
+                from ja_forms local
                 join ja_entries entry on entry.id = local.entry_id
-                join japanese_release.ja_lookup_terms rel on rel.term = local.term
+                join japanese_release.ja_forms rel
+                  on rel.text = local.text
+                 and (case when rel.kind = 'kana' then coalesce(rel.reading, rel.text) else rel.reading end)
+                   is (case when local.kind = 'kana' then coalesce(local.reading, local.text) else local.reading end)
+                 and rel.kind = local.kind
                where entry.source = 'generated'
+                 and not exists (
+                   select 1 from japanese_release.ja_entries same_entry
+                    where same_entry.id = entry.id
+                 )
               union
               select entry.id as id, entry.id as replacement_id
                 from ja_entries entry
                where entry.source = 'generated'
                  and entry.id in (select id from japanese_release.ja_entries)
-            ) group by id;
+            ) group by id having count(distinct replacement_id) = 1;
 
           -- An accepted language group authored for an entry the release
           -- supplies is the usual shape of enrichment. It is carried across the
