@@ -77,7 +77,7 @@ test("the requested explanation language reaches the internal resolve request", 
   expect(calls.map(({ lang }) => lang)).toEqual(["zh-tw", "ko"]);
 });
 
-test("the lookup route keeps a proven-partial group model-free until authorized repair", async () => {
+test("authenticated lookup only fills examples on a group with recorded gaps", async () => {
   const path = join(mkdtempSync(join(tmpdir(), "yori-route-partial-")), "yori.sqlite");
   await Bun.$`bun run scripts/import-jmdict.ts --input fixtures/jmdict-sample.json --out ${path}`.quiet();
   migrateProductionDatabase(path);
@@ -129,15 +129,6 @@ test("the lookup route keeps a proven-partial group model-free until authorized 
   const lookup = openLookupDb(path);
   const repository = openEnrichmentRepository(path, lookup);
   const responses = [
-    JSON.stringify({
-      headword: "学校", reading: "がっこう",
-      senses: [{
-        partOfSpeech: ["n"], registers: [], domains: [], dialect: [], pronunciations: [],
-        pragmaticFunctions: [], glosses: ["提供教育的機構"],
-        evidenceIds: ["jmdict:1206730:1", "jmdict:1206730:2"], provenance: "source"
-      }]
-    }),
-    "ACCEPT", "ACCEPT",
     JSON.stringify({ sentence: "毎朝、学校へ行きます。", translation: "我每天早上去學校。" }),
     "ACCEPT", "ACCEPT"
   ];
@@ -194,13 +185,19 @@ test("the lookup route keeps a proven-partial group model-free until authorized 
   )));
   expect(enrichedRequests.map(({ status }) => status)).toEqual([200, 200]);
   for (const response of enrichedRequests) {
-    const repaired = await response.json();
-    expect(repaired.senses[0].glosses[0].text).toBe("提供教育的機構");
-    expect(repaired.senses[0].appliesTo).toEqual({ kanji: ["学校"], kana: ["がっこう"] });
+    const enriched = await response.json();
+    expect(enriched.senses[0].glosses[0].text).toBe("舊的學校解釋");
+    expect(enriched.senses[0].appliesTo).toEqual({ kanji: ["学校"], kana: ["がっこう"] });
   }
   expect(calls.map(({ role }) => role)).toEqual([
-    "entry-author", "entry-review", "entry-review", "example-author", "example-review", "example-review"
+    "example-author", "example-review", "example-review"
   ]);
+  const repeated = await app.request(
+    "/v1/lookup?q=%E5%AD%A6%E6%A0%A1&dictionary=ja&lang=zh-tw&enrich=true",
+    { headers: { authorization: "Bearer secret" } }
+  );
+  expect(repeated.status).toBe(200);
+  expect(calls).toHaveLength(3);
   repository.close();
   lookup.close();
 });
