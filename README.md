@@ -1,181 +1,74 @@
 # Yori Dict
 
-Open Japanese and English dictionary data for apps, learning tools, and other
-products.
+Open Japanese and English dictionaries for apps and language learning. Use the
+hosted API or download the data for offline use.
 
-Japanese and English are independent dictionaries. Each has its own sources,
-schema, version, and release schedule. Use them through the hosted API or
-download a release.
+Yori Dict combines open dictionary sources with reviewed AI-generated definitions
+and examples. Japanese lookups handle inflected words, such as 食べました → 食べる.
 
-## What ships
+## Languages
 
 | Dictionary | Explanation languages |
 | --- | --- |
-| Japanese headwords | `en`, `de`, `zh-tw`, `zh-cn`, `ko`, `ja` |
-| English headwords | `en`, `ja`, `zh-tw` |
+| Japanese | `en`, `ja`, `zh-tw`, `zh-cn`, `ko`, `de` |
+| English | `en`, `ja`, `zh-tw` |
 
-Every language pair owns its own senses, ordering, examples, and provenance.
-A `zh-tw` sense is not a translation of the `en` sense next to it, and
-`zh-tw` and `zh-cn` are separate content rather than one converted into the
-other. A lookup returns the requested language's complete ordered sense list
-or nothing; it never falls back to another language.
+`zh-tw` uses Taiwanese Traditional Chinese; `zh-cn` uses Simplified Chinese.
+Coverage varies by word and language. The API accepts the languages above;
+[`/v1/meta`](https://yori-dict-production.up.railway.app/v1/meta) lists those
+with stored content.
 
-A supported explanation language is one the API will answer in, not a promise
-that content exists for it yet. `de` is currently supported with no imported
-content: JMdict's German component is separately copyrighted and cannot be
-redistributed (see [DATA_SOURCES.md](DATA_SOURCES.md)), so German is filled by
-Yori Dict's own authored content rather than dropped.
+## API
 
-Coverage differs by language and changes with every release. Exact per-language
-entry, sense, gloss, and example counts live in each release manifest, and
-`/v1/meta` reports the languages that actually have content behind them.
-
-## API quick start
-
-Public API: <https://yori-dict-production.up.railway.app>
-
-Look up an inflected Japanese word:
+Look up a Japanese word with Traditional Chinese definitions:
 
 ```sh
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&dictionary=ja&lang=zh-tw'
 ```
 
-Look up the same word with Japanese explanations:
-
-```sh
-curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=食べました&dictionary=ja&lang=ja'
-```
-
-Japanese is an independent Explanation Group, not a translation of the English
-group. Public lookup returns that group or `null` without fallback. Authorized
-Enrich-on-Lookup can author a missing group directly in Japanese. Its
-Monolingual Sense Examples keep `translations: []` instead of repeating the
-same Japanese sentence as a self-translation.
-
-Look up an English word explained in Japanese:
+Look up an English word with Japanese definitions:
 
 ```sh
 curl 'https://yori-dict-production.up.railway.app/v1/lookup?q=bank&dictionary=en&lang=ja'
 ```
 
-Look up several words in one request:
+Set `dictionary` to `ja` or `en`, and `lang` to the explanation language.
+The response is an entry or `null` if no content is stored in that language.
+Lookups never fall back to another language.
+
+See the [API docs](https://yori-dict-production.up.railway.app/doc) for batch
+lookups and response schemas, or use the [OpenAPI specification](openapi.yaml).
+
+## Downloads
+
+Japanese and English releases are published separately on the
+[releases page](https://github.com/YoriJP/yori-dict/releases).
+
+- SQLite databases for offline lookup, with SHA-256 checksums.
+- JSONL exports for processing dictionary entries.
+- Yomitan packs with one explanation language per ZIP, such as `yori-ja-en.zip`
+  and `yori-en-ja.zip`. Import the ZIP into Yomitan to use it.
+
+Each release manifest records its sources and coverage. Check the release notes
+for available files and known issues with older downloads.
+
+## Run locally
+
+Requires [Bun](https://bun.sh/) 1.4.2.
 
 ```sh
-curl -X POST 'https://yori-dict-production.up.railway.app/v1/lookup/batch' \
-  -H 'content-type: application/json' \
-  --data '{"dictionary":"ja","lang":"ko","queries":["食べました","学校","教室"]}'
-```
-
-Every lookup must name one `dictionary` (`ja` or `en`) and one `lang`. Neither
-has a default, and an unsupported pair is a request error. Single lookup returns
-the entry or `null`. Batch lookup returns `entries`: one entry or `null` per
-query, in the submitted order and length, without repeating the queries.
-
-Ordinary lookup is model-free, and its `null` means no acceptable content exists.
-Authenticated `enrich=true` lookup is best-effort. If the model provider refuses
-the account, a single lookup still returns the stored entry or `null` with an
-`X-Yori-Enrichment` response header; a batch still returns its stored `entries`
-with an `enrichment` object. Those signals mean a returned `null` is unsettled,
-not a confirmed dictionary miss. Database and persistence failures remain
-errors. A provider failure isolated to one batch item makes that item `null`; a
-batch in which every item fails that way returns an error.
-
-Both dictionaries share one base entry shape — `id`, `dictionary`, `lang`,
-`headword`, `headwords`, `senses`, `sources` — while Japanese keeps its
-readings and inflection path and English keeps its pronunciations. Deinflection
-helps match individual Japanese words; it is not sentence parsing.
-
-For the complete request and response schemas, use the
-[interactive API documentation](https://yori-dict-production.up.railway.app/doc)
-or the [OpenAPI specification](https://github.com/YoriJP/yori-dict/blob/main/openapi.yaml).
-Build-time clients may send `X-Yori-Request-Id` on either lookup route to carry
-their own trace id through lookup and enrichment logs.
-
-## Local development
-
-The repository pins Bun 1.4.0. Install dependencies and start the API with:
-
-```sh
+git clone https://github.com/YoriJP/yori-dict.git
+cd yori-dict
 bun install --frozen-lockfile
 bun run dev
 ```
 
-The first start prepares `data/yori.sqlite`: it downloads and verifies the
-Japanese release pinned in `data-release.json`, then imports or rebuilds the
-pinned English release if needed. The API starts at <http://localhost:3000>,
-with interactive documentation at <http://localhost:3000/doc>.
+No API keys are needed. The first run downloads the pinned Japanese data and
+prepares the English dictionary in `data/yori.sqlite`. The API runs at
+<http://localhost:3000>, with API docs at <http://localhost:3000/doc>.
 
-Ordinary lookup needs no environment variables. Authenticated enrichment needs
-`OPENROUTER_API_KEY` and `YORI_ENRICHMENT_TOKEN`; storage and source-evidence
-overrides are documented in [On-demand enrichment](docs/on-demand-enrichment.md#runtime-configuration).
+## License
 
-## Downloads
-
-Each dictionary releases independently on the
-[releases page](https://github.com/YoriJP/yori-dict/releases). One release
-contains a canonical SQLite database and its checksum, a JSONL file with one
-content group per explanation language under each entry, a manifest, and one
-Yomitan v3 pack per explanation language — `yori-ja-en.zip`, `yori-en-ja.zip`,
-and so on. A pack contains only the language it names, so packs for different
-languages can be installed together.
-
-Download and verify a Japanese release:
-
-```sh
-version=<version from the releases page>
-curl -LO "https://github.com/YoriJP/yori-dict/releases/download/data-${version}/yori-dict-${version}.sqlite.gz"
-curl -LO "https://github.com/YoriJP/yori-dict/releases/download/data-${version}/yori-dict-${version}.sqlite.gz.sha256"
-shasum -a 256 -c "yori-dict-${version}.sqlite.gz.sha256"
-gunzip "yori-dict-${version}.sqlite.gz"
-```
-
-The release manifest records the artifact names, checksums, source versions,
-licenses, exact per-language coverage, and the Japanese `coverageGaps` summary.
-Its `schemaVersion` names the table shape: `ja-3` and `en-2` are the current
-Japanese and English shapes.
-Japanese publication requires the source database itself to report `ja-3`;
-a structure-only migrated `ja-2` store must first receive an explicit rebuild
-or Japanese release import that classifies its Evidence and gaps.
-The [Japanese coverage-gap audit](docs/japanese-coverage-gap-audit.md) records
-source-version observations separately from release acceptance rules.
-
-Japanese written forms live in `ja_forms`, and senses in `ja_senses`, which
-names the explanation language:
-
-```sh
-sqlite3 "yori-dict-${version}.sqlite" \
-  "SELECT g.text FROM ja_glosses g
-     JOIN ja_senses s ON s.id = g.sense_id
-     JOIN ja_entries e ON e.id = s.entry_id
-    WHERE e.source_id = '1358280' AND s.lang = 'zh-tw'
-    ORDER BY s.position, g.position;"
-```
-
-English releases use the matching `en_*` tables.
-
-## Data and licensing
-
-Yori Dict keeps source identities and provenance alongside its own stable entry
-and sense ids. Japanese data is based on JMdict with sourced examples,
-estimated learner levels, and reviewed generated additions. English data comes
-from independently licensed open dictionary sources under an explicit source
-policy.
-
-The source code is licensed under MIT. Published dictionary data and releases
-are distributed under CC BY-SA 4.0, with upstream attribution and license
-details in [DATA_SOURCES.md](DATA_SOURCES.md).
-
-## Documentation
-
-- [English dictionary](docs/english-dictionary.md) — source policy, canonical
-  schema, build, and publish.
-- [English source pipeline](docs/english-source-pipeline.md) — how filtered
-  multilingual source evidence is produced and pinned.
-- [On-demand enrichment](docs/on-demand-enrichment.md) — the lookup contract,
-  owner-authorized gap filling, and runtime configuration.
-- [Architecture decisions](docs/adr) — why the system is shaped this way.
-
-## Support
-
-Found incorrect dictionary data, an API problem, or a broken release artifact?
-[Open an issue](https://github.com/YoriJP/yori-dict/issues).
+Code is licensed under [MIT](LICENSE). Dictionary releases are distributed
+under CC BY-SA 4.0, with upstream attribution and license details in
+[Data sources](DATA_SOURCES.md).
