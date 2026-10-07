@@ -41,7 +41,7 @@ test("English resolve completes missing examples on released senses", async () =
     JSON.stringify({ sentence: "She deposited her salary at the bank." }),
     reviewAccepted
   ]);
-  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway, models: englishModels });
+  const dictionary = createEnglishOnDemandDictionary({ repository, modelGateway: gateway });
 
   const completed = await dictionary.resolve({ query: "bank", targetDictionary: "en", lang: "en" });
   expect(completed?.senses[0].examples).toEqual([{
@@ -52,9 +52,13 @@ test("English resolve completes missing examples on released senses", async () =
   expect(repository.savedExamples).toEqual([["yori:en:s_bank", {
     text: "She deposited her salary at the bank.", source: "generated", reviewStatus: "checked"
   }]]);
-  expect(gateway.calls[0]).toMatchObject({ promptVersion: "english-example-author-v3" });
+  expect(gateway.calls[0]).toMatchObject({
+    promptVersion: "english-example-author-v3", model: "openai/gpt-6-luna", reasoningEffort: "low"
+  });
   expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword exactly as a complete lexical item");
-  expect(gateway.calls[1]).toMatchObject({ promptVersion: "english-example-review-v7" });
+  expect(gateway.calls[1]).toMatchObject({
+    promptVersion: "english-example-review-v7", model: "google/gemini-3-flash-preview", reasoningEffort: "minimal"
+  });
   expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
   expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
 });

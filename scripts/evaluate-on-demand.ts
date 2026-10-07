@@ -68,9 +68,7 @@ let malformedReviews = 0;
 
 for (const test of eligibility) {
   const response = await gateway.call(request({
-    role: "eligibility",
-    model: onDemandEvaluationContracts.eligibility.model,
-    promptVersion: onDemandEvaluationContracts.eligibility.promptVersion,
+    ...onDemandEvaluationContracts.eligibility,
     prompt: onDemandEvaluationContracts.eligibility.prompt(test.candidate)
   }));
   const passed = response.text.trim() === test.expected;
@@ -103,11 +101,10 @@ console.log(`${total - failed}/${total} passed`);
 console.log(`review calibration: ${falseAccepts} false accept(s), ${falseRejects} false reject(s), ${malformedReviews} malformed response(s)`);
 if (failed > 0) process.exitCode = 1;
 
-function request(input: Omit<ModelRequest, "provider" | "reasoningEffort" | "requestedServiceTier" | "signal">): ModelRequest {
+function request(input: Omit<ModelRequest, "provider" | "requestedServiceTier" | "signal">): ModelRequest {
   return {
     ...input,
     provider: "openrouter",
-    reasoningEffort: "minimal",
     // Calibration should measure verdicts without waiting for spare Flex capacity.
     requestedServiceTier: "standard",
     signal: AbortSignal.timeout(120_000)
