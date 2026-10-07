@@ -84,11 +84,10 @@ await Bun.write(resolve(outputDirectory, "comparison-results.json"), `${JSON.str
 console.log(JSON.stringify(output, null, 2));
 if (reviewerResults.some(({ summary }) => summary.releaseBlocked)) process.exitCode = 1;
 
-function request(input: Pick<ModelRequest, "role" | "model" | "promptVersion" | "prompt" | "responseSchema">): ModelRequest {
+function request(input: Pick<ModelRequest, "role" | "model" | "promptVersion" | "prompt" | "responseSchema" | "reasoningEffort">): ModelRequest {
   return {
     ...input,
     provider: "openrouter",
-    reasoningEffort: "minimal",
     requestedServiceTier: "standard",
     signal: new AbortController().signal
   };

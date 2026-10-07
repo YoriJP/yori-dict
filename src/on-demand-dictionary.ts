@@ -1617,8 +1617,7 @@ function reviewPrompt(candidateId: string, candidate: unknown, criteria: string 
 
 export const onDemandEvaluationContracts = {
   eligibility: {
-    model: lunaModel,
-    promptVersion: "eligibility-v1",
+    ...modelConfig("eligibility", lunaModel, "eligibility-v1"),
     prompt(candidate: string) {
       return eligibilityPrompt({ query: candidate, targetDictionary: "ja", lang: "en" });
     }
