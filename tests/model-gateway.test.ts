@@ -11,7 +11,7 @@ test("the OpenRouter adapter sends Flex requests with strict routing and no SDK 
           calls.push({ request, options });
           return {
             id: "gen-123",
-            model: "openai/gpt-5.6-luna",
+            model: "openai/gpt-6-luna",
             object: "chat.completion",
             created: 1,
             systemFingerprint: null,
@@ -20,7 +20,7 @@ test("the OpenRouter adapter sends Flex requests with strict routing and no SDK 
             usage: { promptTokens: 12, completionTokens: 2, totalTokens: 14, cost: 0.00042 },
             openrouterMetadata: {
               attempt: 0,
-              attempts: [{ model: "openai/gpt-5.6-luna", provider: "OpenAI", status: 200 }]
+              attempts: [{ model: "openai/gpt-6-luna", provider: "OpenAI", status: 200 }]
             }
           };
         }
@@ -28,13 +28,13 @@ test("the OpenRouter adapter sends Flex requests with strict routing and no SDK 
     }
   });
 
-  const response = await gateway.call(modelRequest("eligibility", "openai/gpt-5.6-luna", "flex"));
+  const response = await gateway.call(modelRequest("eligibility", "openai/gpt-6-luna", "flex"));
 
   expect(calls).toHaveLength(1);
   expect(calls[0].request.chatRequest).toEqual({
-    model: "openai/gpt-5.6-luna",
+    model: "openai/gpt-6-luna",
     messages: [{ role: "user", content: "test prompt" }],
-    reasoning: { effort: "minimal" },
+    reasoning: { effort: "low" },
     serviceTier: "flex",
     provider: { allowFallbacks: false, requireParameters: true },
     stream: false
@@ -44,7 +44,7 @@ test("the OpenRouter adapter sends Flex requests with strict routing and no SDK 
   expect(response).toEqual({
     text: "SKIP",
     requestId: "gen-123",
-    model: "openai/gpt-5.6-luna",
+    model: "openai/gpt-6-luna",
     provider: "OpenAI",
     effectiveServiceTier: "flex",
     inputTokens: 12,
@@ -105,14 +105,14 @@ test("the gateway classifies retryable, authentication, and unsupported failures
     const gateway = createOpenRouterModelGateway({
       client: { chat: { async send() { throw error; } } }
     });
-    await expect(gateway.call(modelRequest("eligibility", "openai/gpt-5.6-luna", "flex")))
+    await expect(gateway.call(modelRequest("eligibility", "openai/gpt-6-luna", "flex")))
       .rejects.toMatchObject({ name: "ModelGatewayError", kind });
   }
 });
 
 test("the gateway reports missing OpenRouter configuration without making a request", async () => {
   const gateway = createOpenRouterModelGateway({});
-  await expect(gateway.call(modelRequest("eligibility", "openai/gpt-5.6-luna", "flex")))
+  await expect(gateway.call(modelRequest("eligibility", "openai/gpt-6-luna", "flex")))
     .rejects.toEqual(new ModelGatewayError("configuration", "OPENROUTER_API_KEY is not configured"));
 });
 
@@ -128,7 +128,7 @@ function modelRequest(
     prompt: "test prompt",
     promptVersion: "test-v1",
     model,
-    reasoningEffort: "minimal",
+    reasoningEffort: model === "openai/gpt-6-luna" ? "low" : "minimal",
     signal: new AbortController().signal
   };
 }

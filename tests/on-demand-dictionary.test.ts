@@ -60,9 +60,13 @@ test("resolve completes missing examples once across concurrent requests", async
   expect(first?.senses[0].examples).toHaveLength(1);
   expect(second).toEqual(first);
   expect(gateway.calls.map(({ role }) => role)).toEqual(["example-author", "example-review"]);
-  expect(gateway.calls[0]).toMatchObject({ promptVersion: "example-author-v3" });
+  expect(gateway.calls[0]).toMatchObject({
+    promptVersion: "example-author-v3", model: "openai/gpt-6-luna", reasoningEffort: "low"
+  });
   expect(gateway.calls[0]!.prompt).toContain("Use the supplied headword spelling as a standalone lexical item");
-  expect(gateway.calls[1]).toMatchObject({ promptVersion: "example-review-v7" });
+  expect(gateway.calls[1]).toMatchObject({
+    promptVersion: "example-review-v7", model: "google/gemini-3-flash-preview", reasoningEffort: "minimal"
+  });
   expect(gateway.calls[1]!.prompt).toContain("one learner example for exactly one supplied dictionary sense");
   expect(gateway.calls[1]!.prompt).not.toContain("source provenance, Taiwan terminology");
 });

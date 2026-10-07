@@ -66,7 +66,7 @@ export type ModelRequest = {
   prompt: string;
   promptVersion: string;
   model: string;
-  reasoningEffort: "minimal";
+  reasoningEffort: "minimal" | "low";
   provider: "openrouter";
   requestedServiceTier: ServiceTier;
   responseSchema?: { name: string; schema: Record<string, unknown> };
@@ -124,7 +124,7 @@ export type AttemptRecord = {
   role: ModelRole;
   promptVersion: string;
   model: string;
-  reasoningEffort: "minimal";
+  reasoningEffort: "minimal" | "low";
   provider: string;
   requestedServiceTier: ServiceTier;
   effectiveServiceTier?: ServiceTier;
@@ -570,7 +570,7 @@ const monolingualExampleSchema = {
   }
 };
 
-const lunaModel = "openai/gpt-5.6-luna";
+const lunaModel = "openai/gpt-6-luna";
 const geminiReviewModel = "google/gemini-3-flash-preview";
 /**
  * Both dictionaries author with Luna and review with Gemini. The reviewer stays
@@ -606,7 +606,7 @@ function modelConfig(
     provider: "openrouter",
     promptVersion,
     requestedServiceTier: "flex",
-    reasoningEffort: "minimal",
+    reasoningEffort: model === lunaModel ? "low" : "minimal",
     ...(responseSchema ? { responseSchema } : {})
   };
 }
