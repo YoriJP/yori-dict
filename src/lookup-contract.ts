@@ -1,7 +1,8 @@
 import type {
   ApiLang,
-  EstimatedLevel,
+  CefrLevel,
   InflectionStep,
+  JlptLevel,
   PublicLanguageSource,
   PublicLookupItem,
   Xref
@@ -45,7 +46,8 @@ export type LookupEntry = {
   sources: string[];
   reading?: string | null;
   common?: boolean;
-  estimatedLevel?: EstimatedLevel;
+  /** A JLPT band for a Japanese entry, a CEFR band for an English one. */
+  estimatedLevel?: JlptLevel | CefrLevel;
   inflectionPath?: InflectionStep[];
   pronunciations?: LookupPronunciation[];
   /**
@@ -197,6 +199,7 @@ export function englishLookupEntry(entry: EnglishEntry, lang: ApiLang): LookupEn
     headwords: [{ text: entry.headword }],
     senses,
     sources: entry.sources.map((source) => `${source.source}:${source.sourceEntryId}`),
+    ...(entry.estimatedLevel ? { estimatedLevel: entry.estimatedLevel } : {}),
     pronunciations: entry.pronunciations.map((pronunciation) => ({
       ipa: pronunciation.ipa,
       ...(pronunciation.region ? { region: pronunciation.region } : {})

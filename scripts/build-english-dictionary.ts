@@ -5,6 +5,7 @@ import {
   type EnglishLanguageSourceInput,
   type EnglishSourceInput
 } from "../src/english-rebuild";
+import type { EnglishLevelSourceInput } from "../src/english-levels";
 
 const lockPath = resolve(flag("--lock") ?? "sources/english/source-lock.json");
 const out = resolve(flag("--out") ?? process.env.YORI_DB_PATH ?? "data/yori-english.sqlite");
@@ -36,12 +37,20 @@ for (const source of lock.languageSources ?? []) {
   }
 }
 
+const levelSources: EnglishLevelSourceInput[] = [];
+for (const source of lock.levelSources ?? []) {
+  const file = resolve(source.file);
+  await verifyChecksum(file, source.sha256);
+  levelSources.push({ ...source, file });
+}
+
 console.log(`Rebuilding the English dictionary from ${sources.length} pinned sources...`);
 const result = await rebuildEnglishDictionary({
   sources,
   out,
   version,
   ...(languageSources.length > 0 ? { languageSources } : {}),
+  ...(levelSources.length > 0 ? { levelSources } : {}),
   ...(flagList("--secondary").length > 0 ? { secondaryMappings: flagList("--secondary").map((path) => resolve(path)) } : {}),
   ...(flag("--retain-from") ? { retainFrom: resolve(flag("--retain-from")!) } : {})
 });
@@ -79,4 +88,5 @@ type SourceLock = {
     | (Extract<EnglishLanguageSourceInput, { source: "japanese-wordnet" }> & { mappingsSha256?: string })
     | Extract<EnglishLanguageSourceInput, { source: "taiwan-terminology" }>
   >;
+  levelSources?: Array<EnglishLevelSourceInput & { sha256: string }>;
 };

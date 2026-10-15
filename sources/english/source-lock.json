@@ -21,5 +21,25 @@
       "license": "CC-BY-SA-4.0 AND GFDL-1.1-or-later",
       "attribution": "Simple English Wiktionary contributors; extracted with Wiktextract"
     }
+  ],
+  "levelSources": [
+    {
+      "source": "cefr-j",
+      "version": "1.5",
+      "file": "sources/english/raw/cefrj-vocabulary-profile-1.5.csv",
+      "url": "https://raw.githubusercontent.com/openlanguageprofiles/olp-en-cefrj/d4e45b75b38f27b30dfc5c44d8c571aec7e7092f/cefrj-vocabulary-profile-1.5.csv",
+      "sha256": "b0dd3c635f1c9a4fdf1490c7e5b7c48e8bbe55b652ad0c9860a95f98e10ae498",
+      "license": "LicenseRef-CEFR-J-Wordlist",
+      "attribution": "The CEFR-J Wordlist Version 1.5. Compiled by Yukio Tono, Tokyo University of Foreign Studies. Retrieved from https://github.com/openlanguageprofiles/olp-en-cefrj on 15/10/26."
+    },
+    {
+      "source": "octanove",
+      "version": "1.0",
+      "file": "sources/english/raw/octanove-vocabulary-profile-c1c2-1.0.csv",
+      "url": "https://raw.githubusercontent.com/openlanguageprofiles/olp-en-cefrj/d4e45b75b38f27b30dfc5c44d8c571aec7e7092f/octanove-vocabulary-profile-c1c2-1.0.csv",
+      "sha256": "18c33a407f2f89f7b8de9671c6d45fe3ea0bce45e7d2d7dcaab48d73e0f7b380",
+      "license": "CC-BY-SA-4.0",
+      "attribution": "Octanove Vocabulary Profile C1/C2 version 1.0 by Octanove Labs, published by Open Language Profiles"
+    }
   ]
 }

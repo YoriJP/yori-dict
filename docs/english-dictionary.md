@@ -8,7 +8,8 @@ Traditional Chinese (`zh-tw`). Coverage varies by language.
 
 Open English WordNet provides the main English definitions and examples.
 Simple English Wiktionary supplies entries missing from WordNet and fills
-pronunciation gaps.
+pronunciation gaps. The CEFR-J Wordlist (A1 to B2) and the Octanove Vocabulary
+Profile (C1 and C2) supply estimated levels.
 
 Source versions and checksums are pinned in the
 [source lock](../sources/english/source-lock.json), with the source archives
@@ -33,6 +34,13 @@ to another language.
 
 Inflected words can resolve to their base forms: `walls` returns `wall`, and
 `rebuilt` returns `rebuild`. The response's `headword` is the matched base form.
+
+An entry carries `estimatedLevel`, a CEFR band from A1 to C2, when either level
+list rates its exact headword. The lists rate a word per part of speech, and
+Octanove sometimes rates only one advanced sense, so an entry keeps the easiest
+band it is given: `rich` is A1, not C1. A word on neither list, such as
+`ubiquitous`, has no level, and an inflected lookup such as `ran` returns the
+level of `run`.
 
 See the [API docs](https://yori-dict-production.up.railway.app/doc) for response
 schemas and batch lookup.

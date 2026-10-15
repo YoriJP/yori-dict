@@ -1,0 +1,2 @@
+# Pinned source files are checksummed byte for byte, so line endings stay as published.
+sources/english/raw/** -text

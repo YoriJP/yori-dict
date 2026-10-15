@@ -38,7 +38,7 @@ paths:
                 batchLookup: /v1/lookup/batch
                 docs: /doc
                 openapi: /openapi.yaml
-                dataRelease: https://github.com/YoriJP/yori-dict/releases/tag/data-2026-08-08
+                dataRelease: https://github.com/YoriJP/yori-dict/releases/tag/data-2026-10-06
   /doc:
     get:
       summary: API documentation
@@ -131,6 +131,12 @@ paths:
                   - name: Simple English Wiktionary
                     license: CC-BY-SA-4.0 AND GFDL-1.1-or-later
                     url: https://simple.wiktionary.org/wiki/Wiktionary:Copyrights
+                  - name: CEFR-J Wordlist
+                    license: LicenseRef-CEFR-J-Wordlist
+                    url: https://www.cefr-j.org/download.html
+                  - name: Octanove Vocabulary Profile C1/C2
+                    license: CC-BY-SA-4.0
+                    url: https://github.com/openlanguageprofiles/olp-en-cefrj
   /v1/lookup:
     get:
       summary: Look up one term in an independent dictionary
@@ -576,9 +582,13 @@ components:
         estimatedLevel:
           type: string
           description: >-
-            Japanese only. Unofficial estimated JLPT band, omitted when the pinned source
-            lists do not cover the JMdict source ID.
-          enum: [N1, N2, N3, N4, N5]
+            An unofficial estimate of how early a learner meets the word. Japanese entries
+            carry a JLPT band (N5 easiest), joined by JMdict source ID. English entries carry
+            a CEFR band (A1 easiest): A1 to B2 from the CEFR-J Wordlist, C1 and C2 from the
+            Octanove Vocabulary Profile, joined by exact headword and keeping the easiest
+            band when a list rates the word more than once. Omitted when no pinned list
+            rates the entry.
+          enum: [N1, N2, N3, N4, N5, A1, A2, B1, B2, C1, C2]
         inflectionPath:
           type: array
           description: Japanese only. Ordered deinflection steps; omitted for exact lookups.

@@ -25,7 +25,12 @@ export const englishSourceCredits: Record<string, { name: string; url: string }>
     url: "https://simple.wiktionary.org/wiki/Wiktionary:Copyrights"
   },
   "japanese-wordnet": { name: "Japanese WordNet", url: "https://bond-lab.github.io/wnja/" },
-  "taiwan-terminology": { name: "Taiwan government terminology", url: "https://terms.naer.edu.tw/" }
+  "taiwan-terminology": { name: "Taiwan government terminology", url: "https://terms.naer.edu.tw/" },
+  "cefr-j": { name: "CEFR-J Wordlist", url: "https://www.cefr-j.org/download.html" },
+  octanove: {
+    name: "Octanove Vocabulary Profile C1/C2",
+    url: "https://github.com/openlanguageprofiles/olp-en-cefrj"
+  }
 };
 
 /** One synset as the pinned Open English WordNet JSON export writes it. */

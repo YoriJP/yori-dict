@@ -18,9 +18,10 @@ export type { LanguageCoverage };
  * `en-1` was the earlier blob shape, where one `english_entries` row held a whole
  * entry as JSON and every sense was English. `en-2` is this normalized shape,
  * so a reader can tell the two artifact generations apart, exactly as `ja-2`
- * distinguishes the Japanese rebuild from the tables it replaced.
+ * distinguishes the Japanese rebuild from the tables it replaced. `en-3` adds
+ * `en_entry_levels`.
  */
-export const englishSchemaVersion = "en-2";
+export const englishSchemaVersion = "en-3";
 
 export const englishCanonicalTables = [
   "en_metadata",
@@ -31,7 +32,8 @@ export const englishCanonicalTables = [
   "en_senses",
   "en_glosses",
   "en_examples",
-  "en_generations"
+  "en_generations",
+  "en_entry_levels"
 ] as const;
 
 const definitions = `
@@ -131,6 +133,15 @@ create table if not exists en_generations (
   service_tier text,
   review_outcome text not null,
   created_at text not null
+);
+
+-- Estimated Level: one CEFR band per entry from a pinned list. An entry
+-- neither list rates has no row.
+create table if not exists en_entry_levels (
+  entry_id text primary key references en_entries(id),
+  level text not null check (level in ('A1', 'A2', 'B1', 'B2', 'C1', 'C2')),
+  source_name text not null,
+  source_version text not null
 );
 
 create index if not exists en_lookup_terms_term_idx on en_lookup_terms(term);

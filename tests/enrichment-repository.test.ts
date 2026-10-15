@@ -197,9 +197,13 @@ test("production migrations are idempotent", async () => {
   const legacy = new Database(path);
   legacy.exec("drop table ja_sense_evidence; drop table ja_explanation_group_gaps;");
   legacy.prepare("update ja_metadata set value = 'ja-2' where key = 'schemaVersion'").run();
-  legacy.prepare(
-    "delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)"
-  ).run();
+  // Drizzle applies only migrations newer than the latest recorded one, so
+  // every row from ja-3 onward is forgotten, not just the most recent.
+  const journal = await Bun.file("drizzle/meta/_journal.json").json() as {
+    entries: Array<{ tag: string; when: number }>;
+  };
+  const ja3 = journal.entries.find(({ tag }) => tag === "0006_japanese-evidence-gaps")!.when;
+  legacy.prepare("delete from __drizzle_migrations where created_at >= ?").run(ja3);
   legacy.close();
   migrateProductionDatabase(path);
   migrateProductionDatabase(path);

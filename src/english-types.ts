@@ -1,4 +1,4 @@
-import type { ApiLang } from "./types";
+import type { ApiLang, CefrLevel } from "./types";
 
 export type EnglishSourceName = "open-english-wordnet" | "wiktionary";
 
@@ -94,6 +94,8 @@ export type EnglishEntry = {
   id: string;
   dictionary: "en";
   headword: string;
+  /** Absent when neither pinned level list carries the headword. */
+  estimatedLevel?: CefrLevel;
   pronunciations: EnglishPronunciation[];
   senses: EnglishSense[];
   sources: EnglishSourceReference[];

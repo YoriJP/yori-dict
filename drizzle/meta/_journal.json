@@ -50,6 +50,13 @@
       "when": 1788678000000,
       "tag": "0006_japanese-evidence-gaps",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792022400000,
+      "tag": "0007_english-entry-levels",
+      "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@ import {
 const path = resolve(process.env.YORI_DB_PATH ?? "data/yori.sqlite");
 // The English source version is pinned here, the way the Japanese release is
 // pinned in data-release.json. It was a runtime variable nothing ever set.
-const englishVersion = "2026.08.1";
+const englishVersion = "2026.10.2";
 const localEnglishRelease = resolve(`releases/english/yori-english-${englishVersion}.sqlite`);
 
 const installedJapanese = await ensureJapaneseProductionDatabase(path);
