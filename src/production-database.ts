@@ -59,6 +59,11 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
   const incomingVersion = source.query<{ value: string }, []>(
     "select value from en_metadata where key = 'dictionaryVersion'"
   ).get()?.value;
+  // A release exported before en-3 carries no levels, and grafting it leaves
+  // its imported entries unrated rather than failing.
+  const incomingLevels = Boolean(source.query<{ name: string }, []>(
+    "select name from sqlite_master where type = 'table' and name = 'en_entry_levels'"
+  ).get());
   source.close();
   if (!incomingVersion) throw new Error(`English release has no dictionaryVersion: ${releasePath}`);
   const currentVersion = production.query<{ value: string }, []>(
@@ -128,6 +133,10 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
             select id from en_entries where source <> 'generated'
             union select id from promoted_en_entries
           );
+          delete from en_entry_levels where entry_id in (
+            select id from en_entries where source <> 'generated'
+            union select id from promoted_en_entries
+          );
           delete from en_entries
            where source <> 'generated' or id in (select id from promoted_en_entries);
           delete from en_metadata;
@@ -141,6 +150,10 @@ export function importEnglishRelease(path: string, releasePath: string): boolean
           insert or ignore into en_senses select * from english_release.en_senses;
           insert or ignore into en_glosses select * from english_release.en_glosses;
           insert or ignore into en_examples select * from english_release.en_examples;
+          ${incomingLevels
+            ? `insert or ignore into en_entry_levels (entry_id, level, source_name, source_version)
+                 select entry_id, level, source_name, source_version from english_release.en_entry_levels;`
+            : ""}
           -- A retained group only returns to an entry the release still
           -- provides, and never displaces content the release itself explains
           -- in that language.

@@ -150,7 +150,8 @@ raw upstream record. The pinned archives themselves are the reproducible rebuild
 Canonical entries carry separate source evidence IDs and stable `yori:en:*` identities;
 they do not adopt either source's identity. The English SQLite, JSONL, manifest, and
 Yomitan v3 artifacts are distributed under CC BY-SA 4.0 and must retain both source
-attributions.
+attributions, and the SQLite and JSONL artifacts also those of the English level lists
+below.
 
 Sources:
 
@@ -207,16 +208,59 @@ Sources:
 
 ## Estimated Levels
 
-Estimated levels come from `stephenmk/yomitan-jlpt-vocab`, pinned by commit in
-the download script and joined to entries only by `jmdict_seq`. That project
-packages its dictionary under CC BY-SA 4.0 and attributes the underlying JLPT
-lists to Jonathan Waller under CC BY. These are unofficial estimates: the JLPT
-does not publish an official vocabulary list.
+Japanese estimated levels come from `stephenmk/yomitan-jlpt-vocab`, pinned by
+commit in the download script and joined to entries only by `jmdict_seq`. That
+project packages its dictionary under CC BY-SA 4.0 and attributes the underlying
+JLPT lists to Jonathan Waller under CC BY. These are unofficial estimates: the
+JLPT does not publish an official vocabulary list.
 
 Sources:
 
 - https://github.com/stephenmk/yomitan-jlpt-vocab
 - http://www.tanos.co.uk/jlpt/
+
+### English
+
+English estimated levels are CEFR bands from two lists that Open Language
+Profiles publishes together. Both files are committed verbatim under
+`sources/english/raw/` and pinned by commit, URL and checksum in
+`sources/english/source-lock.json`. The CEFR defines no vocabulary, so these are
+estimates too.
+
+- The CEFR-J Wordlist 1.5 rates about 7,800 headword and part-of-speech pairs
+  from A1 to B2. Its terms are not a Creative Commons licence. Tono Laboratory at
+  Tokyo University of Foreign Studies holds the copyright and states that the list
+  *"can be used for both research and commercial purposes with a proper
+  acknowledgement of the source"*. The Japanese terms on the same page add that a
+  new list may be made by modifying it, provided it is cited (本語彙表を改変して別の語彙表を作ることはかまわないが、必ず本語彙表を適切に引用しなければならない),
+  and that fees apply only when the laboratory is asked to supervise a commercial
+  use. There is no share-alike and no condition that distribution under CC BY-SA
+  4.0 would breach, so a rating joined onto an entry is admitted on that grant.
+  The terms do not mention verbatim redistribution of the file. Open Language
+  Profiles publishes it with the CEFR-J project's permission, and the committed
+  copy is theirs. Version 1.6 on cefr-j.org merges some spelling variants and adds
+  *being*, *having* and *tonne*; 1.5 is the release Open Language Profiles
+  publishes as CSV.
+- The Octanove Vocabulary Profile C1/C2 1.0 by Octanove Labs rates about 2,100
+  headword and part-of-speech pairs at C1 or C2, some only for one advanced sense. It is
+  distributed under CC BY-SA 4.0, so level data derived from it stays under CC
+  BY-SA 4.0, which is already the English release licence.
+
+Ratings attach to the entry whose headword exactly matches a listed headword or
+one of its slash-separated spelling variants. Required citation for the CEFR-J
+Wordlist:
+
+```txt
+The CEFR-J Wordlist Version 1.5. Compiled by Yukio Tono, Tokyo University of
+Foreign Studies. Retrieved from https://github.com/openlanguageprofiles/olp-en-cefrj
+on 15/10/26.
+```
+
+Sources:
+
+- https://www.cefr-j.org/download.html
+- https://github.com/openlanguageprofiles/olp-en-cefrj
+- https://creativecommons.org/licenses/by-sa/4.0/
 
 ## Release SQLite Database
 
@@ -262,4 +306,6 @@ distributed under CC BY-SA 4.0.
 ```
 
 For example sentences and estimated levels, also retain the Tatoeba IDs and
-source links carried by the database and name the list projects above.
+source links carried by the database and name the list projects above. English
+releases that carry estimated levels must also cite the CEFR-J Wordlist as shown
+above and credit Octanove Labs' Vocabulary Profile under CC BY-SA 4.0.

@@ -121,7 +121,7 @@ export type PublicLookupItem = {
   source: "jmdict" | "generated";
   sourceId: string;
   headwordLanguage: "ja";
-  estimatedLevel?: EstimatedLevel;
+  estimatedLevel?: JlptLevel;
   inflectionPath?: InflectionStep[];
   headwords: PublicHeadword[];
   senses: PublicSense[];
@@ -132,7 +132,7 @@ export type PublicEntry = {
   source: "jmdict" | "generated";
   sourceId: string;
   headwordLanguage: "ja";
-  estimatedLevel?: EstimatedLevel;
+  estimatedLevel?: JlptLevel;
   headwords: PublicHeadword[];
   senses: PublicSense[];
 };
@@ -172,7 +172,11 @@ export type PublicSense = {
   pragmaticFunctions?: string[];
 };
 
-export type EstimatedLevel = "N1" | "N2" | "N3" | "N4" | "N5";
+/** Estimated Level for a Japanese entry: a JLPT band. */
+export type JlptLevel = "N1" | "N2" | "N3" | "N4" | "N5";
+
+/** Estimated Level for an English entry: a CEFR band. */
+export type CefrLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 
 export type InflectionStep = {
   from: string;

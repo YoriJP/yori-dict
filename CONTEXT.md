@@ -141,8 +141,8 @@ A sense example rendered into a gloss language.
 _Avoid_: Gloss, second example
 
 **Estimated Level**:
-A JLPT band taken from an unofficial published list. No official JLPT vocabulary list has existed since 2010, so the band is an estimate and is presented as one.
-_Avoid_: JLPT level, official level, difficulty
+How early a learner meets an entry, as a band taken from an unofficial published list: a JLPT band for Japanese, a CEFR band for English. No official JLPT vocabulary list has existed since 2010 and the CEFR defines no vocabulary at all, so the band is an estimate and is presented as one. A word several ratings cover keeps its easiest band; an entry no list rates has no level.
+_Avoid_: JLPT level, CEFR level, official level, difficulty
 
 **Data Release**:
 A versioned, immutable snapshot exported from one dictionary's canonical production tables. Japanese and English releases remain independently consumable even though runtime uses one physical database.

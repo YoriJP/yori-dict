@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rename } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { englishEntryId, englishSenseId, normalizeEnglishLookupTerm } from "./english-dictionary";
+import { chooseEnglishLevels, cefrLevels, type EnglishLevelSourceInput } from "./english-levels";
 import { resolveEnglishLemma } from "./english-strip";
 import {
   importOpenEnglishWordNetEntry,
@@ -33,6 +34,7 @@ import {
 } from "../scripts/english-evidence-sources";
 import { openZipFile, type ZipArchive } from "./stored-zip";
 import type { EnglishSourceRecord } from "./english-types";
+import type { CefrLevel } from "./types";
 
 /**
  * The explicit English source policy.
@@ -133,6 +135,11 @@ export type EnglishRebuildOptions = {
    * they never create, reorder or rewrite the English group.
    */
   languageSources?: EnglishLanguageSourceInput[];
+  /**
+   * Pinned CEFR lists. Each entry, imported or retained, gets the easiest band
+   * any list gives its exact headword; an inflected form is not rated.
+   */
+  levelSources?: EnglishLevelSourceInput[];
   /** Limits which lexical-entry files of the archive are read. Tests rebuild a slice. */
   wordnetEntryFiles?: string[] | null;
   /**
@@ -154,6 +161,8 @@ export type EnglishRebuildResult = {
   retained: { entries: number; groups: number; examples: number };
   /** Direct-import outcome per explanation language other than English. */
   languages: Record<string, EnglishLanguageImportResult>;
+  /** Entries per Estimated Level band. */
+  levels: Record<CefrLevel, number>;
 };
 
 type PendingEntry = {
@@ -255,6 +264,7 @@ async function buildInto(
   const pronunciations = writeEntries(db, entries, reference.byTerm);
   const languages = await importLanguageGroups(db, options.languageSources ?? [], entries);
   const retainedResult = restoreRetained(db, retained);
+  const levels = await writeLevels(db, options.levelSources ?? []);
 
   return {
     entries: db.query<{ count: number }, []>("select count(*) as count from en_entries").get()?.count ?? 0,
@@ -264,7 +274,8 @@ async function buildInto(
     secondary,
     pronunciations,
     retained: retainedResult,
-    languages
+    languages,
+    levels
   };
 }
 
@@ -511,7 +522,8 @@ function writeMetadata(
       en: `${englishSourcePolicy.primary} then ${englishSourcePolicy.fallback}`,
       ja: englishSourcePolicy.ja,
       "zh-tw": englishSourcePolicy["zh-tw"]
-    }
+    },
+    estimatedLevel: "easiest CEFR band any level source gives the exact headword"
   }));
   insert.run("sources", JSON.stringify([
     ...options.sources.map((source) => ({
@@ -546,8 +558,48 @@ function writeMetadata(
             mappings: basename(source.mappings)
           }
         : {})
+    })),
+    // No `lang`: a level describes the headword, not an explanation language,
+    // so no Yomitan pack's attribution names a level source.
+    ...(options.levelSources ?? []).map((source) => ({
+      source: source.source,
+      ...sourceCredit(source.source),
+      version: source.version,
+      license: source.license,
+      attribution: source.attribution,
+      file: basename(source.file),
+      ...(source.sha256 ? { sha256: source.sha256 } : {}),
+      ...(source.url ? { url: source.url } : {}),
+      role: "estimated-level"
     }))
   ]));
+}
+
+async function writeLevels(
+  db: Database,
+  inputs: EnglishLevelSourceInput[]
+): Promise<Record<CefrLevel, number>> {
+  const counts = Object.fromEntries(cefrLevels.map((level) => [level, 0])) as Record<CefrLevel, number>;
+  if (inputs.length === 0) return counts;
+  const levels = chooseEnglishLevels(await Promise.all(inputs.map(async (input) => ({
+    sourceName: input.source,
+    sourceVersion: input.version,
+    text: await Bun.file(resolve(input.file)).text()
+  }))));
+  const insert = db.prepare(
+    "insert into en_entry_levels (entry_id, level, source_name, source_version) values (?, ?, ?, ?)"
+  );
+  db.transaction(() => {
+    for (const entry of db.query<{ id: string; lookup_term: string }, []>(
+      "select id, lookup_term from en_entries order by id"
+    ).all()) {
+      const rated = levels.get(entry.lookup_term);
+      if (!rated) continue;
+      insert.run(entry.id, rated.level, rated.sourceName, rated.sourceVersion);
+      counts[rated.level] += 1;
+    }
+  })();
+  return counts;
 }
 
 /**

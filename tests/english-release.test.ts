@@ -32,7 +32,7 @@ test("the English release is deterministic and keeps the source's sense order en
   expect(manifest).toMatchObject({
     dictionary: "en",
     artifactVersion: "2026.08.1",
-    schemaVersion: "en-2",
+    schemaVersion: "en-3",
     dictionaryVersion: "2026.08.1",
     entries: 3,
     sourcePolicy: {
@@ -80,7 +80,7 @@ test("the English release is deterministic and keeps the source's sense order en
   expect(released.query<{ name: string }, []>(
     "select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name"
   ).all().map(({ name }) => name)).toEqual([
-    "en_entries", "en_entry_sources", "en_examples", "en_generations",
+    "en_entries", "en_entry_levels", "en_entry_sources", "en_examples", "en_generations",
     "en_glosses", "en_lookup_terms", "en_metadata", "en_pronunciations", "en_senses"
   ]);
   released.close();

@@ -12,7 +12,7 @@ import { resolveEnglishLemma } from "./english-strip";
 import { normalizeEnglishLookupTerm } from "./normalize";
 
 export { normalizeEnglishLookupTerm };
-import type { ApiLang, DictionaryMeta, PublicSource } from "./types";
+import type { ApiLang, CefrLevel, DictionaryMeta, PublicSource } from "./types";
 
 /** One entry with every explanation language it currently carries. */
 export type EnglishEntryGroups = {
@@ -161,14 +161,18 @@ export function readEnglishEntry(db: Database, entryId: string, lang: ApiLang): 
 }
 
 export function readEnglishEntryHeader(db: Database, entryId: string): Omit<EnglishEntry, "senses"> | null {
-  const row = db.query<{ id: string; headword: string }, [string]>(
-    "select id, headword from en_entries where id = ?"
-  ).get(entryId);
+  const row = db.query<{ id: string; headword: string; level: CefrLevel | null }, [string]>(`
+    select entry.id, entry.headword, level.level
+      from en_entries entry
+      left join en_entry_levels level on level.entry_id = entry.id
+     where entry.id = ?
+  `).get(entryId);
   if (!row) return null;
   return {
     id: row.id,
     dictionary: "en",
     headword: row.headword,
+    ...(row.level ? { estimatedLevel: row.level } : {}),
     pronunciations: readEnglishPronunciations(db, entryId),
     sources: readEnglishSources(db, entryId)
   };

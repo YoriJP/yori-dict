@@ -19,7 +19,7 @@ import {
   type LanguageCoverage
 } from "./japanese-schema";
 import { parseApiLang, toApiLang } from "./lang";
-import type { ApiLang, EstimatedLevel, JmdictFile, JmdictWord } from "./types";
+import type { ApiLang, JlptLevel, JmdictFile, JmdictWord } from "./types";
 
 export type JapaneseRebuildOptions = {
   /** Pinned JMdict-simplified export. */
@@ -161,7 +161,7 @@ async function buildInto(
   }
   const estimatedLevels = options.jlptVocab
     ? await readEstimatedLevels(options.jlptVocab)
-    : new Map<string, EstimatedLevel>();
+    : new Map<string, JlptLevel>();
   const legacyGlosses = (await Promise.all((options.aiGlosses ?? []).map((path) => readJsonl<LegacyGlossRow>(path)))).flat();
   const legacyExamples = (await Promise.all((options.aiExamples ?? []).map((path) => readJsonl<LegacyExampleRow>(path)))).flat();
 
@@ -206,7 +206,7 @@ function importWords(
   db: Database,
   source: JmdictFile,
   exampleSource: JmdictFile | null,
-  estimatedLevels: Map<string, EstimatedLevel>
+  estimatedLevels: Map<string, JlptLevel>
 ) {
   const exampleStats = { imported: 0, unmatched: 0, ambiguous: 0, invalid: 0 };
   const importedSenses = new Map<string, ImportedSense>();
@@ -964,14 +964,14 @@ function readingForKanji(word: JmdictWord, kanjiText: string): string | null {
   return matchingKana?.text ?? word.kana[0]?.text ?? null;
 }
 
-async function readEstimatedLevels(directory: string): Promise<Map<string, EstimatedLevel>> {
-  const levels = new Map<string, EstimatedLevel>();
+async function readEstimatedLevels(directory: string): Promise<Map<string, JlptLevel>> {
+  const levels = new Map<string, JlptLevel>();
   const files = (await readdir(directory)).filter((file) => /^n[1-5]\.csv$/i.test(file)).sort();
   if (files.length !== 5) throw new Error(`Expected n1.csv through n5.csv in ${directory}`);
   for (const file of files) {
     const match = basename(file).match(/^n([1-5])\.csv$/i);
     if (!match) continue;
-    const level = `N${match[1]}` as EstimatedLevel;
+    const level = `N${match[1]}` as JlptLevel;
     const lines = (await Bun.file(join(directory, file)).text()).split(/\r?\n/).slice(1);
     for (const line of lines) {
       const separator = line.indexOf(",");
