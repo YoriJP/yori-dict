@@ -13,7 +13,7 @@ import {
   type ResolveRequest,
   type SourceEvidence
 } from "../src/on-demand-dictionary";
-import type { PublicLookupItem } from "../src/types";
+import type { PublicLookupItem, RubyToken } from "../src/types";
 test("resolve returns a released entry without calling a model", async () => {
   const released = existingEntry();
   const repository = new MemoryRepository({ released: [["学校", released]] });
@@ -1175,7 +1175,7 @@ type ScriptedResponse = string | Error | ((request: ModelRequest) => string | Pr
 class ScriptedGateway implements ModelGateway {
   readonly calls: ModelRequest[] = [];
 
-  constructor(private readonly responses: ScriptedResponse[]) {}
+  constructor(readonly responses: ScriptedResponse[]) {}
 
   async call(input: ModelRequest) {
     this.calls.push(input);
@@ -1238,6 +1238,7 @@ class MemoryRepository implements EnrichmentRepository {
   readonly attempts: unknown[] = [];
   readonly entries = new Map<string, PublicLookupItem>();
   readonly examples = new Map<string, PublicLookupItem["senses"][number]["examples"]>();
+  readonly ruby = new Map<string, RubyToken[] | null>();
   private readonly released: Map<string, PublicLookupItem>;
   private readonly sources: Map<string, SourceEvidence[]>;
   private readonly rankedCandidates: Map<string, CanonicalCandidate[]>;
@@ -1256,24 +1257,40 @@ class MemoryRepository implements EnrichmentRepository {
     this.lookups.push(["dictionary", query]);
     const entry = this.entries.get(query) ?? this.released.get(query) ?? null;
     if (!entry) return null;
-    return {
-      ...entry,
-      senses: entry.senses.map((sense) => this.examples.has(sense.id)
-        ? { ...sense, examples: this.examples.get(sense.id) }
-        : sense)
-    };
+    return this.stored(entry);
   }
 
   findById(id: string, _lang?: unknown, inflectionPath = []) {
     const entry = [...this.entries.values(), ...this.released.values()].find((candidate) => candidate.id === id);
     if (!entry) return null;
+    return this.stored({ ...entry, ...(inflectionPath.length > 0 ? { inflectionPath } : {}) });
+  }
+
+  /** The entry as the store would read it back: saved examples, and readings joined by sentence. */
+  private stored(entry: PublicLookupItem): PublicLookupItem {
     return {
       ...entry,
-      ...(inflectionPath.length > 0 ? { inflectionPath } : {}),
-      senses: entry.senses.map((sense) => this.examples.has(sense.id)
-        ? { ...sense, examples: this.examples.get(sense.id) }
-        : sense)
+      senses: entry.senses.map((sense) => {
+        const examples = this.examples.get(sense.id) ?? sense.examples;
+        return examples
+          ? {
+              ...sense,
+              examples: examples.map((example) => {
+                const ruby = this.ruby.get(example.text);
+                return ruby ? { ...example, ruby } : example;
+              })
+            }
+          : sense;
+      })
     };
+  }
+
+  saveExampleRuby(text: string, ruby: RubyToken[] | null) {
+    this.ruby.set(text, ruby);
+  }
+
+  triedExampleRuby(texts: string[]) {
+    return new Set(texts.filter((text) => this.ruby.has(text)));
   }
 
   candidates(query: string) {
@@ -1401,3 +1418,94 @@ for (const [headword, reading, gloss] of [
     });
   }
 }
+
+function withExamples(...texts: string[]): PublicLookupItem {
+  const entry = existingEntry();
+  entry.senses[0].examples = texts.map((text) => ({
+    text,
+    translations: [{ lang: "en", text: "x" }],
+    source: "sourced",
+    reviewStatus: "source"
+  }));
+  return entry;
+}
+
+/** Answers a reading request for whichever of these sentences its prompt lists. */
+function rubyFor(readings: Record<string, Array<[string, string?]>>) {
+  return (input: ModelRequest) => {
+    const listed = input.prompt.split("\n").flatMap((line) => {
+      const [index, text] = line.split("\t");
+      return text !== undefined && text in readings ? [{ index: Number(index), text }] : [];
+    });
+    return JSON.stringify({
+      sentences: listed.map(({ index, text }) => ({
+        index,
+        segments: readings[text].map(([segment, reading]) => ({ text: segment, reading: reading ?? "" }))
+      }))
+    });
+  };
+}
+
+test("an example sentence is read once, whether its reading was kept or rejected", async () => {
+  const repository = new MemoryRepository({ released: [["学校", withExamples("学校へ行きます。", "大学へ行く。")]] });
+  const gateway = new ScriptedGateway([rubyFor({
+    // A reading over the okurigana too is moved off it: 行(い)きます.
+    "学校へ行きます。": [["学校", "がっこう"], ["へ"], ["行き", "いき"], ["ます。"]],
+    // A kanji left without a reading is not furigana a learner can use.
+    "大学へ行く。": [["大学", "だいがく"], ["へ"], ["行", ""], ["く。"]]
+  })]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, exampleRuby: true });
+
+  const expected: RubyToken[] = [["学校", "がっこう"], "へ", ["行", "い"], "きます。"];
+  for (let lookup = 0; lookup < 3; lookup += 1) {
+    const entry = await dictionary.resolve(request("学校"));
+    expect(entry?.senses[0].examples?.map((example) => example.ruby)).toEqual([expected, undefined]);
+  }
+  // The rejected sentence is not paid for again on later lookups.
+  expect(gateway.calls).toHaveLength(1);
+});
+
+test("a reading is kept only where the segment's kana lines up with it", async () => {
+  const repository = new MemoryRepository({
+    released: [["学校", withExamples("𠮷野家で折り返す。", "東京タワー前で。")]]
+  });
+  const gateway = new ScriptedGateway([rubyFor({
+    "𠮷野家で折り返す。": [["𠮷野家", "よしのや"], ["で"], ["折り返", "おりかえ"], ["す。"]],
+    // タワー is not in the reading, so the reading cannot be placed over it.
+    "東京タワー前で。": [["東京タワー前", "とうきょうまえ"], ["で。"]]
+  })]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, exampleRuby: true });
+
+  const entry = await dictionary.resolve(request("学校"));
+  expect(entry?.senses[0].examples?.map((example) => example.ruby)).toEqual([
+    [["𠮷野家", "よしのや"], "で", ["折", "お"], "り", ["返", "かえ"], "す。"],
+    undefined
+  ]);
+});
+
+test("concurrent lookups sharing a sentence read it once", async () => {
+  const readings = rubyFor({
+    "学校。": [["学校", "がっこう"], ["。"]],
+    "大学。": [["大学", "だいがく"], ["。"]],
+    "中学。": [["中学", "ちゅうがく"], ["。"]]
+  });
+  const repository = new MemoryRepository({
+    released: [["学校", withExamples("学校。", "大学。")], ["中学", withExamples("学校。", "中学。")]]
+  });
+  const gateway = new ScriptedGateway([readings, readings]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, exampleRuby: true });
+
+  const entries = await Promise.all([dictionary.resolve(request("学校")), dictionary.resolve(request("中学"))]);
+  expect(entries.map((entry) => entry?.senses[0].examples?.every((example) => example.ruby))).toEqual([true, true]);
+  expect(gateway.calls.filter((call) => call.prompt.includes("学校。"))).toHaveLength(1);
+});
+
+test("a provider failure serves the entry without readings", async () => {
+  const released = existingEntry();
+  const repository = new MemoryRepository({ released: [["学校", released]] });
+  const gateway = new ScriptedGateway([new ModelGatewayError("permanent", "refused")]);
+  const dictionary = createJapaneseOnDemandDictionary({ repository, modelGateway: gateway, exampleRuby: true });
+
+  expect(await dictionary.resolve(request("学校"))).toEqual(released);
+  expect(repository.ruby.size).toBe(0);
+});

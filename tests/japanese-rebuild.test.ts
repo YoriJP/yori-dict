@@ -8,7 +8,7 @@ import { openLookupDb } from "../src/db";
 import { openEnrichmentRepository } from "../src/enrichment-repository";
 import { rebuildJapaneseDictionary } from "../src/japanese-rebuild";
 import { migrateProductionDatabase } from "../src/production-database";
-import type { PublicLookupItem } from "../src/types";
+import type { PublicLookupItem, RubyToken } from "../src/types";
 
 test("a rebuild gives every explanation language its own ordered senses", async () => {
   const out = join(mkdtempSync(join(tmpdir(), "yori-ja-rebuild-")), "yori.sqlite");
@@ -398,6 +398,10 @@ test("a rebuild retains accepted generated content and does not reorder imported
     source: "generated",
     reviewStatus: "checked"
   }, exampleGeneration);
+  // An Example Reading on an imported example: the rebuild re-imports the
+  // example row itself, and the reading must find it again by its sentence.
+  const schoolRuby: RubyToken[] = [["学校", "がっこう"], "へ", ["行", "い"], "きます。"];
+  repository.saveExampleRuby("学校へ行きます。", schoolRuby, exampleGeneration);
   // An authored group written from licensed evidence carries source
   // provenance. It is still enrichment, and a rebuild must keep it.
   repository.saveEntry({
@@ -454,7 +458,10 @@ test("a rebuild retains accepted generated content and does not reorder imported
   // The source-provenance authored group survived too: enrichment is marked by
   // its generation reference, not by every sense claiming to be generated.
   expect(reopened.lookup("学校", "ko").item?.senses[0].glosses[0].text).toBe("학교");
-  expect(reopened.lookup("学校", "en").item?.senses[0].examples?.[0].text).toBe("学校へ行きます。");
+  expect(reopened.lookup("学校", "en").item?.senses[0].examples?.[0]).toMatchObject({
+    text: "学校へ行きます。",
+    ruby: schoolRuby
+  });
   // A generated addition never renumbers imported senses.
   expect(reopened.lookup("食べる", "en").item?.senses[0].position).toBe(1);
   reopened.close();

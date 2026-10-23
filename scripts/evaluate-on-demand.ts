@@ -169,6 +169,12 @@ class EvaluationRepository implements EnrichmentRepository {
   find(query: string) { return this.entry?.word === query ? this.entry : null; }
   findSources(query: string) { return query === this.source.headword ? [this.source] : []; }
   saveEntry(entry: PublicLookupItem) { this.entry = entry; }
+  // The evaluated dictionary does not author Example Readings.
+  saveExampleRuby() {}
+  triedExampleRuby() {
+    return new Set<string>();
+  }
+
   saveExample(senseId: string, example: PublicExample) {
     if (!this.entry) return;
     this.entry = {

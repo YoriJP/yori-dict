@@ -849,6 +849,21 @@ components:
           type: string
           description: Source examples are untouched; generated examples must be checked.
           enum: [source, checked]
+        ruby:
+          type: array
+          description: >-
+            Example Reading for a Japanese sentence: plain strings and [base, reading]
+            pairs that concatenate back to `text` exactly. Readings are model-authored
+            and checked by code, not reviewed. Omitted until the sentence has been read.
+          items:
+            oneOf:
+              - type: string
+              - type: array
+                minItems: 2
+                maxItems: 2
+                items:
+                  type: string
+          example: [["果物", "くだもの"], "を", ["食", "た"], "べる。"]
     ErrorResponse:
       type: object
       required: [error]
