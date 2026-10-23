@@ -135,7 +135,6 @@ export type AttemptRecord = {
   inputTokens?: number;
   outputTokens?: number;
   costUsd?: number;
-  prompt?: string;
   response?: string;
   error?: string;
   outcome: string;
@@ -1037,7 +1036,6 @@ async function callAndRecord(
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         costUsd: response.costUsd,
-        prompt: boundedLog(prompt),
         response: boundedLog(response.text),
         outcome: "pending"
       };
@@ -1055,7 +1053,6 @@ async function callAndRecord(
           durationMs: Math.max(0, performance.now() - started),
           ...(timing.queueDurationMs === undefined ? {} : { queueDurationMs: timing.queueDurationMs }),
           ...(timing.providerDurationMs === undefined ? {} : { providerDurationMs: timing.providerDurationMs }),
-          prompt: boundedLog(prompt),
           error: boundedLog(failure.message),
           outcome: failure.kind
         });

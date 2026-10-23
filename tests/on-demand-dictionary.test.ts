@@ -320,9 +320,10 @@ test("resolve authors a source-grounded entry before completing its examples", a
   expect(repository.attempts[0]).toMatchObject({
     traceId: "news-ja-request",
     candidateId: entry.id,
-    prompt: expect.stringContaining("source_evidence"),
     response: expect.stringContaining("未知語")
   });
+  // Prompts are reproducible from the prompt version and dominated storage.
+  for (const attempt of repository.attempts) expect(attempt).not.toHaveProperty("prompt");
 });
 
 test("resolve canonicalizes once and repeats source discovery for the changed headword", async () => {
