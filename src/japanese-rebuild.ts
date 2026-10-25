@@ -89,6 +89,8 @@ type Retained = {
   examples: Array<Record<string, unknown>>;
   /** Generations referenced by retained examples on imported senses. */
   exampleGenerations: Array<Record<string, unknown>>;
+  exampleRuby: Array<Record<string, unknown>>;
+  exampleRubyGenerations: Array<Record<string, unknown>>;
 };
 
 type RetainedEntry = {
@@ -559,7 +561,7 @@ function importLegacyExamples(
 }
 
 function emptyRetained(): Retained {
-  return { entries: [], groups: [], examples: [], exampleGenerations: [] };
+  return { entries: [], groups: [], examples: [], exampleGenerations: [], exampleRuby: [], exampleRubyGenerations: [] };
 }
 
 /**
@@ -669,7 +671,21 @@ function readRetained(path: string): Retained {
       `select * from ja_generations where id in (${exampleGenerationIds.map(() => "?").join(", ")})`
     ).all(...exampleGenerationIds);
 
-    return { entries, groups, examples, exampleGenerations };
+    // Example Readings are keyed by sentence, so every one is carried over: a
+    // sentence the rebuilt sources still contain finds its reading again.
+    const hasRuby = Boolean(db.query(
+      "select 1 from sqlite_master where type = 'table' and name = 'ja_example_ruby'"
+    ).get());
+    const exampleRuby = hasRuby
+      ? db.query<Record<string, unknown>, []>("select * from ja_example_ruby order by text").all()
+      : [];
+    const exampleRubyGenerations = hasRuby
+      ? db.query<Record<string, unknown>, []>(
+          "select * from ja_generations where id in (select generation_id from ja_example_ruby)"
+        ).all()
+      : [];
+
+    return { entries, groups, examples, exampleGenerations, exampleRuby, exampleRubyGenerations };
   } finally {
     db.close();
   }
@@ -754,6 +770,8 @@ function restoreRetained(
       insertRow(db, "ja_examples", { ...example, position: next }, true);
       examples += 1;
     }
+    for (const generation of retained.exampleRubyGenerations) insertRow(db, "ja_generations", generation, true);
+    for (const ruby of retained.exampleRuby) insertRow(db, "ja_example_ruby", ruby, true);
   })();
   return { entries, groups, examples };
 }

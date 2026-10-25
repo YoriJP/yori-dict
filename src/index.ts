@@ -32,7 +32,8 @@ const japaneseOnDemand = createJapaneseOnDemandDictionary({
   gate: modelGate,
   reviewPasses: 2,
   timeoutMs: modelTimeoutMs,
-  logger
+  logger,
+  exampleRuby: true
 });
 const englishRepository = openEnglishEnrichmentRepository(dbPath);
 const englishOnDemand = createEnglishOnDemandDictionary({

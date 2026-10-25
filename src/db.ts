@@ -11,6 +11,7 @@ import type {
   PublicLookupItem,
   PublicSense,
   PublicSource,
+  RubyToken,
   Xref
 } from "./types";
 import { normalizeJapaneseEvidenceId } from "./japanese-schema";
@@ -77,6 +78,7 @@ type ExampleRow = {
   source_name: string | null;
   source_id: string | null;
   review_status: "source" | "checked";
+  ruby: string | null;
 };
 
 export type LookupDb = {
@@ -511,10 +513,29 @@ function readSenseEvidence(db: Database, senseId: string, legacySourceRef: strin
       : [];
 }
 
+/**
+ * Databases known to hold Example Readings. A release published before the
+ * table existed is still readable; once the table appears it stays, so only
+ * its absence is re-checked.
+ */
+const exampleRubyDatabases = new WeakSet<Database>();
+
+function hasExampleRuby(db: Database): boolean {
+  if (exampleRubyDatabases.has(db)) return true;
+  const present = Boolean(db.query(
+    "select 1 from sqlite_master where type = 'table' and name = 'ja_example_ruby'"
+  ).get());
+  if (present) exampleRubyDatabases.add(db);
+  return present;
+}
+
 function readExamples(db: Database, senseId: string): PublicExample[] {
+  const ruby = hasExampleRuby(db)
+    ? "(select ruby from ja_example_ruby where ja_example_ruby.text = ja_examples.text)"
+    : "null";
   return db
     .query<ExampleRow, [string]>(
-      `select text, translations, source, source_name, source_id, review_status
+      `select text, translations, source, source_name, source_id, review_status, ${ruby} as ruby
          from ja_examples where sense_id = ? order by position`
     )
     .all(senseId)
@@ -524,7 +545,8 @@ function readExamples(db: Database, senseId: string): PublicExample[] {
       source: row.source,
       ...(row.source_name ? { sourceName: row.source_name } : {}),
       ...(row.source_id ? { sourceId: row.source_id } : {}),
-      reviewStatus: row.review_status
+      reviewStatus: row.review_status,
+      ...(row.ruby ? { ruby: JSON.parse(row.ruby) as RubyToken[] } : {})
     }));
 }
 

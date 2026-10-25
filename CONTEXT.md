@@ -136,6 +136,10 @@ _Avoid_: Generated example
 A sense example written by a model, admitted only after the deterministic filter and the reviewer both accept it.
 _Avoid_: Sourced example, AI gloss
 
+**Example Reading**:
+The furigana for a Japanese example sentence, kept by sentence rather than by example row, so a sentence shared by several senses is read once. Model-authored and checked by the deterministic filter only; it is a reading aid, not reviewed content. A sentence the filter rejected keeps no reading and is not attempted again.
+_Avoid_: Ruby annotation, transcription, reading (alone, which means the headword reading)
+
 **Example Translation**:
 A sense example rendered into a gloss language.
 _Avoid_: Gloss, second example
