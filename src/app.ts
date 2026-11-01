@@ -77,8 +77,8 @@ export function createApp(
   app.get("/health", (c) => c.json({ ok: true }));
 
   // Yori Watch's recommended and free OpenRouter models: data, so a better
-  // model reaches every install without an extension release. Changing it
-  // switches Translations for every learner who follows the recommendation,
+  // model reaches every install without an extension release. Changing the
+  // recommended one switches Translations for every learner who follows it,
   // so it changes only after Yori Watch's model eval passes on the new model
   // (yori-watch ADR 0008). Served from the repo, so the change is reviewed.
   app.get("/v1/watch/models", (c) =>

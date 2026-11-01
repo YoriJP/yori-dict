@@ -86,7 +86,7 @@ paths:
       description: >-
         The OpenRouter models Yori Watch offers as Recommended and Free. Yori
         Watch fetches this at most once a day and falls back to its bundled
-        copy. `free` is null when no free model passed Yori Watch's eval.
+        copy. `free` is null when no free model is offered.
       operationId: getWatchModels
       responses:
         "200":
@@ -105,7 +105,7 @@ paths:
                       - type: "null"
               example:
                 recommended: { id: openai/gpt-6-luna, name: GPT-6 Luna }
-                free: null
+                free: { id: openrouter/free, name: OpenRouter Free }
   /v1/meta:
     get:
       summary: Dictionary metadata
