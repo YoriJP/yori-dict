@@ -80,6 +80,32 @@ paths:
                     const: true
               example:
                 ok: true
+  /v1/watch/models:
+    get:
+      summary: Yori Watch's recommended and free models
+      description: >-
+        The OpenRouter models Yori Watch offers as Recommended and Free. Yori
+        Watch fetches this at most once a day and falls back to its bundled
+        copy. `free` is null when no free model passed Yori Watch's eval.
+      operationId: getWatchModels
+      responses:
+        "200":
+          description: The recommended model, and the free one or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recommended, free]
+                properties:
+                  recommended:
+                    $ref: "#/components/schemas/WatchModel"
+                  free:
+                    oneOf:
+                      - $ref: "#/components/schemas/WatchModel"
+                      - type: "null"
+              example:
+                recommended: { id: openai/gpt-6-luna, name: GPT-6 Luna }
+                free: null
   /v1/meta:
     get:
       summary: Dictionary metadata
@@ -336,6 +362,18 @@ components:
         Optional for ordinary lookup and required when `enrich=true`. Supplying
         a token by itself does not trigger enrichment.
   schemas:
+    WatchModel:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: OpenRouter model id.
+          example: openai/gpt-6-luna
+        name:
+          type: string
+          description: The name a learner reads.
+          example: GPT-6 Luna
     IndexResponse:
       type: object
       required: [name, description, health, meta, lookup, batchLookup, docs, openapi, dataRelease]

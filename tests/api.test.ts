@@ -305,3 +305,13 @@ test("returns one ordered entry per batch query without repeating the queries", 
   expect(body.entries[1]).toBeNull();
   expect(body.entries[2]).toBeNull();
 });
+
+test("serves Yori Watch's models as OpenRouter ids with names", async () => {
+  const res = await app.request("/v1/watch/models");
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  const isModel = (m: { id: unknown; name: unknown }) =>
+    typeof m.id === "string" && /^[\w.-]+\/[\w.:-]+$/.test(m.id) && typeof m.name === "string";
+  expect(isModel(body.recommended)).toBe(true);
+  expect(body.free === null || isModel(body.free)).toBe(true);
+});

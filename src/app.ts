@@ -4,6 +4,7 @@ import type { LookupDb } from "./db";
 import type { ApiLang, DictionaryMeta, PublicLookupItem, PublicSource } from "./types";
 import type { EnglishEntry } from "./english-types";
 import { dataReleaseUrl } from "./data-release";
+import watchModels from "./watch-models.json";
 import {
   englishLookupEntry,
   japaneseLookupEntry,
@@ -74,6 +75,15 @@ export function createApp(
   );
 
   app.get("/health", (c) => c.json({ ok: true }));
+
+  // Yori Watch's recommended and free OpenRouter models: data, so a better
+  // model reaches every install without an extension release. Changing it
+  // switches Translations for every learner who follows the recommendation,
+  // so it changes only after Yori Watch's model eval passes on the new model
+  // (yori-watch ADR 0008). Served from the repo, so the change is reviewed.
+  app.get("/v1/watch/models", (c) =>
+    c.json(watchModels, 200, { "cache-control": "public, max-age=3600" })
+  );
 
   // Metadata is derived, never declared. Each dictionary reports the
   // explanation languages it holds senses in, so a language pair that would
