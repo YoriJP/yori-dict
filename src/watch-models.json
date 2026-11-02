@@ -1,4 +1,4 @@
 {
   "recommended": { "id": "openai/gpt-6-luna", "name": "GPT-6 Luna" },
-  "free": { "id": "openrouter/free", "name": "OpenRouter Free" }
+  "free": { "id": "google/gemma-4-31b-it:free", "name": "Gemma 4 31B" }
 }
