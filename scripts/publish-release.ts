@@ -1,4 +1,5 @@
-import { dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { publishDraftRelease, type ReleaseDictionary } from "../src/release-publish";
 
 const dictionary = flag("--dictionary");
@@ -17,8 +18,9 @@ const draft = await publishDraftRelease({
   dictionary: dictionary as ReleaseDictionary,
   version,
   databasePath,
-  // Beside the database, because the volume has room for a full export.
-  workDirectory: resolve(flag("--work-dir") ?? dirname(databasePath)),
+  // Not beside the database: the export copies the whole database before
+  // dropping other tables, and the volume has no room for that copy.
+  workDirectory: resolve(flag("--work-dir") ?? tmpdir()),
   repository: "YoriJP/yori-dict",
   token,
   target,
