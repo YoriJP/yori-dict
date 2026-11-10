@@ -75,4 +75,5 @@ bun run english:release -- --db data/yori-english.sqlite --version local
 Files are written to `releases/english/`: SQLite, a compressed copy and checksum,
 JSONL, a coverage and source manifest, and one Yomitan v3 ZIP per language with
 content. These commands create local files; published downloads are on the
-[releases page](https://github.com/YoriJP/yori-dict/releases).
+[releases page](https://github.com/YoriJP/yori-dict/releases), and
+[releasing.md](releasing.md) describes how to publish one.
