@@ -72,6 +72,7 @@ export async function buildEnglishRelease(
 
   snapshotCanonicalDatabase(productionPath, artifacts.sqlite, englishCanonicalTables);
   const coverage = readCoverageFrom(artifacts.sqlite, "en");
+  const levels = readLevels(artifacts.sqlite);
   for (const lang of Object.keys(coverage)) {
     artifacts.yomitan[lang] = join(options.outputDirectory, `yori-en-${lang}.zip`);
     await rm(artifacts.yomitan[lang], { force: true });
@@ -141,6 +142,7 @@ export async function buildEnglishRelease(
     sourcePolicy: metadata.sourcePolicy,
     entries,
     coverage,
+    levels,
     sources: metadata.sources
   }, null, 2)}\n`);
   return artifacts;
@@ -179,7 +181,16 @@ function languageAttribution(sources: unknown[], lang: string): string {
   return named.length > 0 ? named.join("; ") : "Yori Dict authored and reviewed content";
 }
 
-
+function readLevels(path: string): Record<string, number> {
+  const db = new Database(path, { readonly: true });
+  try {
+    return Object.fromEntries(db.query<{ level: string; count: number }, []>(
+      "select level, count(*) as count from en_entry_levels group by level order by level"
+    ).all().map(({ level, count }) => [level, count]));
+  } finally {
+    db.close();
+  }
+}
 
 function readMetadata(path: string) {
   const db = new Database(path, { readonly: true });

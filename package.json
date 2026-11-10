@@ -20,6 +20,7 @@
     "ko:probe": "bun run scripts/probe-kaikki-ko.ts",
     "lookup:check": "bun run scripts/check-lookup.ts",
     "japanese:release": "bun run release:check && bun run scripts/package-release.ts",
+    "release:publish": "bun run scripts/publish-release.ts",
     "release:check": "bun run db:prepare && bun run lookup:check && bun run typecheck && bun test",
     "start": "bun run db:prepare && bun run src/index.ts",
     "test": "bun test",
