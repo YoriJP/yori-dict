@@ -5,6 +5,7 @@ import type {
   JlptLevel,
   PublicLanguageSource,
   PublicLookupItem,
+  RubyToken,
   Xref
 } from "./types";
 import type { EnglishEntry } from "./english-types";
@@ -116,6 +117,7 @@ export type LookupExample = {
   reviewStatus: "source" | "checked";
   sourceName?: string;
   sourceId?: string;
+  ruby?: RubyToken[];
 };
 
 /**

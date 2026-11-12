@@ -184,6 +184,12 @@ export type InflectionStep = {
   reason: string;
 };
 
+/**
+ * Furigana for a Japanese sentence: plain runs and `[base, reading]` pairs that
+ * concatenate back to the sentence exactly.
+ */
+export type RubyToken = string | [base: string, reading: string];
+
 export type PublicExample = {
   text: string;
   translations: Array<{ lang: string; text: string }>;
@@ -191,6 +197,7 @@ export type PublicExample = {
   sourceName?: string;
   sourceId?: string;
   reviewStatus: "source" | "checked";
+  ruby?: RubyToken[];
 };
 
 export type PublicLanguageSource = {

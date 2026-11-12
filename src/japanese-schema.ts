@@ -48,7 +48,8 @@ export const japaneseCanonicalTables = [
   "ja_glosses",
   "ja_examples",
   "ja_generations",
-  "ja_explanation_group_gaps"
+  "ja_explanation_group_gaps",
+  "ja_example_ruby"
 ] as const;
 
 const definitions = `
@@ -161,6 +162,16 @@ create table if not exists ja_generations (
   service_tier text,
   review_outcome text not null,
   created_at text not null
+);
+
+-- Example Readings are keyed by sentence, not by example row: the same
+-- sentence under several senses is read once, and the reading survives the
+-- release graft and rebuilds that replace the example rows themselves. A null
+-- reading records a rejected attempt, so the sentence is not paid for again.
+create table if not exists ja_example_ruby (
+  text text primary key,
+  ruby text,
+  generation_id text not null references ja_generations(id)
 );
 
 create index if not exists ja_lookup_terms_term_idx on ja_lookup_terms(term);

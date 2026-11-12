@@ -100,6 +100,13 @@ export function openEnrichmentRepository(
     values (?, ?, ?, ?, ?, ?, ?, ?)
     on conflict(id) do update set review_outcome = excluded.review_outcome
   `);
+  const saveExampleRuby = db.prepare(`
+    insert into ja_example_ruby (text, ruby, generation_id) values (?, ?, ?)
+    on conflict(text) do update set ruby = excluded.ruby, generation_id = excluded.generation_id
+  `);
+  const readExampleRuby = db.prepare<{ text: string }, [string]>(
+    "select text from ja_example_ruby where text = ?"
+  );
   const saveAttempt = db.prepare(`
     insert into model_attempts (dictionary, attempt_json, created_at) values ('ja', ?, ?)
   `);
@@ -197,6 +204,14 @@ export function openEnrichmentRepository(
           recordGeneration(generation)
         );
       })();
+    },
+    saveExampleRuby(text, ruby, generation) {
+      db.transaction(() => {
+        saveExampleRuby.run(text, ruby ? JSON.stringify(ruby) : null, recordGeneration(generation));
+      })();
+    },
+    triedExampleRuby(texts) {
+      return new Set(texts.filter((text) => readExampleRuby.get(text)));
     },
     recordAttempt(attempt) {
       saveAttempt.run(JSON.stringify(attempt), new Date().toISOString());

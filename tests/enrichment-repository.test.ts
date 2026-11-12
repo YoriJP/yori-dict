@@ -10,7 +10,7 @@ import { importLegacyOverlays } from "../src/legacy-overlay-import";
 import { openLookupDb } from "../src/db";
 import { importJapaneseRelease, migrateProductionDatabase } from "../src/production-database";
 import { createJapaneseOnDemandDictionary, type AttemptRecord } from "../src/on-demand-dictionary";
-import type { PublicExample, PublicLookupItem } from "../src/types";
+import type { PublicExample, PublicLookupItem, RubyToken } from "../src/types";
 
 test("accepted Japanese enrichment becomes canonical production data", async () => {
   const path = await productionDatabase();
@@ -300,6 +300,8 @@ test("a Japanese source refresh preserves accepted generated content", async () 
     }]
   }, "ko", generation);
   repository.saveExample(imported.senses[0].id, example, generation);
+  const ruby: RubyToken[] = [["学校", "がっこう"], "へ", ["行", "い"], "きます。"];
+  repository.saveExampleRuby(example.text, ruby, generation);
   repository.close();
   lookup.close();
 
@@ -312,7 +314,8 @@ test("a Japanese source refresh preserves accepted generated content", async () 
 
   const refreshedLookup = openLookupDb(path);
   expect(refreshedLookup.lookup("未知語", "en").item?.word).toBe("未知語");
-  expect(refreshedLookup.lookup("学校", "en").item?.senses[0].examples).toEqual([example]);
+  // The refresh replaces example rows; the reading is kept by its sentence.
+  expect(refreshedLookup.lookup("学校", "en").item?.senses[0].examples).toEqual([{ ...example, ruby }]);
   // The accepted language group on an imported entry survived the refresh with
   // its own provenance, under that entry's own identity.
   const taiwanese = refreshedLookup.lookup("学校", "zh-tw").item;
